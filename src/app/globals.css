@@ -24,3 +24,58 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes intro-character-slide-in {
+  from {
+    transform: translateX(calc(-100vw - 8px));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.intro-character-slide-in {
+  animation: intro-character-slide-in 0.7s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-character-slide-in {
+    animation: none;
+  }
+}
+
+@keyframes intro-character-slide-in-right {
+  from {
+    transform: translateX(calc(100vw + 8px));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.intro-character-slide-in-right {
+  animation: intro-character-slide-in-right 0.7s ease-out forwards;
+}
+
+@keyframes intro-character-slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(100vw + 8px));
+  }
+}
+
+.intro-character-slide-out-right {
+  animation: intro-character-slide-out-right 0.7s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-character-slide-in-right {
+    animation: none;
+  }
+
+  .intro-character-slide-out-right {
+    animation: none;
+  }
+}
