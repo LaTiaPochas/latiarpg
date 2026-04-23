@@ -1,8 +1,8 @@
-import { FinTutorialStory } from "@/components/fin-tutorial/fin-tutorial-story";
+import { ClassSelectionScreen } from "@/components/class-selection/class-selection-screen";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-export default async function FinTutorialPage() {
+export default async function ClassSelectionPage() {
   const hasSupabaseEnv =
     !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
     !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -14,8 +14,7 @@ export default async function FinTutorialPage() {
           <h1 className="text-2xl font-bold">Faltan variables de Supabase</h1>
           <p className="mt-3 text-amber-100">
             Configura <code>NEXT_PUBLIC_SUPABASE_URL</code> y{" "}
-            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> en <code>.env.local</code>
-            .
+            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> en <code>.env.local</code>.
           </p>
         </main>
       </div>
@@ -41,13 +40,18 @@ export default async function FinTutorialPage() {
     redirect("/introduccion");
   }
 
+  if (!milestones?.tutorial_completed) {
+    redirect("/fin-tutorial");
+  }
+
   if (milestones?.class_selected) {
     redirect("/");
   }
 
-  if (milestones?.tutorial_completed) {
-    redirect("/class-selection");
-  }
+  const { data: classes } = await supabase
+    .from("classes")
+    .select("id, name, description, str, dex, int, wis")
+    .order("name", { ascending: true });
 
-  return <FinTutorialStory />;
+  return <ClassSelectionScreen classes={classes ?? []} />;
 }

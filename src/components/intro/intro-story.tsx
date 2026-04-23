@@ -7,7 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 
 const BG_INTRO_CITY = "/img/resources/background/bg_intro_city.png";
 const BG_INTRO_CASA_FEDE = "/img/resources/background/bg_intro_casafede.png";
-const BG_INTRO_CASA_FEDE_2 = "/img/resources/background/bg_intro_casafede_2.png";
+const BG_INTRO_CASA_FEDE_2 =
+  "/img/resources/background/bg_intro_casafede_2_revisited.png";
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
 const PJ_FEDE_BLURP = "/img/resources/characters/pj_fede_city_blurp.png";
 const PJ_FEDE_STANDING = "/img/resources/characters/pj_fede_city_standing.png";
@@ -359,6 +360,8 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
 
   useEffect(() => {
     if (sceneOverlayOpacity !== 1 || fadeTargetStep === null) return;
+    let raf1: number | null = null;
+    let raf2: number | null = null;
     const t = window.setTimeout(() => {
       setStep(fadeTargetStep);
       if (fadeTargetStep === 3) {
@@ -380,12 +383,19 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
         setStep8LootInfo({ open: false, x: 0, y: 0, pinned: false });
         setDidCloseStep8Loot(false);
       }
-      requestAnimationFrame(() => {
-        setSceneOverlayOpacity(0);
-        setFadeTargetStep(null);
+      // Asegura que el nuevo fondo quede renderizado mientras la pantalla sigue negra.
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => {
+          setSceneOverlayOpacity(0);
+          setFadeTargetStep(null);
+        });
       });
     }, SCENE_FADE_MS);
-    return () => window.clearTimeout(t);
+    return () => {
+      window.clearTimeout(t);
+      if (raf1 !== null) cancelAnimationFrame(raf1);
+      if (raf2 !== null) cancelAnimationFrame(raf2);
+    };
   }, [sceneOverlayOpacity, fadeTargetStep]);
 
   useEffect(() => {
@@ -433,10 +443,9 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        advance();
-      }
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      advance();
     };
     if (canAdvanceStory) {
       window.addEventListener("keydown", onKey);
@@ -780,9 +789,9 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   rompiendo las bolas en La Tía.
                 </p>
               )}
-              <div className="mt-4 flex justify-end">
-                <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                  Siguiente
+              <div className="mt-4 flex justify-center">
+                <span className="text-center text-xs text-amber-100/90">
+                  Click o Enter para continuar
                 </span>
               </div>
             </div>
@@ -817,9 +826,9 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
               <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                 {casaLine === 1 ? DIALOGUE_CASA_DISCORD : DIALOGUE_CASA_TRY_GAME}
               </p>
-              <div className="mt-4 flex justify-end">
-                <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                  Siguiente
+              <div className="mt-4 flex justify-center">
+                <span className="text-center text-xs text-amber-100/90">
+                  Click o Enter para continuar
                 </span>
               </div>
             </div>
@@ -842,9 +851,9 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
               <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                 {DIALOGUE_CASA_LOOKING}
               </p>
-              <div className="mt-4 flex justify-end">
-                <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                  Siguiente
+              <div className="mt-4 flex justify-center">
+                <span className="text-center text-xs text-amber-100/90">
+                  Click o Enter para continuar
                 </span>
               </div>
             </div>
@@ -885,13 +894,13 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex flex-1 flex-col self-stretch">
                 <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentForestDialogue.text}
                 </p>
-                <div className="mt-4 flex justify-end">
-                  <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                    Siguiente
+                <div className="mt-auto flex justify-center pt-4">
+                  <span className="text-center text-xs text-amber-100/90">
+                    Click o Enter para continuar
                   </span>
                 </div>
               </div>
@@ -933,13 +942,13 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex flex-1 flex-col self-stretch">
                 <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentStep6Dialogue.text}
                 </p>
-                <div className="mt-4 flex justify-end">
-                  <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                    Siguiente
+                <div className="mt-auto flex justify-center pt-4">
+                  <span className="text-center text-xs text-amber-100/90">
+                    Click o Enter para continuar
                   </span>
                 </div>
               </div>
@@ -987,13 +996,13 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex flex-1 flex-col self-stretch">
                 <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentStep7Dialogue.text}
                 </p>
-                <div className="mt-4 flex justify-end">
-                  <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                    Siguiente
+                <div className="mt-auto flex justify-center pt-4">
+                  <span className="text-center text-xs text-amber-100/90">
+                    Click o Enter para continuar
                   </span>
                 </div>
               </div>
@@ -1035,13 +1044,13 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex flex-1 flex-col self-stretch">
                 <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                   {DIALOGUE_FEDE_STEP8_RAMAS}
                 </p>
-                <div className="mt-4 flex justify-end">
-                  <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                    Siguiente
+                <div className="mt-auto flex justify-center pt-4">
+                  <span className="text-center text-xs text-amber-100/90">
+                    Click o Enter para continuar
                   </span>
                 </div>
               </div>
@@ -1095,7 +1104,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   />
                 </div>
                 <span className="absolute -bottom-1 -right-1 rounded-full border border-[#1f2d44] bg-[#0f1828]/95 px-2 py-0.5 text-xs font-black leading-none text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]">
-                  x1
+                  x5
                 </span>
               </div>
             </div>
@@ -1111,7 +1120,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             <button
               type="button"
               onClick={closeStep8Loot}
-              className="mt-6 w-full cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-4 py-2 font-semibold text-amber-50 transition hover:bg-amber-600"
+              className="mx-auto mt-6 block cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-6 py-2 font-semibold text-amber-50 transition hover:bg-amber-600"
             >
               CONTINUAR
             </button>
@@ -1154,29 +1163,36 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex flex-1 flex-col self-stretch">
                 <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentStep9Dialogue.text}
                 </p>
-                <div className="mt-4 flex justify-end">
+                <div className="mt-auto flex justify-center pt-4">
                   {step9Line < STEP9_DIALOGUES.length - 1 ? (
-                    <span className="rounded-md border border-amber-700/70 bg-amber-950/50 px-4 py-2 text-sm font-semibold text-amber-100">
-                      Siguiente
+                    <span className="text-center text-xs text-amber-100/90">
+                      Click o Enter para continuar
                     </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={goToBattleTutorial}
-                      className="pointer-events-auto cursor-pointer rounded-md border border-red-800/80 bg-red-900/80 px-4 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-800"
-                    >
-                      Ir a la batalla
-                    </button>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
         </>
+      )}
+      {step === 9 && step9Line === STEP9_DIALOGUES.length - 1 && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
+          <button
+            type="button"
+            onClick={goToBattleTutorial}
+            className="pointer-events-auto relative cursor-pointer overflow-hidden rounded-lg border border-red-600/80 bg-gradient-to-b from-[#c14040] via-[#9a2929] to-[#661818] px-6 py-2 text-sm font-bold uppercase tracking-[0.1em] text-red-50 shadow-[0_10px_24px_rgba(120,22,22,0.45),inset_0_1px_0_rgba(255,196,196,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:from-[#ce4d4d] hover:via-[#aa3232] hover:to-[#751c1c] hover:shadow-[0_14px_30px_rgba(120,22,22,0.6),inset_0_1px_0_rgba(255,214,214,0.38)] active:translate-y-0 active:scale-[0.99]"
+          >
+            <span
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(255,205,205,0.22),transparent_58%)]"
+              aria-hidden
+            />
+            <span className="relative">Ir a la batalla</span>
+          </button>
+        </div>
       )}
 
       {step === 9 && step9Line >= STEP9_DIALOGUES.length && (
@@ -1184,9 +1200,13 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
           <button
             type="button"
             onClick={goToBattleTutorial}
-            className="pointer-events-auto w-full max-w-md cursor-pointer rounded-xl border border-red-800/80 bg-red-900/85 px-8 py-4 text-lg font-bold uppercase tracking-wide text-red-100 shadow-[0_10px_24px_rgba(0,0,0,0.45)] transition hover:bg-red-800 sm:text-xl"
+            className="pointer-events-auto relative w-full max-w-md cursor-pointer overflow-hidden rounded-xl border border-red-600/80 bg-gradient-to-b from-[#c14040] via-[#9a2929] to-[#661818] px-8 py-4 text-lg font-bold uppercase tracking-[0.12em] text-red-50 shadow-[0_12px_30px_rgba(120,22,22,0.5),inset_0_1px_0_rgba(255,196,196,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:from-[#ce4d4d] hover:via-[#aa3232] hover:to-[#751c1c] hover:shadow-[0_16px_36px_rgba(120,22,22,0.62),inset_0_1px_0_rgba(255,214,214,0.38)] active:translate-y-0 active:scale-[0.99] sm:text-xl"
           >
-            Ir a la batalla
+            <span
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(255,205,205,0.22),transparent_58%)]"
+              aria-hidden
+            />
+            <span className="relative">Ir a la batalla</span>
           </button>
         </div>
       )}
