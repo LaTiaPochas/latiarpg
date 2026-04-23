@@ -13,7 +13,7 @@ const ENEMY_BLACKWOLF_2 = "/img/resources/enemigos/enemy_sprite_blackwolf_2.png"
 const PJ_FEDE_RPG_FIGHT_STICK =
   "/img/resources/characters/pj_fede_rpg_fight_stick.png";
 const ICON_XP = "/img/resources/iconos/icon_xp.png";
-const ICON_GOLD = "/img/resources/iconos/icon_gold.png";
+const ICON_GOLD = "/img/resources/items/item_madera.png";
 
 const MAX_PLAYER_HP = 100;
 const MAX_PLAYER_MANA = 20;
@@ -21,6 +21,7 @@ const MAX_ENEMY_HP = 80;
 const SKILL_CHARGED_HIT_MP_COST = 10;
 const WOLF_ATTACK_DAMAGE = 10;
 const PLAYER_ATK = 50;
+const HP_BAR_ANIMATION_MS = 300;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -39,7 +40,7 @@ export default function BatallaTutorialPage() {
   const router = useRouter();
   const combatLogRef = useRef<HTMLDivElement | null>(null);
 
-  const handleVictoryContinue = useCallback(async () => {
+  const handleLootContinue = useCallback(async () => {
     await markIntroCompleted();
     router.push("/fin-tutorial");
   }, [router]);
@@ -47,6 +48,7 @@ export default function BatallaTutorialPage() {
   const wolfAttackTimeoutRef = useRef<number | null>(null);
   const enemyAttackDelayTimeoutRef = useRef<number | null>(null);
   const postEnemyAttackDelayTimeoutRef = useRef<number | null>(null);
+  const combatResultTimeoutRef = useRef<number | null>(null);
   const [actionMenu, setActionMenu] = useState<"main" | "skills">("main");
   const [isIntroTutorialOpen, setIsIntroTutorialOpen] = useState(true);
   const [isSkillTutorialOpen, setIsSkillTutorialOpen] = useState(false);
@@ -55,7 +57,16 @@ export default function BatallaTutorialPage() {
   const [isWolfAttacking, setIsWolfAttacking] = useState(false);
   const [isActionLocked, setIsActionLocked] = useState(false);
   const [isCombatFinished, setIsCombatFinished] = useState(false);
+  const [isCombatResultVisible, setIsCombatResultVisible] = useState(false);
+  const [isLootModalOpen, setIsLootModalOpen] = useState(false);
+  const [didMarkIntroCompleted, setDidMarkIntroCompleted] = useState(false);
   const [skillInfoTooltip, setSkillInfoTooltip] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    pinned: boolean;
+  }>({ open: false, x: 0, y: 0, pinned: false });
+  const [lootInfoTooltip, setLootInfoTooltip] = useState<{
     open: boolean;
     x: number;
     y: number;
@@ -172,6 +183,34 @@ export default function BatallaTutorialPage() {
     );
   };
 
+  const openLootInfoTooltip = (x: number, y: number, pinned: boolean) => {
+    setLootInfoTooltip({
+      open: true,
+      x: Math.min(x + 12, window.innerWidth - 360),
+      y: Math.min(y + 12, window.innerHeight - 170),
+      pinned,
+    });
+  };
+
+  const hideLootInfoTooltip = () => {
+    setLootInfoTooltip((prev) =>
+      prev.pinned ? prev : { open: false, x: 0, y: 0, pinned: false },
+    );
+  };
+
+  const toggleLootInfoTooltipPinned = (x: number, y: number) => {
+    setLootInfoTooltip((prev) =>
+      prev.open && prev.pinned
+        ? { open: false, x: 0, y: 0, pinned: false }
+        : {
+            open: true,
+            x: Math.min(x + 12, window.innerWidth - 360),
+            y: Math.min(y + 12, window.innerHeight - 170),
+            pinned: true,
+          },
+    );
+  };
+
   const handleSkill = () => {
     if (isActionLocked || isCombatFinished || turnOwner !== "player") return;
     if (!didShowSkillTutorial) {
@@ -211,6 +250,12 @@ export default function BatallaTutorialPage() {
   const isVictory = enemyHp <= 0 && playerHp > 0;
 
   useEffect(() => {
+    if (!isVictory || didMarkIntroCompleted) return;
+    setDidMarkIntroCompleted(true);
+    void markIntroCompleted();
+  }, [didMarkIntroCompleted, isVictory]);
+
+  useEffect(() => {
     if (!combatLogRef.current) return;
     combatLogRef.current.scrollTop = combatLogRef.current.scrollHeight;
   }, [combatLog]);
@@ -231,6 +276,29 @@ export default function BatallaTutorialPage() {
   }, [playerHp, enemyHp]);
 
   useEffect(() => {
+    if (!isCombatFinished) {
+      setIsCombatResultVisible(false);
+      setIsLootModalOpen(false);
+      setLootInfoTooltip({ open: false, x: 0, y: 0, pinned: false });
+      if (combatResultTimeoutRef.current) {
+        window.clearTimeout(combatResultTimeoutRef.current);
+        combatResultTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (combatResultTimeoutRef.current) {
+      window.clearTimeout(combatResultTimeoutRef.current);
+    }
+
+    // Espera a que termine la transición visual de la barra de HP.
+    combatResultTimeoutRef.current = window.setTimeout(() => {
+      setIsCombatResultVisible(true);
+      combatResultTimeoutRef.current = null;
+    }, HP_BAR_ANIMATION_MS);
+  }, [isCombatFinished]);
+
+  useEffect(() => {
     return () => {
       if (wolfAttackTimeoutRef.current) {
         window.clearTimeout(wolfAttackTimeoutRef.current);
@@ -240,6 +308,9 @@ export default function BatallaTutorialPage() {
       }
       if (postEnemyAttackDelayTimeoutRef.current) {
         window.clearTimeout(postEnemyAttackDelayTimeoutRef.current);
+      }
+      if (combatResultTimeoutRef.current) {
+        window.clearTimeout(combatResultTimeoutRef.current);
       }
     };
   }, []);
@@ -533,70 +604,117 @@ export default function BatallaTutorialPage() {
         </div>
       )}
 
-      {isCombatFinished && (
+      {isCombatResultVisible && (
         <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/65 p-4">
           {isVictory ? (
             <div className="w-full max-w-xl space-y-3">
               <div
-                className={`${menuFont.className} rounded-xl border border-emerald-600/85 bg-emerald-950/90 px-6 py-5 text-center shadow-[0_14px_40px_rgba(0,0,0,0.55)]`}
+                className={`${menuFont.className} relative overflow-hidden rounded-xl border border-emerald-400/85 bg-gradient-to-b from-emerald-700/95 via-emerald-850/95 to-emerald-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.6),0_0_24px_rgba(16,185,129,0.28),inset_0_1px_0_rgba(209,250,229,0.35)]`}
               >
-                <p className="text-2xl font-bold uppercase tracking-[0.14em] text-emerald-100 sm:text-3xl">
+                <span
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(209,250,229,0.28),transparent_58%)]"
+                  aria-hidden
+                />
+                <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
+                <p className="relative text-3xl font-black uppercase tracking-[0.2em] text-emerald-50 drop-shadow-[0_0_12px_rgba(167,243,208,0.6)] sm:text-4xl">
                   VICTORIA
                 </p>
-              </div>
-              <div
-                className={`${menuFont.className} rounded-xl border border-amber-700/70 bg-[#1c120e]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.55)] sm:p-6`}
-              >
-                <p className="mb-5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/95">
-                  Has Conseguido:
+                <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/90">
+                  El enemigo ha sido derrotado
                 </p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center">
-                    <div className="mx-auto w-[8.5rem]">
-                      <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
-                        <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
-                          <Image
-                            src={ICON_XP}
-                            alt="XP"
-                            width={112}
-                            height={112}
-                            className="h-full w-full object-contain"
-                          />
+                <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
+              </div>
+              {isLootModalOpen ? (
+                <div
+                  className={`${menuFont.className} rounded-xl border border-amber-700/70 bg-[#1c120e]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.55)] sm:p-6`}
+                >
+                  <p className="mb-5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/95">
+                    Has Conseguido:
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="text-center">
+                      <div className="mx-auto w-[8.5rem]">
+                        <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
+                          <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
+                            <Image
+                              src={ICON_XP}
+                              alt="XP"
+                              width={112}
+                              height={112}
+                              className="h-full w-full object-contain"
+                            />
+                          </div>
+                          <span className="absolute -bottom-1 -right-1 rounded-full border border-[#1f2d44] bg-[#0f1828]/95 px-2 py-0.5 text-xs font-black leading-none text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]">
+                            +10 XP
+                          </span>
                         </div>
-                        <span className="absolute -bottom-1 -right-1 rounded-full border border-[#1f2d44] bg-[#0f1828]/95 px-2 py-0.5 text-xs font-black leading-none text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]">
-                          +10 XP
-                        </span>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="text-center">
-                    <div className="mx-auto w-[8.5rem]">
-                      <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
-                        <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
-                          <Image
-                            src={ICON_GOLD}
-                            alt="Oro"
-                            width={112}
-                            height={112}
-                            className="h-full w-full object-contain"
-                          />
+                    <div className="text-center">
+                      <div className="mx-auto w-[8.5rem]">
+                        <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
+                          <button
+                            type="button"
+                            onMouseEnter={(e) =>
+                              openLootInfoTooltip(e.clientX, e.clientY, false)
+                            }
+                            onMouseMove={(e) =>
+                              openLootInfoTooltip(e.clientX, e.clientY, false)
+                            }
+                            onMouseLeave={hideLootInfoTooltip}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleLootInfoTooltipPinned(e.clientX, e.clientY);
+                            }}
+                            className="absolute right-1 top-1 z-[2] flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-[#d5deee]/75 bg-[#25354f]/95 text-xs font-black text-[#eef4ff] shadow-[0_1px_4px_rgba(0,0,0,0.45)] transition hover:bg-[#304665]"
+                            aria-label="Ver información de Madera"
+                          >
+                            ?
+                          </button>
+                          <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
+                            <Image
+                              src={ICON_GOLD}
+                              alt="Item madera"
+                              width={112}
+                              height={112}
+                              className="h-full w-full object-contain"
+                            />
+                          </div>
+                          <span className="absolute -bottom-1 -right-1 rounded-full border border-[#1f2d44] bg-[#0f1828]/95 px-2 py-0.5 text-xs font-black leading-none text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]">
+                            x5
+                          </span>
                         </div>
-                        <span className="absolute -bottom-1 -right-1 rounded-full border border-[#1f2d44] bg-[#0f1828]/95 px-2 py-0.5 text-xs font-black leading-none text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]">
-                          x5
-                        </span>
                       </div>
                     </div>
                   </div>
+                  {lootInfoTooltip.open && (
+                    <div
+                      className={`${helpCardFont.className} fixed z-[80] max-w-sm rounded-lg border border-amber-700/70 bg-[#1c120e]/95 px-3 py-2 text-sm leading-relaxed text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
+                      style={{ left: lootInfoTooltip.x, top: lootInfoTooltip.y }}
+                    >
+                      <span className="font-bold">Madera:</span> Recurso natural
+                      utilizado para diversos fines en este mundo.
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleLootContinue()}
+                    className="mx-auto mt-6 block cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-5 py-2 font-semibold text-amber-50 transition hover:bg-amber-600/90"
+                  >
+                    CONTINUAR
+                  </button>
                 </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => void handleVictoryContinue()}
-                  className="mt-6 w-full cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-4 py-2 font-semibold text-amber-50 transition hover:bg-amber-600/90"
+                  onClick={() => setIsLootModalOpen(true)}
+                  className="mx-auto block cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-5 py-2 font-semibold text-amber-50 transition hover:bg-amber-600/90"
                 >
                   CONTINUAR
                 </button>
-              </div>
+              )}
             </div>
           ) : (
             <div

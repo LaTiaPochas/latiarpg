@@ -33,7 +33,7 @@ export default async function Home() {
 
   const { data: milestones } = await supabase
     .from("user_milestones")
-    .select("intro_completed, tutorial_completed")
+    .select("intro_completed, tutorial_completed, class_selected")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -43,6 +43,10 @@ export default async function Home() {
 
   if (!milestones?.tutorial_completed) {
     redirect("/fin-tutorial");
+  }
+
+  if (!milestones?.class_selected) {
+    redirect("/class-selection");
   }
 
   const profileResponse = await supabase
