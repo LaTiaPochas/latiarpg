@@ -227,59 +227,59 @@ export function FinTutorialStory() {
       )}
 
       {step === 1 && (
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-[7] flex w-full items-end justify-start pb-0 pl-3 sm:pl-6 md:pl-10">
-          <div className="intro-character-slide-in flex max-h-[min(64vh,520px)] max-w-[min(92vw,700px)] items-end">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[7] flex justify-start pb-[4.5rem] pl-0 sm:pb-0 sm:pl-6 md:pl-10">
+          <div className="intro-character-slide-in flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={PJ_FEDE_RPG_TIRED}
               alt="Fede cansado"
               width={620}
               height={930}
-              className="h-[min(62vh,430px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+              className="h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)] sm:h-[min(68vh,500px)]"
             />
           </div>
         </div>
       )}
       {step === 1 && showStep1Mati && (
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-[7] flex w-full items-end justify-end pb-0 pr-3 sm:pr-6 md:pr-10">
-          <div className="intro-character-slide-in-right flex max-h-[min(64vh,520px)] max-w-[min(92vw,700px)] items-end">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[7] flex justify-end pb-[4.5rem] pr-3 sm:pb-0 sm:pr-8 md:pr-12">
+          <div className="intro-character-slide-in-right flex max-h-[min(54vh,320px)] max-w-[min(72vw,280px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={isMatiStandingPose ? PJ_MATI_RPG_STANDING : PJ_MATI_RPG_STANDING_2}
               alt="Mati"
               width={620}
               height={930}
-              className="h-[min(62vh,430px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+              className="h-[min(40vh,230px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)] sm:h-[min(68vh,640px)]"
             />
           </div>
         </div>
       )}
       {showStep2Mati && (
         <div
-          className={`pointer-events-none absolute inset-y-0 left-0 z-[7] flex w-full items-end justify-start pb-6 pl-40 transition-transform duration-500 sm:pb-8 sm:pl-48 md:pb-10 md:pl-56 ${
+          className={`pointer-events-none absolute inset-x-0 bottom-0 z-[7] flex justify-start pb-[4.5rem] ml-24 pl-0 transition-transform duration-500 sm:pb-0 sm:pl-4 md:pl-8 ${
             isStep2ClassChoiceMoment
-              ? "translate-x-8 sm:translate-x-10 md:translate-x-32"
+              ? "translate-x-6 sm:translate-x-8 md:translate-x-12"
               : ""
           }`}
         >
-          <div className="intro-character-slide-in flex max-h-[min(64vh,520px)] max-w-[min(92vw,700px)] items-end">
+          <div className="intro-character-slide-in flex max-h-[min(54vh,320px)] max-w-[min(72vw,280px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={isStep2ClassChoiceMoment ? PJ_MATI_RPG_STANDING_2 : PJ_MATI_RPG_STANDING}
               alt="Mati"
               width={620}
               height={930}
-              className="h-[min(62vh,430px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+              className="h-[min(40vh,230px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)] sm:h-[min(68vh,640px)]"
             />
           </div>
         </div>
       )}
       {showStep2Fede && (
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-[8] flex w-full items-end justify-start pb-0 pl-8 sm:pl-14 md:pl-20">
-          <div className="intro-character-slide-in flex max-h-[min(64vh,520px)] max-w-[min(92vw,700px)] items-end">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] flex justify-start pb-[4.5rem] pl-1 sm:pb-0 sm:pl-6 md:pl-10">
+          <div className="intro-character-slide-in flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end sm:max-h-[min(60vh,400px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={PJ_FEDE_RPG_STANDING}
               alt="Fede"
               width={620}
               height={930}
-              className="h-[min(62vh,430px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+              className="h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)] sm:h-[min(60vh,400px)]"
             />
           </div>
         </div>
@@ -300,7 +300,7 @@ export function FinTutorialStory() {
               alt="Leo volando"
               width={420}
               height={630}
-              className="h-[min(46vh,320px)] w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.55)]"
+              className="h-[min(23vh,160px)] w-auto object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.55)]"
             />
           </div>
         </div>
@@ -308,10 +308,10 @@ export function FinTutorialStory() {
 
       {(step === 1 || step2Phase >= 2) && (
         <div
-          className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+          className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
         >
-          <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-2.5">
-            <div className="my-0 -ml-2.5 w-24 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
+          <div className="mx-auto flex w-full max-w-3xl gap-2 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-3 py-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-5">
+            <div className="my-0 -ml-1 w-20 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:-ml-3.5 sm:w-28">
               <Image
                 src={
                   currentDialogue.face === "pj_fede_rpg_face_tired"
@@ -331,7 +331,7 @@ export function FinTutorialStory() {
               />
             </div>
             <div className="min-w-0 flex flex-1 flex-col self-stretch">
-              <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+              <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                 {currentDialogue.text}
               </p>
               {canAdvance && (

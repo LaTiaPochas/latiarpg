@@ -20,7 +20,7 @@ const MAX_PLAYER_MANA = 20;
 const MAX_ENEMY_HP = 80;
 const SKILL_CHARGED_HIT_MP_COST = 10;
 const WOLF_ATTACK_DAMAGE = 10;
-const PLAYER_ATK = 50;
+const PLAYER_ATK = 9;
 const HP_BAR_ANIMATION_MS = 300;
 
 const clamp = (value: number, min: number, max: number) =>
@@ -38,7 +38,8 @@ const menuFont = Montserrat({
 
 export default function BatallaTutorialPage() {
   const router = useRouter();
-  const combatLogRef = useRef<HTMLDivElement | null>(null);
+  const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
+  const combatLogDesktopRef = useRef<HTMLDivElement | null>(null);
 
   const handleLootContinue = useCallback(async () => {
     await markIntroCompleted();
@@ -50,6 +51,8 @@ export default function BatallaTutorialPage() {
   const postEnemyAttackDelayTimeoutRef = useRef<number | null>(null);
   const combatResultTimeoutRef = useRef<number | null>(null);
   const [actionMenu, setActionMenu] = useState<"main" | "skills">("main");
+  const [isActionsPanelOpen, setIsActionsPanelOpen] = useState(false);
+  const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
   const [isIntroTutorialOpen, setIsIntroTutorialOpen] = useState(true);
   const [isSkillTutorialOpen, setIsSkillTutorialOpen] = useState(false);
   const [didShowSkillTutorial, setDidShowSkillTutorial] = useState(false);
@@ -83,6 +86,28 @@ export default function BatallaTutorialPage() {
 
   const pushLog = (line: string) => setCombatLog((prev) => [...prev, line]);
   const chargedHitDamage = Math.floor(PLAYER_ATK + 5 + PLAYER_ATK * 0.5);
+  const renderCombatLogLine = (line: string) => {
+    const damageMatch = line.match(/(\d+)(?=\s+de daño)/);
+    if (!damageMatch || damageMatch.index === undefined) return line;
+
+    const start = damageMatch.index;
+    const end = start + damageMatch[1].length;
+    const damageClass = line.includes("Dark Wolf")
+      ? "font-bold text-red-300"
+      : line.includes("Fede")
+        ? "font-bold text-emerald-300"
+        : "";
+
+    if (!damageClass) return line;
+
+    return (
+      <>
+        {line.slice(0, start)}
+        <span className={damageClass}>{damageMatch[1]}</span>
+        {line.slice(end)}
+      </>
+    );
+  };
 
   const nextTurn = () => {
     const currentTurn = turnRef.current;
@@ -256,9 +281,21 @@ export default function BatallaTutorialPage() {
   }, [didMarkIntroCompleted, isVictory]);
 
   useEffect(() => {
-    if (!combatLogRef.current) return;
-    combatLogRef.current.scrollTop = combatLogRef.current.scrollHeight;
+    if (combatLogMobileRef.current) {
+      combatLogMobileRef.current.scrollTop = combatLogMobileRef.current.scrollHeight;
+    }
+    if (combatLogDesktopRef.current) {
+      combatLogDesktopRef.current.scrollTop = combatLogDesktopRef.current.scrollHeight;
+    }
   }, [combatLog]);
+
+  useEffect(() => {
+    if (!isCombatLogPanelOpen || !combatLogMobileRef.current) return;
+    window.requestAnimationFrame(() => {
+      if (!combatLogMobileRef.current) return;
+      combatLogMobileRef.current.scrollTop = combatLogMobileRef.current.scrollHeight;
+    });
+  }, [isCombatLogPanelOpen]);
 
   useEffect(() => {
     if (playerHp <= 0 || enemyHp <= 0) {
@@ -316,7 +353,7 @@ export default function BatallaTutorialPage() {
   }, []);
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-[#120b08] text-amber-50">
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:min-h-screen sm:h-auto">
       <Image
         src={BG_INTRO_FOREST}
         alt=""
@@ -330,11 +367,91 @@ export default function BatallaTutorialPage() {
         aria-hidden
       />
 
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col p-4 sm:p-6">
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-screen sm:p-6">
         <header
-          className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/88 p-3 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-4`}
+          className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/88 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-4`}
         >
-          <div className="grid gap-3 sm:grid-cols-3 sm:items-center">
+          <div className="space-y-2 sm:hidden">
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5">
+                <span
+                  className={`text-sm font-bold transition-transform duration-200 ${
+                    turnOwner === "player"
+                      ? "scale-110 text-amber-100 drop-shadow-[0_0_8px_rgba(251,191,36,0.7)]"
+                      : "text-amber-700/70"
+                  }`}
+                  aria-hidden
+                >
+                  &lt;
+                </span>
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-300/85">
+                  Turno {turn}
+                </p>
+                <span
+                  className={`text-sm font-bold transition-transform duration-200 ${
+                    turnOwner === "enemy"
+                      ? "scale-110 text-amber-100 drop-shadow-[0_0_8px_rgba(251,191,36,0.7)]"
+                      : "text-amber-700/70"
+                  }`}
+                  aria-hidden
+                >
+                  &gt;
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-2">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.14em] text-emerald-200/80">
+                  FEDE
+                </p>
+                <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full bg-black/45">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-300"
+                    style={{ width: `${playerHpPercent}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-emerald-100/90">
+                  HP {playerHp} / {MAX_PLAYER_HP}
+                </p>
+              </div>
+
+              <div className="h-full w-px self-stretch bg-amber-700/60" aria-hidden />
+
+              <div>
+                <p className="text-right text-[10px] uppercase tracking-[0.14em] text-red-200/80">
+                  BLACKWOLF
+                </p>
+                <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full bg-black/45">
+                  <div
+                    className="h-full bg-gradient-to-r from-red-700 to-red-500 transition-all duration-300"
+                    style={{ width: `${enemyHpPercent}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-right text-[10px] text-red-100/90">
+                  HP {enemyHp} / {MAX_ENEMY_HP}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-2">
+              <div>
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/45">
+                  <div
+                    className="h-full bg-gradient-to-r from-sky-600 to-cyan-400 transition-all duration-300"
+                    style={{ width: `${playerManaPercent}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-sky-100/90">
+                  Mana {playerMana} / {MAX_PLAYER_MANA}
+                </p>
+              </div>
+              <div className="w-px opacity-0" aria-hidden />
+              <div />
+            </div>
+          </div>
+
+          <div className="hidden gap-3 sm:grid sm:grid-cols-3 sm:items-center">
             <div>
               <p className="text-xs uppercase tracking-[0.16em] text-emerald-200/80">
                 Fede
@@ -405,19 +522,19 @@ export default function BatallaTutorialPage() {
           </div>
         </header>
 
-        <main className="relative mt-4 flex flex-1 items-end justify-between overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-3 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] sm:p-6">
-          <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start">
+        <main className="relative mt-2 flex min-h-0 flex-1 items-end justify-between overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] sm:mt-4 sm:p-6">
+          <div className="intro-character-slide-in pointer-events-none flex w-[42%] translate-y-3 items-end justify-start sm:translate-y-0">
             <Image
               src={PJ_FEDE_RPG_FIGHT_STICK}
               alt="Fede en combate"
               width={620}
               height={930}
-              className="h-[min(52vh,360px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)]"
+              className="h-[min(32vh,200px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)] sm:h-[min(52vh,360px)]"
             />
           </div>
 
           <div
-            className={`intro-character-slide-in-right pointer-events-none flex w-[42%] items-end justify-end transition-transform duration-200 ease-out ${
+            className={`intro-character-slide-in-right pointer-events-none flex w-[42%] -translate-y-3 self-start items-end justify-end transition-transform duration-200 ease-out sm:translate-y-0 sm:self-auto ${
               isWolfAttacking ? "-translate-x-12 sm:-translate-x-16" : "translate-x-0"
             }`}
           >
@@ -426,14 +543,201 @@ export default function BatallaTutorialPage() {
               alt="Blackwolf"
               width={420}
               height={420}
-              className="h-[min(44vh,300px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)]"
+              className="h-[min(29vh,178px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)] sm:h-[min(44vh,300px)]"
             />
           </div>
         </main>
 
-        <section className="mt-4 grid gap-3 pb-1 sm:grid-cols-[0.9fr_1.5fr]">
+        <section className="mt-2 grid min-h-0 flex-none grid-cols-1 gap-2 pb-0 sm:hidden">
+          <div className="relative">
+            {!isActionsPanelOpen && (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsActionsPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) setIsCombatLogPanelOpen(false);
+                    return next;
+                  })
+                }
+                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                aria-expanded={isActionsPanelOpen}
+              >
+                <span>Acciones</span>
+                <span aria-hidden>▲</span>
+              </button>
+            )}
+
+            {isActionsPanelOpen && (
+              <div
+                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsActionsPanelOpen(false);
+                    setActionMenu("main");
+                  }}
+                  className="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90"
+                  aria-label="Colapsar panel de acciones"
+                >
+                  <span>Acciones</span>
+                  <span aria-hidden>▼</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {actionMenu === "skills" && (
+                    <button
+                      type="button"
+                      onClick={() => setActionMenu("main")}
+                      className="cursor-pointer rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-sm font-bold text-amber-200 transition hover:bg-amber-900/60"
+                      aria-label="Volver a acciones"
+                    >
+                      ←
+                    </button>
+                  )}
+                </div>
+
+                {actionMenu === "main" ? (
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleAttack}
+                      disabled={isActionLocked}
+                      className="w-full cursor-pointer rounded-md border border-slate-500/70 bg-slate-700/45 px-2 py-1 text-left text-xs font-semibold text-slate-100 transition hover:bg-slate-600/65 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      Atacar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActionMenu("skills")}
+                      disabled={isActionLocked}
+                      className="w-full cursor-pointer rounded-md border border-sky-600/70 bg-sky-900/45 px-2 py-1 text-left text-xs font-semibold text-sky-100 transition hover:bg-sky-800/65 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      Habilidades
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full cursor-not-allowed rounded-md border border-slate-500/70 bg-slate-700/45 px-2 py-1 text-left text-xs font-semibold text-slate-200/75 opacity-60"
+                      aria-disabled="true"
+                    >
+                      Inventario
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full cursor-not-allowed rounded-md border border-red-700/70 bg-red-900/45 px-2 py-1 text-left text-xs font-semibold text-red-200/75 opacity-60"
+                      aria-disabled="true"
+                    >
+                      Huir
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-2 grid gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSkill}
+                        disabled={isActionLocked || playerMana < SKILL_CHARGED_HIT_MP_COST}
+                        className="w-full cursor-pointer rounded-md border border-sky-600/70 bg-sky-900/45 px-2 py-1 text-left text-xs font-semibold text-sky-100 transition hover:bg-sky-800/65 disabled:cursor-not-allowed disabled:opacity-55"
+                      >
+                        Golpe cargado
+                      </button>
+                      <span className="shrink-0 rounded-md border border-sky-600/70 bg-sky-950/55 px-2 py-1 text-[10px] font-bold text-sky-200">
+                        10 MP
+                      </span>
+                      <button
+                        type="button"
+                        onMouseEnter={(e) =>
+                          openSkillInfoTooltip(e.clientX, e.clientY, false)
+                        }
+                        onMouseMove={(e) =>
+                          openSkillInfoTooltip(e.clientX, e.clientY, false)
+                        }
+                        onMouseLeave={hideSkillInfoTooltip}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleSkillInfoTooltipPinned(e.clientX, e.clientY);
+                        }}
+                        className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-sky-500/80 bg-sky-900/60 text-xs font-black text-sky-100 transition hover:bg-sky-800/75"
+                        aria-label="Información de Golpe cargado"
+                      >
+                        ?
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            {!isCombatLogPanelOpen && (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsCombatLogPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setIsActionsPanelOpen(false);
+                      setActionMenu("main");
+                    }
+                    return next;
+                  })
+                }
+                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                aria-expanded={isCombatLogPanelOpen}
+              >
+                <div className="min-w-0 text-left">
+                  <p>Combat Log</p>
+                  <p
+                    className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[11px] normal-case tracking-normal leading-relaxed text-amber-50/92`}
+                  >
+                    {combatLog[combatLog.length - 1] ?? ""}
+                  </p>
+                </div>
+                <span className="ml-2 shrink-0" aria-hidden>
+                  ▲
+                </span>
+              </button>
+            )}
+
+            {isCombatLogPanelOpen && (
+              <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+                <button
+                  type="button"
+                  onClick={() => setIsCombatLogPanelOpen(false)}
+                  className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
+                  aria-label="Colapsar combat log"
+                >
+                  <span>Combat Log</span>
+                  <span aria-hidden>▼</span>
+                </button>
+                <div
+                  ref={combatLogMobileRef}
+                  className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px] leading-relaxed text-amber-50/92`}
+                >
+                  {combatLog.map((line, idx) => (
+                    <p
+                      key={`${line}-${idx}`}
+                      className={`rounded-md bg-black/25 px-2 py-1 ${
+                        idx === 0 ? "text-red-300" : ""
+                      }`}
+                    >
+                      {renderCombatLogLine(line)}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-4 hidden min-h-0 flex-none grid-cols-[0.9fr_1.5fr] gap-3 pb-1 sm:grid">
           <div
-            className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/90 p-3 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-3`}
+            className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/90 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-3`}
           >
             <div className="flex items-center gap-2">
               {actionMenu === "skills" && (
@@ -452,12 +756,12 @@ export default function BatallaTutorialPage() {
             </div>
 
             {actionMenu === "main" ? (
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-2 grid grid-cols-2 gap-1.5 sm:mt-3 sm:gap-2">
                 <button
                   type="button"
                   onClick={handleAttack}
                   disabled={isActionLocked}
-                  className="w-full cursor-pointer rounded-md border border-slate-500/70 bg-slate-700/45 px-3 py-1.5 text-left text-sm font-semibold text-slate-100 transition hover:bg-slate-600/65 disabled:cursor-not-allowed disabled:opacity-55"
+                  className="w-full cursor-pointer rounded-md border border-slate-500/70 bg-slate-700/45 px-2 py-1 text-left text-xs font-semibold text-slate-100 transition hover:bg-slate-600/65 disabled:cursor-not-allowed disabled:opacity-55 sm:px-3 sm:py-1.5 sm:text-sm"
                 >
                   Atacar
                 </button>
@@ -465,14 +769,14 @@ export default function BatallaTutorialPage() {
                   type="button"
                   onClick={() => setActionMenu("skills")}
                   disabled={isActionLocked}
-                  className="w-full cursor-pointer rounded-md border border-sky-600/70 bg-sky-900/45 px-3 py-1.5 text-left text-sm font-semibold text-sky-100 transition hover:bg-sky-800/65 disabled:cursor-not-allowed disabled:opacity-55"
+                  className="w-full cursor-pointer rounded-md border border-sky-600/70 bg-sky-900/45 px-2 py-1 text-left text-xs font-semibold text-sky-100 transition hover:bg-sky-800/65 disabled:cursor-not-allowed disabled:opacity-55 sm:px-3 sm:py-1.5 sm:text-sm"
                 >
                   Habilidades
                 </button>
                 <button
                   type="button"
                   disabled
-                  className="w-full cursor-not-allowed rounded-md border border-slate-500/70 bg-slate-700/45 px-3 py-1.5 text-left text-sm font-semibold text-slate-200/75 opacity-60"
+                  className="w-full cursor-not-allowed rounded-md border border-slate-500/70 bg-slate-700/45 px-2 py-1 text-left text-xs font-semibold text-slate-200/75 opacity-60 sm:px-3 sm:py-1.5 sm:text-sm"
                   aria-disabled="true"
                 >
                   Inventario
@@ -480,24 +784,24 @@ export default function BatallaTutorialPage() {
                 <button
                   type="button"
                   disabled
-                  className="w-full cursor-not-allowed rounded-md border border-red-700/70 bg-red-900/45 px-3 py-1.5 text-left text-sm font-semibold text-red-200/75 opacity-60"
+                  className="w-full cursor-not-allowed rounded-md border border-red-700/70 bg-red-900/45 px-2 py-1 text-left text-xs font-semibold text-red-200/75 opacity-60 sm:px-3 sm:py-1.5 sm:text-sm"
                   aria-disabled="true"
                 >
                   Huir
                 </button>
               </div>
             ) : (
-              <div className="mt-3 grid gap-2">
+              <div className="mt-2 grid gap-1.5 sm:mt-3 sm:gap-2">
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleSkill}
                     disabled={isActionLocked || playerMana < SKILL_CHARGED_HIT_MP_COST}
-                    className="w-full cursor-pointer rounded-md border border-sky-600/70 bg-sky-900/45 px-3 py-1.5 text-left text-sm font-semibold text-sky-100 transition hover:bg-sky-800/65 disabled:cursor-not-allowed disabled:opacity-55"
+                    className="w-full cursor-pointer rounded-md border border-sky-600/70 bg-sky-900/45 px-2 py-1 text-left text-xs font-semibold text-sky-100 transition hover:bg-sky-800/65 disabled:cursor-not-allowed disabled:opacity-55 sm:px-3 sm:py-1.5 sm:text-sm"
                   >
                     Golpe cargado
                   </button>
-                  <span className="shrink-0 rounded-md border border-sky-600/70 bg-sky-950/55 px-2 py-1 text-xs font-bold text-sky-200">
+                  <span className="shrink-0 rounded-md border border-sky-600/70 bg-sky-950/55 px-2 py-1 text-[10px] font-bold text-sky-200 sm:text-xs">
                     10 MP
                   </span>
                   <button
@@ -524,19 +828,24 @@ export default function BatallaTutorialPage() {
             )}
           </div>
 
-          <div className="rounded-xl border border-amber-800/70 bg-[#1a100c]/90 p-3 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-4">
+          <div className="rounded-xl border border-amber-800/70 bg-[#1a100c]/90 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-4">
             <p
               className={`${menuFont.className} text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
             >
               Combat Log
             </p>
             <div
-              ref={combatLogRef}
-              className={`${helpCardFont.className} mt-3 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-xs leading-relaxed text-amber-50/92 sm:text-sm`}
+              ref={combatLogDesktopRef}
+              className={`${helpCardFont.className} mt-2 min-h-20 max-h-20 space-y-1 overflow-y-auto pr-1 text-[11px] leading-relaxed text-amber-50/92 sm:mt-3 sm:min-h-28 sm:max-h-28 sm:text-sm`}
             >
               {combatLog.map((line, idx) => (
-                <p key={`${line}-${idx}`} className="rounded-md bg-black/25 px-2 py-1">
-                  {line}
+                <p
+                  key={`${line}-${idx}`}
+                  className={`rounded-md bg-black/25 px-2 py-1 ${
+                    idx === 0 ? "text-red-300" : ""
+                  }`}
+                >
+                  {renderCombatLogLine(line)}
                 </p>
               ))}
             </div>
@@ -545,7 +854,7 @@ export default function BatallaTutorialPage() {
       </div>
 
       {isIntroTutorialOpen && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-4">
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-4 sm:absolute">
           <div
             className={`${helpCardFont.className} w-full max-w-2xl rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-5 shadow-[0_14px_40px_rgba(0,0,0,0.55)] sm:p-6`}
           >
@@ -568,7 +877,7 @@ export default function BatallaTutorialPage() {
       )}
 
       {isSkillTutorialOpen && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-4">
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-4 sm:absolute">
           <div
             className={`${helpCardFont.className} w-full max-w-2xl rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-5 shadow-[0_14px_40px_rgba(0,0,0,0.55)] sm:p-6`}
           >
@@ -593,9 +902,19 @@ export default function BatallaTutorialPage() {
 
       {skillInfoTooltip.open && (
         <div
-          className={`${helpCardFont.className} fixed z-[60] max-w-sm rounded-lg border border-sky-700/75 bg-[#0f1827]/96 px-3 py-2 text-sm leading-relaxed text-sky-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
+          className={`${helpCardFont.className} fixed z-[60] max-w-sm rounded-lg border border-sky-700/75 bg-[#0f1827]/96 px-3 py-2 pr-8 text-sm leading-relaxed text-sky-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
           style={{ left: skillInfoTooltip.x, top: skillInfoTooltip.y }}
         >
+          <button
+            type="button"
+            onClick={() =>
+              setSkillInfoTooltip({ open: false, x: 0, y: 0, pinned: false })
+            }
+            className="absolute right-1 top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-sky-500/80 bg-sky-950/70 text-[10px] font-black leading-none text-sky-100 transition hover:bg-sky-800/80"
+            aria-label="Cerrar tooltip de habilidad"
+          >
+            X
+          </button>
           <p className="font-bold">Golpe cargado (10 MP)</p>
           <div className="my-1 h-px w-full bg-sky-500/45" />
           <p>
@@ -605,7 +924,7 @@ export default function BatallaTutorialPage() {
       )}
 
       {isCombatResultVisible && (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/65 p-4">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4 sm:absolute">
           {isVictory ? (
             <div className="w-full max-w-xl space-y-3">
               <div
