@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   if (!hasSupabaseEnv) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-6 py-10 text-slate-100">
+      <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-slate-950 px-6 py-10 text-slate-100">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#3b2f1f_0%,#0f172a_45%,#020617_100%)]" />
         <main className="relative mx-auto w-full max-w-md rounded-2xl border border-amber-500/40 bg-amber-950/35 p-6 shadow-[0_0_60px_rgba(245,158,11,0.15)] backdrop-blur-sm">
           <h1 className="text-2xl font-bold">Configura Supabase primero</h1>
@@ -39,7 +39,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const errorMessage = params.error;
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-3 py-6 text-amber-50 sm:px-6 sm:py-10">
+    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-slate-950 px-3 py-6 text-amber-50 sm:px-6 sm:py-10">
       <div
         className="absolute inset-0 bg-cover bg-center"
         style={{

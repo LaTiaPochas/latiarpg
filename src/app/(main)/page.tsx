@@ -9,7 +9,7 @@ export default async function Home() {
 
   if (!hasSupabaseEnv) {
     return (
-      <div className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
+      <div className="min-h-[100dvh] bg-slate-950 px-6 py-10 text-slate-100">
         <main className="mx-auto w-full max-w-3xl rounded-xl border border-amber-700/40 bg-amber-950/30 p-6">
           <h1 className="text-2xl font-bold">Faltan variables de Supabase</h1>
           <p className="mt-3 text-amber-100">
@@ -83,7 +83,7 @@ export default async function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
+    <div className="min-h-[100dvh] bg-slate-950 px-6 py-10 text-slate-100">
       <main className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-3">
         <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6 lg:col-span-2">
           <p className="text-sm uppercase tracking-widest text-emerald-300">

@@ -348,6 +348,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
     );
   }, []);
 
+  const closeStep8LootInfo = useCallback(() => {
+    setStep8LootInfo({ open: false, x: 0, y: 0, pinned: false });
+  }, []);
+
   const toggleStep8LootInfoPinned = useCallback(
     (x: number, y: number) => {
       setStep8LootInfo((prev) =>
@@ -489,7 +493,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
         : BG_INTRO_CITY;
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-[#120b08] text-amber-50">
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:min-h-screen sm:h-auto">
       <Image
         src={bgSrc}
         alt=""
@@ -1065,7 +1069,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
       )}
 
       {step === 8 && isStep8LootOpen && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-4">
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-4"
+          onClick={closeStep8LootInfo}
+        >
           <div className="relative w-full max-w-md rounded-xl border border-amber-700/70 bg-[#1c120e]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.55)] sm:p-6">
             <button
               type="button"
@@ -1117,6 +1124,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
               <div
                 className="fixed z-[60] max-w-xs rounded-lg border border-amber-700/70 bg-[#1c120e]/95 px-3 py-2 text-sm leading-relaxed text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]"
                 style={{ left: step8LootInfo.x, top: step8LootInfo.y }}
+                onClick={(e) => e.stopPropagation()}
               >
                 <span className="font-bold">Madera:</span> Recurso natural
                 utilizado para diversos fines en este mundo.

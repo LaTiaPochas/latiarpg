@@ -38,7 +38,7 @@ export default async function CharacterProfilePage() {
 
   if (!hasSupabaseEnv) {
     return (
-      <div className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
+      <div className="min-h-[100dvh] bg-slate-950 px-6 py-10 text-slate-100">
         <main className="mx-auto w-full max-w-3xl rounded-xl border border-amber-700/40 bg-amber-950/30 p-6">
           <h1 className="text-2xl font-bold">Faltan variables de Supabase</h1>
           <p className="mt-3 text-amber-100">
@@ -106,7 +106,7 @@ export default async function CharacterProfilePage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#1b0f0b] px-6 py-10 text-amber-50 [background-image:linear-gradient(90deg,rgba(59,34,23,0.95)_0%,rgba(59,34,23,0.95)_16%,rgba(77,45,30,0.95)_16%,rgba(77,45,30,0.95)_33%,rgba(52,30,20,0.95)_33%,rgba(52,30,20,0.95)_50%,rgba(74,43,29,0.95)_50%,rgba(74,43,29,0.95)_66%,rgba(56,33,22,0.95)_66%,rgba(56,33,22,0.95)_83%,rgba(70,41,27,0.95)_83%,rgba(70,41,27,0.95)_100%),linear-gradient(180deg,rgba(0,0,0,0.2)_0%,rgba(0,0,0,0.08)_8%,rgba(0,0,0,0.2)_16%,rgba(0,0,0,0.08)_24%,rgba(0,0,0,0.2)_32%,rgba(0,0,0,0.08)_40%,rgba(0,0,0,0.2)_48%,rgba(0,0,0,0.08)_56%,rgba(0,0,0,0.2)_64%,rgba(0,0,0,0.08)_72%,rgba(0,0,0,0.2)_80%,rgba(0,0,0,0.08)_88%,rgba(0,0,0,0.2)_100%)] [background-size:420px_100%,100%_22px]">
+    <div className="min-h-[100dvh] bg-[#1b0f0b] px-6 py-10 text-amber-50 [background-image:linear-gradient(90deg,rgba(59,34,23,0.95)_0%,rgba(59,34,23,0.95)_16%,rgba(77,45,30,0.95)_16%,rgba(77,45,30,0.95)_33%,rgba(52,30,20,0.95)_33%,rgba(52,30,20,0.95)_50%,rgba(74,43,29,0.95)_50%,rgba(74,43,29,0.95)_66%,rgba(56,33,22,0.95)_66%,rgba(56,33,22,0.95)_83%,rgba(70,41,27,0.95)_83%,rgba(70,41,27,0.95)_100%),linear-gradient(180deg,rgba(0,0,0,0.2)_0%,rgba(0,0,0,0.08)_8%,rgba(0,0,0,0.2)_16%,rgba(0,0,0,0.08)_24%,rgba(0,0,0,0.2)_32%,rgba(0,0,0,0.08)_40%,rgba(0,0,0,0.2)_48%,rgba(0,0,0,0.08)_56%,rgba(0,0,0,0.2)_64%,rgba(0,0,0,0.08)_72%,rgba(0,0,0,0.2)_80%,rgba(0,0,0,0.08)_88%,rgba(0,0,0,0.2)_100%)] [background-size:420px_100%,100%_22px]">
       <main className="mx-auto grid w-full max-w-7xl gap-6 lg:grid-cols-12">
         <section className="rounded-xl border border-amber-800/60 bg-[#2a1812]/90 p-6 shadow-[0_0_30px_rgba(0,0,0,0.35)] lg:col-span-3">
           <h2 className="text-lg font-semibold tracking-wide text-amber-300">
