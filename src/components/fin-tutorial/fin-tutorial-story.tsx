@@ -194,7 +194,7 @@ export function FinTutorialStory() {
   }, [step, step1Line, step2Line]);
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-[#120b08] text-amber-50">
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:min-h-screen sm:h-auto">
       <Image
         src={step === 1 ? BG_INTRO_FOREST : BG_INTRO_FOREST_CAMP}
         alt=""

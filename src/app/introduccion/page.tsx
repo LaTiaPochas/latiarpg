@@ -9,7 +9,7 @@ export default async function IntroduccionPage() {
 
   if (!hasSupabaseEnv) {
     return (
-      <div className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
+      <div className="min-h-[100dvh] bg-slate-950 px-6 py-10 text-slate-100">
         <main className="mx-auto w-full max-w-3xl rounded-xl border border-amber-700/40 bg-amber-950/30 p-6">
           <h1 className="text-2xl font-bold">Faltan variables de Supabase</h1>
           <p className="mt-3 text-amber-100">

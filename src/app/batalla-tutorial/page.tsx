@@ -223,6 +223,10 @@ export default function BatallaTutorialPage() {
     );
   };
 
+  const closeLootInfoTooltip = () => {
+    setLootInfoTooltip({ open: false, x: 0, y: 0, pinned: false });
+  };
+
   const toggleLootInfoTooltipPinned = (x: number, y: number) => {
     setLootInfoTooltip((prev) =>
       prev.open && prev.pinned
@@ -924,7 +928,10 @@ export default function BatallaTutorialPage() {
       )}
 
       {isCombatResultVisible && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4 sm:absolute">
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4 sm:absolute"
+          onClick={closeLootInfoTooltip}
+        >
           {isVictory ? (
             <div className="w-full max-w-xl space-y-3">
               <div
@@ -1012,6 +1019,7 @@ export default function BatallaTutorialPage() {
                     <div
                       className={`${helpCardFont.className} fixed z-[80] max-w-sm rounded-lg border border-amber-700/70 bg-[#1c120e]/95 px-3 py-2 text-sm leading-relaxed text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
                       style={{ left: lootInfoTooltip.x, top: lootInfoTooltip.y }}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       <span className="font-bold">Madera:</span> Recurso natural
                       utilizado para diversos fines en este mundo.
