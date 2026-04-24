@@ -39,7 +39,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const errorMessage = params.error;
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-6 py-10 text-amber-50">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-3 py-6 text-amber-50 sm:px-6 sm:py-10">
       <div
         className="absolute inset-0 bg-cover bg-center"
         style={{
@@ -49,7 +49,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       />
       <div className="absolute inset-0 bg-gradient-to-b from-slate-950/35 via-slate-900/55 to-black/80" />
 
-      <main className="relative mx-auto w-full max-w-lg rounded-2xl border border-amber-400/40 bg-slate-950/70 p-7 shadow-[0_0_80px_rgba(251,191,36,0.2)] backdrop-blur-md">
+      <main className="relative mx-auto w-full max-w-sm rounded-2xl border border-amber-400/40 bg-slate-950/70 p-5 shadow-[0_0_80px_rgba(251,191,36,0.2)] backdrop-blur-md sm:max-w-lg sm:p-7">
         <div className="pointer-events-none absolute inset-0 rounded-2xl border border-amber-300/15" />
         <div className="mx-auto flex w-full justify-center">
           <Image
@@ -57,11 +57,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             alt="La Tia RPG"
             width={320}
             height={140}
-            className="h-auto w-auto max-w-[320px] transition duration-300 hover:scale-105 hover:drop-shadow-[0_0_18px_rgba(251,191,36,0.55)]"
+            className="h-auto w-auto max-w-[220px] transition duration-300 hover:scale-105 hover:drop-shadow-[0_0_18px_rgba(251,191,36,0.55)] sm:max-w-[320px]"
             priority
           />
         </div>
-        <p className="mt-4 text-center text-sm italic text-amber-100/90">
+        <p className="mt-3 text-center text-xs italic leading-relaxed text-amber-100/90 sm:mt-4 sm:text-sm">
           It&apos;s a dangerous business, going out your door.
           <br />
           You step onto the road, and if you don&apos;t keep your feet,
@@ -74,9 +74,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </div>
         ) : null}
 
-        <form action={login} className="mt-6 space-y-4">
+        <form action={login} className="mt-5 space-y-3.5 sm:mt-6 sm:space-y-4">
           <div>
-            <label htmlFor="email" className="mb-2 block text-sm text-amber-100">
+            <label htmlFor="email" className="mb-1.5 block text-xs text-amber-100 sm:mb-2 sm:text-sm">
               Email
             </label>
             <input
@@ -85,7 +85,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               type="email"
               autoComplete="email"
               required
-              className="w-full rounded-md border border-amber-700/50 bg-slate-900/70 px-3 py-2 text-amber-50 outline-none transition placeholder:text-amber-100/40 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/40"
+              className="w-full rounded-md border border-amber-700/50 bg-slate-900/70 px-2.5 py-1.5 text-sm text-amber-50 outline-none transition placeholder:text-amber-100/40 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/40 sm:px-3 sm:py-2"
               placeholder="jugador@latiarpg.com"
             />
           </div>
@@ -93,7 +93,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <div>
             <label
               htmlFor="password"
-              className="mb-2 block text-sm text-amber-100"
+              className="mb-1.5 block text-xs text-amber-100 sm:mb-2 sm:text-sm"
             >
               Contraseña
             </label>
@@ -103,14 +103,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               type="password"
               autoComplete="current-password"
               required
-              className="w-full rounded-md border border-amber-700/50 bg-slate-900/70 px-3 py-2 text-amber-50 outline-none transition placeholder:text-amber-100/40 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/40"
+              className="w-full rounded-md border border-amber-700/50 bg-slate-900/70 px-2.5 py-1.5 text-sm text-amber-50 outline-none transition placeholder:text-amber-100/40 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/40 sm:px-3 sm:py-2"
               placeholder="********"
             />
           </div>
 
           <button
             type="submit"
-            className="mt-1 w-full cursor-pointer rounded-md border border-amber-300/60 bg-amber-400 px-4 py-2 font-semibold text-slate-900 transition hover:bg-amber-500"
+            className="mt-1 w-full cursor-pointer rounded-md border border-amber-300/60 bg-amber-400 px-4 py-1.5 text-sm font-semibold text-slate-900 transition hover:bg-amber-500 sm:py-2"
           >
             Comenzar la Aventura
           </button>

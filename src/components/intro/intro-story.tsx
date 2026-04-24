@@ -178,6 +178,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
   const [step, setStep] = useState(0);
   const [sceneOverlayOpacity, setSceneOverlayOpacity] = useState(0);
   const [fadeTargetStep, setFadeTargetStep] = useState<number | null>(null);
+  const [step2Line, setStep2Line] = useState(0);
   /** 0 = solo fondo; 1 = personaje + Discord; 2 = mismo personaje + probar el juego */
   const [casaLine, setCasaLine] = useState(0);
   /** index de la linea activa dentro de FOREST_DIALOGUES */
@@ -213,6 +214,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
 
   const advance = useCallback(() => {
     if (step === 2 && sceneOverlayOpacity === 0) {
+      if (step2Line === 0) {
+        setStep2Line(1);
+        return;
+      }
       setFadeTargetStep(3);
       setSceneOverlayOpacity(1);
       return;
@@ -301,6 +306,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
   }, [
     step,
     sceneOverlayOpacity,
+    step2Line,
     casaLine,
     forestLine,
     isBechoExiting,
@@ -489,7 +495,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
         alt=""
         fill
         priority
-        className="object-cover object-center"
+        className="object-cover object-[center_top] sm:object-center"
         sizes="100vw"
       />
       <div
@@ -498,7 +504,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
       />
 
       {showFedeCity && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-0 pl-3 sm:pl-6 md:pl-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-10 pl-3 sm:pb-0 sm:pl-6 md:pl-10">
           <div
             key={step === 1 ? "blurp" : "standing"}
             className={
@@ -512,7 +518,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
               alt="Fede"
               width={720}
               height={1080}
-              className="h-[min(68vh,500px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+              className="h-[min(46vh,280px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,500px)]"
               priority={step === 1}
             />
           </div>
@@ -520,162 +526,162 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
       )}
 
       {showFedeCasa && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-0 pr-3 sm:pr-6 md:pr-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-10 pr-3 sm:pb-0 sm:pr-6 md:pr-10">
           <div className="intro-character-slide-in-right flex max-h-[min(68vh,640px)] max-w-[min(92vw,520px)] items-end">
             <Image
               src={PJ_FEDE_STANDING_2}
               alt="Fede"
               width={720}
               height={1080}
-              className="h-[min(68vh,500px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+              className="h-[min(46vh,280px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,500px)]"
             />
           </div>
         </div>
       )}
 
       {showFedeForest && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-0 pl-3 sm:pl-6 md:pl-10">
-          <div className="intro-character-slide-in flex max-h-[min(68vh,640px)] max-w-[min(92vw,520px)] items-end">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-[4.5rem] pl-0 sm:pb-0 sm:pl-6 md:pl-10">
+          <div className="intro-character-slide-in flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={PJ_FEDE_RPG_STANDING}
               alt="Fede"
               width={720}
               height={1080}
-              className="h-[min(68vh,500px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+              className="h-[min(32vh,184px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,500px)]"
             />
           </div>
         </div>
       )}
 
       {showBechoForest && !isBechoExited && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-0 pr-3 sm:pr-6 md:pr-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-[4.5rem] pr-0 sm:pb-0 sm:pr-6 md:pr-10">
           <div
             className={`${
               isBechoExiting
                 ? "intro-character-slide-out-right"
                 : "intro-character-slide-in-right"
-            } flex max-h-[min(68vh,600px)] max-w-[min(92vw,500px)] items-end`}
+            } flex max-h-[min(50vh,280px)] max-w-[min(66vw,250px)] items-end sm:max-h-[min(68vh,600px)] sm:max-w-[min(92vw,500px)]`}
           >
             <Image
               src={bechoUsesFinalPose ? PJ_BECHO_RPG_STANDING : PJ_BECHO_RPG_STANDING_2}
               alt="Becho"
               width={720}
               height={1080}
-              className="h-[min(68vh,640px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+              className="h-[min(40vh,230px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,640px)]"
             />
           </div>
         </div>
       )}
 
       {showForestGroupStep6 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-0 pl-3 sm:pl-6 md:pl-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-[4.5rem] pl-1 sm:pb-0 sm:pl-6 md:pl-10">
           <div
             className={`${
               isStep6Exiting ? "intro-character-slide-out-right" : "intro-character-slide-in"
-            } relative flex max-h-[min(68vh,500px)] max-w-[min(92vw,720px)] items-end`}
+            } relative flex max-h-[min(56vh,360px)] max-w-[min(96vw,460px)] items-end sm:max-h-[min(68vh,500px)] sm:max-w-[min(92vw,720px)]`}
           >
             <Image
               src={PJ_FEDE_RPG_STANDING}
               alt="Fede"
               width={720}
               height={1080}
-              className="relative z-20 h-[min(66vh,500px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+              className="relative z-20 h-[min(32vh,184px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(66vh,500px)]"
             />
             <Image
               src={PJ_BECHO_RPG_STANDING}
               alt="Becho"
               width={720}
               height={1080}
-              className="relative z-0 -ml-10 h-[min(64vh,600px)] w-auto max-w-full object-contain object-bottom opacity-95 drop-shadow-[0_8px_24px_rgba(0,0,0,0.45)] sm:-ml-14 md:-ml-20"
+              className="relative z-0 -ml-22 h-[min(40vh,230px)] w-auto max-w-full object-contain object-bottom opacity-95 drop-shadow-[0_8px_24px_rgba(0,0,0,0.45)] sm:-ml-14 sm:h-[min(64vh,600px)] md:-ml-20"
             />
           </div>
         </div>
       )}
 
       {showChaneStep6 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-0 pr-3 sm:pr-6 md:pr-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-end pb-[4.5rem] pr-0 sm:pb-0 sm:pr-6 md:pr-10">
           <div
             className={`${
               isStep6Exiting ? "intro-character-slide-out-right" : "intro-character-slide-in-right"
-            } flex max-h-[min(68vh,500px)] max-w-[min(92vw,520px)] items-end`}
+            } flex max-h-[min(56vh,340px)] max-w-[min(72vw,240px)] items-end sm:max-h-[min(68vh,500px)] sm:max-w-[min(92vw,520px)]`}
           >
             <Image
               src={chaneUsesFinalPose ? PJ_CHANE_RPG_STANDING : PJ_CHANE_RPG_STANDING_2}
               alt="Chane"
               width={720}
               height={1080}
-              className="h-[min(66vh,500px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)]"
+              className="translate-x-10 h-[min(40vh,230px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(66vh,500px)]"
             />
           </div>
         </div>
       )}
 
       {showTrioStep7 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-0 pl-3 sm:pl-6 md:pl-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-start pb-[4.5rem] pl-1 sm:pb-0 sm:pl-6 md:pl-10">
           <div
             className={`${
               isStep7Exiting ? "intro-character-slide-out-right" : "intro-character-slide-in"
-            } relative flex max-h-[min(60vh,520px)] max-w-[min(92vw,700px)] items-end`}
+            } relative flex max-h-[min(52vh,320px)] max-w-[min(98vw,520px)] items-end sm:max-h-[min(60vh,520px)] sm:max-w-[min(92vw,700px)]`}
           >
             <Image
               src={PJ_FEDE_RPG_STANDING}
               alt="Fede"
               width={620}
               height={930}
-              className="relative z-20 h-[min(60vh,400px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+              className="relative z-20 h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)] sm:h-[min(60vh,400px)]"
             />
             <Image
               src={PJ_BECHO_RPG_STANDING}
               alt="Becho"
               width={620}
               height={930}
-              className="relative z-10 -ml-14 h-[min(58vh,450px)] w-auto object-contain object-bottom opacity-95 drop-shadow-[0_8px_20px_rgba(0,0,0,0.4)] sm:-ml-18 md:-ml-22"
+              className="relative z-10 -ml-22 h-[min(40vh,230px)] w-auto object-contain object-bottom opacity-95 drop-shadow-[0_8px_20px_rgba(0,0,0,0.4)] sm:-ml-18 sm:h-[min(58vh,450px)] md:-ml-22"
             />
             <Image
               src={PJ_CHANE_RPG_STANDING}
               alt="Chane"
               width={620}
               height={930}
-              className="relative z-[15] -ml-16 h-[min(56vh,400px)] w-auto object-contain object-bottom opacity-90 drop-shadow-[0_8px_20px_rgba(0,0,0,0.35)] sm:-ml-20 md:-ml-24"
+              className="relative z-0 -ml-56 -translate-y-[4.5rem] h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_20px_rgba(0,0,0,0.35)] sm:-ml-20 sm:h-[min(56vh,400px)] md:-ml-24"
             />
           </div>
         </div>
       )}
 
       {showSilvaStep7 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-0 pr-3 sm:pr-6 md:pr-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end pb-[4.5rem] pr-0 sm:pb-0 sm:pr-6 md:pr-10">
           <div
             className={`${
               isStep7Exiting ? "intro-character-slide-out-right" : "intro-character-slide-in-right"
-            } flex max-h-[min(60vh,450px)] max-w-[min(92vw,450px)] items-end`}
+            } flex max-h-[min(52vh,300px)] max-w-[min(75vw,250px)] items-end sm:max-h-[min(60vh,450px)] sm:max-w-[min(92vw,450px)]`}
           >
             <Image
               src={PJ_SILVA_RPG_STANDING_2}
               alt="Silva"
               width={620}
               height={930}
-              className="h-[min(60vh,450px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)]"
+              className="h-[min(34vh,190px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.45)] sm:h-[min(60vh,450px)]"
             />
           </div>
         </div>
       )}
 
       {showStep8Branch && (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[6] -translate-x-1/2 -translate-y-1/2">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[6] -translate-x-[24%] translate-y-0 sm:-translate-x-1/2 sm:-translate-y-1/2">
           <Image
             src={OBJETO_RANDOM_RAMA_1}
             alt="Ramas"
             width={200}
             height={200}
-            className="h-auto w-[min(42vw,180px)] object-contain drop-shadow-[0_6px_16px_rgba(0,0,0,0.45)]"
+            className="h-auto w-[min(34vw,144px)] object-contain drop-shadow-[0_6px_16px_rgba(0,0,0,0.45)] sm:w-[min(42vw,180px)]"
           />
         </div>
       )}
 
       {showFedeStep8 && (
-        <div className="pointer-events-none absolute inset-0 z-[7] flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 z-[7] flex translate-x-12 translate-y-14 items-center justify-center pb-[4.5rem] sm:translate-x-0 sm:translate-y-0 sm:pb-0">
           <div
-            className={`flex max-h-[min(62vh,450px)] max-w-[min(92vw,520px)] items-end transition-transform duration-[800ms] ease-out ${
+            className={`flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end transition-transform duration-[800ms] ease-out sm:max-h-[min(62vh,450px)] sm:max-w-[min(92vw,520px)] ${
               step8Phase === 1
                 ? step8FedeNearBranch
                   ? "translate-x-[14vw] sm:translate-x-[12vw]"
@@ -688,35 +694,35 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
               alt="Fede"
               width={620}
               height={930}
-              className="h-[min(62vh,400px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.5)]"
+              className="h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.5)] sm:h-[min(62vh,400px)]"
             />
           </div>
         </div>
       )}
 
       {showFedeScaredStep9 && (
-        <div className="pointer-events-none absolute inset-0 z-[7] flex items-center justify-center">
-          <div className="flex max-h-[min(62vh,420px)] max-w-[min(92vw,520px)] items-end translate-x-[10vw] sm:translate-x-[8vw]">
+        <div className="pointer-events-none absolute inset-0 z-[7] flex translate-x-12 translate-y-14 items-center justify-center pb-[4.5rem] sm:translate-x-0 sm:translate-y-0 sm:pb-0">
+          <div className="flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end translate-x-[14vw] sm:translate-x-[12vw] sm:max-h-[min(62vh,450px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={PJ_FEDE_RPG_SCARED_2}
               alt="Fede asustado"
               width={620}
               height={930}
-              className="h-[min(62vh,380px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.5)]"
+              className="h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.5)] sm:h-[min(62vh,400px)]"
             />
           </div>
         </div>
       )}
 
       {showFedeFightStep9 && (
-        <div className="pointer-events-none absolute inset-0 z-[7] flex items-center justify-center">
-          <div className="flex max-h-[min(62vh,420px)] max-w-[min(92vw,520px)] items-end translate-x-[10vw] sm:translate-x-[8vw]">
+        <div className="pointer-events-none absolute inset-0 z-[7] flex translate-x-12 translate-y-14 items-center justify-center pb-[4.5rem] sm:translate-x-0 sm:translate-y-0 sm:pb-0">
+          <div className="flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end translate-x-[14vw] sm:translate-x-[12vw] sm:max-h-[min(62vh,450px)] sm:max-w-[min(92vw,520px)]">
             <Image
               src={PJ_FEDE_RPG_FIGHT_STICK_2}
               alt="Fede listo para pelear"
               width={620}
               height={930}
-              className="h-[min(62vh,380px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.5)]"
+              className="h-[min(32vh,184px)] w-auto object-contain object-bottom drop-shadow-[0_8px_22px_rgba(0,0,0,0.5)] sm:h-[min(62vh,400px)]"
             />
           </div>
         </div>
@@ -727,14 +733,14 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
           <div
             className={`${
               step9Line === 0 ? "intro-character-slide-in" : ""
-            } flex max-h-[min(54vh,340px)] max-w-[min(60vw,340px)] items-end`}
+            } flex max-h-[min(43vh,272px)] max-w-[min(48vw,272px)] items-end sm:max-h-[min(54vh,340px)] sm:max-w-[min(60vw,340px)]`}
           >
             <Image
               src={ENEMY_BLACKWOLF_1}
               alt="Blackwolf"
               width={420}
               height={420}
-              className="h-[min(54vh,320px)] w-auto object-contain drop-shadow-[0_8px_20px_rgba(0,0,0,0.55)]"
+              className="h-[min(43vh,256px)] w-auto object-contain drop-shadow-[0_8px_20px_rgba(0,0,0,0.55)] sm:h-[min(54vh,320px)]"
             />
           </div>
         </div>
@@ -773,20 +779,19 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
-            <div className="mx-auto w-full max-w-3xl rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-4 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-5">
+            <div className="mx-auto w-full max-w-3xl rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-3 py-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-5">
               {step === 1 && (
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                   *BRRRR* ~ Eructa ~
                 </p>
               )}
               {step === 2 && (
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
-                  Uff que buen almuerzo. Por suerte hoy salí de laburar temprano.
-                  <br />
-                  Voy a poder ir a casa y ver ese juego que hizo Mati con el que están
-                  rompiendo las bolas en La Tía.
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
+                  {step2Line === 0
+                    ? "Uff que buen almuerzo. Por suerte hoy salí de laburar temprano."
+                    : "Voy a poder ir a casa y ver ese juego que hizo Mati con el que están rompiendo las bolas en La Tía."}
                 </p>
               )}
               <div className="mt-4 flex justify-center">
@@ -820,10 +825,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
-            <div className="mx-auto w-full max-w-3xl rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-4 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-5">
-              <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+            <div className="mx-auto w-full max-w-3xl rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-3 py-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-5">
+              <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                 {casaLine === 1 ? DIALOGUE_CASA_DISCORD : DIALOGUE_CASA_TRY_GAME}
               </p>
               <div className="mt-4 flex justify-center">
@@ -845,10 +850,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
-            <div className="mx-auto w-full max-w-3xl rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-4 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-5">
-              <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+            <div className="mx-auto w-full max-w-3xl rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-3 py-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-5">
+              <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                 {DIALOGUE_CASA_LOOKING}
               </p>
               <div className="mt-4 flex justify-center">
@@ -870,10 +875,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
             <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-2.5">
-              <div className="my-0 -ml-2.5 w-24 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
+              <div className="my-0 -ml-1 w-16 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
                 <Image
                   src={
                     currentForestDialogue.face === "fede"
@@ -895,7 +900,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                 />
               </div>
               <div className="min-w-0 flex flex-1 flex-col self-stretch">
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentForestDialogue.text}
                 </p>
                 <div className="mt-auto flex justify-center pt-4">
@@ -918,10 +923,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
             <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-2.5">
-              <div className="my-0 -ml-2.5 w-24 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
+              <div className="my-0 -ml-1 w-16 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
                 <Image
                   src={
                     currentStep6Dialogue.face === "fede"
@@ -943,7 +948,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                 />
               </div>
               <div className="min-w-0 flex flex-1 flex-col self-stretch">
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentStep6Dialogue.text}
                 </p>
                 <div className="mt-auto flex justify-center pt-4">
@@ -966,10 +971,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
             <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-2.5">
-              <div className="my-0 -ml-2.5 w-24 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
+              <div className="my-0 -ml-1 w-16 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
                 <Image
                   src={
                     currentStep7Dialogue.face === "fede"
@@ -997,7 +1002,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                 />
               </div>
               <div className="min-w-0 flex flex-1 flex-col self-stretch">
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentStep7Dialogue.text}
                 </p>
                 <div className="mt-auto flex justify-center pt-4">
@@ -1032,10 +1037,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             aria-label="Siguiente"
           />
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
             <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-2.5">
-              <div className="my-0 -ml-2.5 w-24 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
+              <div className="my-0 -ml-1 w-16 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
                 <Image
                   src={PJ_FEDE_RPG_FACE_2}
                   alt="Retrato de Fede"
@@ -1045,7 +1050,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                 />
               </div>
               <div className="min-w-0 flex flex-1 flex-col self-stretch">
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                   {DIALOGUE_FEDE_STEP8_RAMAS}
                 </p>
                 <div className="mt-auto flex justify-center pt-4">
@@ -1139,10 +1144,10 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
             />
           )}
           <div
-            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-4 sm:p-6`}
+            className={`${dialogueFont.className} pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-stretch p-2 sm:p-6`}
           >
             <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-2.5">
-              <div className="my-0 -ml-2.5 w-24 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
+              <div className="my-0 -ml-1 w-16 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:my-0 sm:-ml-3.5 sm:w-28">
                 <Image
                   src={
                     currentStep9Dialogue.face === "fede_scared"
@@ -1164,7 +1169,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                 />
               </div>
               <div className="min-w-0 flex flex-1 flex-col self-stretch">
-                <p className="text-left text-base leading-relaxed text-amber-50/95 sm:text-lg">
+                <p className="text-left text-[13px] leading-relaxed text-amber-50/95 sm:text-lg">
                   {currentStep9Dialogue.text}
                 </p>
                 <div className="mt-auto flex justify-center pt-4">
@@ -1196,7 +1201,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
       )}
 
       {step === 9 && step9Line >= STEP9_DIALOGUES.length && (
-        <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center p-4 sm:p-6">
+        <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center p-3 sm:p-6">
           <button
             type="button"
             onClick={goToBattleTutorial}

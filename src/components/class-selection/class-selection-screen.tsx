@@ -106,7 +106,7 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
   };
 
   return (
-    <main className="relative min-h-screen w-full overflow-hidden bg-[#120b08] text-amber-50">
+    <main className="relative h-[100dvh] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:min-h-screen sm:h-auto">
       <Image
         src={BG_INTRO_FOREST}
         alt=""
@@ -120,8 +120,8 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
         aria-hidden
       />
 
-      <section className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col items-center justify-center gap-8 px-4 py-10">
-        <div className="grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-3">
+      <section className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col items-center justify-center gap-3 px-2 py-3 sm:min-h-screen sm:gap-8 sm:px-4 sm:py-10">
+        <div className="grid w-full max-w-4xl grid-cols-3 gap-1.5 sm:gap-4">
           {classes.map((gameClass, index) => {
             const isSelected = selectedClassId === gameClass.id;
             return (
@@ -129,64 +129,64 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
                 key={gameClass.id}
                 type="button"
                 onClick={() => setSelectedClassId(gameClass.id)}
-                className={`${menuFont.className} flex h-full min-h-52 cursor-pointer flex-col rounded-xl border p-6 text-center text-xl font-semibold transition ${
+                className={`${menuFont.className} flex h-full min-h-0 cursor-pointer flex-col rounded-xl border p-2 text-center text-[11px] font-semibold transition sm:min-h-52 sm:p-6 sm:text-xl ${
                   isSelected
                     ? "border-amber-400 bg-amber-900/45 shadow-[0_0_0_2px_rgba(251,191,36,0.55)]"
                     : "border-amber-800/70 bg-[#1a100c]/88 hover:border-amber-600/80 hover:bg-[#24150f]/92"
                 }`}
               >
-                <div className="mb-3 flex justify-center">
-                  <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-amber-700/70 bg-black/30 p-2 shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
+                <div className="mb-1.5 flex justify-center sm:mb-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-amber-700/70 bg-black/30 p-1 shadow-[0_6px_16px_rgba(0,0,0,0.35)] sm:h-24 sm:w-24 sm:rounded-xl sm:p-2">
                     <Image
                       src={buildClassIconSrc(gameClass.name || `modal_${index + 1}`)}
                       alt={`Icono de ${gameClass.name || `Modal ${index + 1}`}`}
                       width={72}
                       height={72}
-                      className="h-[72px] w-[72px] object-contain"
+                      className="h-[34px] w-[34px] object-contain sm:h-[72px] sm:w-[72px]"
                     />
                   </div>
                 </div>
-                <div className="-mx-6 flex min-h-[2.5rem] items-center justify-center border-y border-amber-700/70 bg-black/20 px-4 py-1.5 text-center">
+                <div className="-mx-2 flex min-h-[2rem] items-center justify-center border-y border-amber-700/70 bg-black/20 px-1 py-1 text-center sm:-mx-6 sm:min-h-[2.5rem] sm:px-4 sm:py-1.5">
                   <p>{gameClass.name || `Modal ${index + 1}`}</p>
                 </div>
-                <div className="mt-3 flex h-[5rem] flex-col">
-                  <p className="text-xs font-normal leading-relaxed text-amber-100/80">
+                <div className="mt-1 flex h-[2.35rem] flex-col sm:mt-3 sm:h-[5rem]">
+                  <p className="overflow-hidden text-[9px] font-normal leading-tight text-amber-100/80 sm:text-xs sm:leading-relaxed">
                     {gameClass.description || `Descripcion de ${gameClass.name || `Modal ${index + 1}`}`}
                   </p>
-                  <div className="mt-auto flex justify-center pt-2">
-                    <div className="h-px w-28 bg-gradient-to-r from-transparent via-amber-700/75 to-transparent" />
+                  <div className="mt-auto flex justify-center pt-1 sm:pt-2">
+                    <div className="h-px w-14 bg-gradient-to-r from-transparent via-amber-700/75 to-transparent sm:w-28" />
                   </div>
                 </div>
-                <div className="mt-5 grid grid-cols-2 gap-2 text-sm">
-                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-2 py-1">
-                    <span className="block text-[10px] uppercase tracking-wider text-amber-200/80">
+                <div className="mt-1.5 grid grid-cols-2 gap-1 text-[10px] sm:mt-5 sm:gap-2 sm:text-sm">
+                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-1 py-0.5 sm:px-2 sm:py-1">
+                    <span className="block text-[8px] uppercase tracking-wider text-amber-200/80 sm:text-[10px]">
                       STR
                     </span>
-                    <span className="mt-0.5 block text-base font-semibold leading-none text-amber-100">
+                    <span className="mt-0.5 block text-xs font-semibold leading-none text-amber-100 sm:text-base">
                       {gameClass.str}
                     </span>
                   </p>
-                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-2 py-1">
-                    <span className="block text-[10px] uppercase tracking-wider text-amber-200/80">
+                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-1 py-0.5 sm:px-2 sm:py-1">
+                    <span className="block text-[8px] uppercase tracking-wider text-amber-200/80 sm:text-[10px]">
                       DEX
                     </span>
-                    <span className="mt-0.5 block text-base font-semibold leading-none text-amber-100">
+                    <span className="mt-0.5 block text-xs font-semibold leading-none text-amber-100 sm:text-base">
                       {gameClass.dex}
                     </span>
                   </p>
-                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-2 py-1">
-                    <span className="block text-[10px] uppercase tracking-wider text-amber-200/80">
+                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-1 py-0.5 sm:px-2 sm:py-1">
+                    <span className="block text-[8px] uppercase tracking-wider text-amber-200/80 sm:text-[10px]">
                       INT
                     </span>
-                    <span className="mt-0.5 block text-base font-semibold leading-none text-amber-100">
+                    <span className="mt-0.5 block text-xs font-semibold leading-none text-amber-100 sm:text-base">
                       {gameClass.int}
                     </span>
                   </p>
-                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-2 py-1">
-                    <span className="block text-[10px] uppercase tracking-wider text-amber-200/80">
+                  <p className="rounded-md border border-amber-700/70 bg-black/25 px-1 py-0.5 sm:px-2 sm:py-1">
+                    <span className="block text-[8px] uppercase tracking-wider text-amber-200/80 sm:text-[10px]">
                       WIS
                     </span>
-                    <span className="mt-0.5 block text-base font-semibold leading-none text-amber-100">
+                    <span className="mt-0.5 block text-xs font-semibold leading-none text-amber-100 sm:text-base">
                       {gameClass.wis}
                     </span>
                   </p>
@@ -200,7 +200,7 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
           type="button"
           onClick={onSelectClass}
           disabled={selectedClassId === null || isPending || isConfirmModalOpen}
-          className={`${menuFont.className} relative overflow-hidden rounded-lg border px-8 py-3 text-base font-bold uppercase tracking-[0.14em] transition-all duration-300 ${
+          className={`${menuFont.className} relative overflow-hidden rounded-lg border px-5 py-2 text-xs font-bold uppercase tracking-[0.12em] transition-all duration-300 sm:px-8 sm:py-3 sm:text-base sm:tracking-[0.14em] ${
             selectedClassId === null || isPending || isConfirmModalOpen
               ? "cursor-not-allowed border-amber-900/70 bg-amber-950/55 text-amber-200/45"
               : "cursor-pointer border-amber-600/80 bg-gradient-to-b from-[#c47b2a] via-[#9f5a20] to-[#6f3617] text-amber-50 shadow-[0_10px_24px_rgba(120,58,22,0.45),inset_0_1px_0_rgba(255,224,185,0.28)] hover:-translate-y-0.5 hover:from-[#d08a33] hover:via-[#ad6526] hover:to-[#7b3f1b] hover:shadow-[0_14px_30px_rgba(120,58,22,0.6),inset_0_1px_0_rgba(255,232,199,0.4)] active:translate-y-0 active:scale-[0.99]"
@@ -217,24 +217,24 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
           <span className="relative">{isPending ? "Guardando..." : "Seleccionar"}</span>
         </button>
         {errorMessage && (
-          <p className="text-sm font-medium text-red-200">{errorMessage}</p>
+          <p className="text-xs font-medium text-red-200 sm:text-sm">{errorMessage}</p>
         )}
       </section>
       {isConfirmModalOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-4">
           <div
-            className={`${menuFont.className} w-full max-w-lg rounded-xl border border-amber-700/80 bg-[#1c120e]/95 p-6 text-center shadow-[0_14px_40px_rgba(0,0,0,0.55)]`}
+            className={`${menuFont.className} w-full max-w-[92vw] rounded-xl border border-amber-700/80 bg-[#1c120e]/95 p-4 text-center shadow-[0_14px_40px_rgba(0,0,0,0.55)] sm:max-w-lg sm:p-6`}
           >
-            <p className="text-lg font-semibold text-amber-100">
+            <p className="text-base font-semibold leading-snug text-amber-100 sm:text-lg">
               ¿Estás seguro que querés seleccionar esta clase?
             </p>
-            <p className="mt-3 text-sm text-red-300">Esta decisión es irreversible.</p>
-            <div className="mt-6 flex justify-center gap-3">
+            <p className="mt-2 text-xs text-red-300 sm:mt-3 sm:text-sm">Esta decisión es irreversible.</p>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-6 sm:flex sm:justify-center sm:gap-3">
               <button
                 type="button"
                 onClick={onConfirmSelectClass}
                 disabled={isPending}
-                className="cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-5 py-2 font-semibold text-amber-50 transition hover:bg-amber-600/90 disabled:cursor-not-allowed disabled:opacity-65"
+                className="cursor-pointer rounded-md border border-amber-600/80 bg-amber-700/80 px-3 py-2 text-sm font-semibold text-amber-50 transition hover:bg-amber-600/90 disabled:cursor-not-allowed disabled:opacity-65 sm:px-5"
               >
                 {isPending ? "Guardando..." : "Confirmar"}
               </button>
@@ -242,7 +242,7 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
                 type="button"
                 onClick={() => setIsConfirmModalOpen(false)}
                 disabled={isPending}
-                className="cursor-pointer rounded-md border border-amber-800/80 bg-amber-950/45 px-5 py-2 font-semibold text-amber-100 transition hover:bg-amber-900/65 disabled:cursor-not-allowed disabled:opacity-65"
+                className="cursor-pointer rounded-md border border-amber-800/80 bg-amber-950/45 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-900/65 disabled:cursor-not-allowed disabled:opacity-65 sm:px-5"
               >
                 Cancelar
               </button>
@@ -253,9 +253,9 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
       {isHelloModalOpen && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-4">
           <div
-            className={`${menuFont.className} w-full max-w-3xl rounded-xl border border-amber-700/80 bg-[#1c120e]/95 p-6 text-center shadow-[0_14px_40px_rgba(0,0,0,0.55)] sm:p-8`}
+            className={`${menuFont.className} w-full max-w-[94vw] max-h-[88dvh] overflow-y-auto rounded-xl border border-amber-700/80 bg-[#1c120e]/95 p-4 text-center shadow-[0_14px_40px_rgba(0,0,0,0.55)] sm:max-w-3xl sm:max-h-none sm:overflow-visible sm:p-8`}
           >
-            <div className="mx-auto flex w-full max-w-sm justify-center">
+            <div className="mx-auto flex w-full max-w-[14rem] justify-center sm:max-w-sm">
               <Image
                 src="/img/resources/logos/logo_latia_rpg.png"
                 alt="Logo La Tia RPG"
@@ -267,11 +267,11 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
               />
             </div>
 
-            <div className="my-5 flex justify-center">
-              <div className="h-px w-3/4 bg-gradient-to-r from-transparent via-amber-700/80 to-transparent" />
+            <div className="my-3 flex justify-center sm:my-5">
+              <div className="h-px w-[85%] bg-gradient-to-r from-transparent via-amber-700/80 to-transparent sm:w-3/4" />
             </div>
 
-            <p className="mx-auto max-w-2xl text-sm leading-relaxed text-amber-100/90 sm:text-base">
+            <p className="mx-auto max-w-2xl text-xs leading-relaxed text-amber-100/90 sm:text-base">
               ¡Bienvenido al mundo de La Tia RPG!
               <br />
               <br />
@@ -292,15 +292,15 @@ export function ClassSelectionScreen({ classes }: ClassSelectionScreenProps) {
               ¿Qué esperás? Vamos a empezar tu camino a leyenda.
             </p>
 
-            <div className="my-5 flex justify-center">
-              <div className="h-px w-3/4 bg-gradient-to-r from-transparent via-amber-700/80 to-transparent" />
+            <div className="my-3 flex justify-center sm:my-5">
+              <div className="h-px w-[85%] bg-gradient-to-r from-transparent via-amber-700/80 to-transparent sm:w-3/4" />
             </div>
 
             <button
               type="button"
               onClick={onStartAdventure}
               disabled={isPending || isWorldPreparing}
-              className="cursor-pointer rounded-md border border-amber-600/80 bg-gradient-to-b from-[#c47b2a] via-[#9f5a20] to-[#6f3617] px-8 py-3 text-base font-bold uppercase tracking-[0.12em] text-amber-50 shadow-[0_10px_24px_rgba(120,58,22,0.45),inset_0_1px_0_rgba(255,224,185,0.28)] transition hover:-translate-y-0.5 hover:from-[#d08a33] hover:via-[#ad6526] hover:to-[#7b3f1b] hover:shadow-[0_14px_30px_rgba(120,58,22,0.6),inset_0_1px_0_rgba(255,232,199,0.4)] active:translate-y-0 active:scale-[0.99]"
+              className="cursor-pointer rounded-md border border-amber-600/80 bg-gradient-to-b from-[#c47b2a] via-[#9f5a20] to-[#6f3617] px-5 py-2 text-xs font-bold uppercase tracking-[0.11em] text-amber-50 shadow-[0_10px_24px_rgba(120,58,22,0.45),inset_0_1px_0_rgba(255,224,185,0.28)] transition hover:-translate-y-0.5 hover:from-[#d08a33] hover:via-[#ad6526] hover:to-[#7b3f1b] hover:shadow-[0_14px_30px_rgba(120,58,22,0.6),inset_0_1px_0_rgba(255,232,199,0.4)] active:translate-y-0 active:scale-[0.99] sm:px-8 sm:py-3 sm:text-base sm:tracking-[0.12em]"
             >
               Empezar mi Aventura
             </button>
