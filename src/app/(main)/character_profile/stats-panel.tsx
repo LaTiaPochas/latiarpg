@@ -15,9 +15,9 @@ type TooltipState = {
 } | null;
 
 const statDescriptions: Record<StatItem["label"], string> = {
-  STR: "Fuerza. Aumenta la vida maxima, la regeneración de vida y el daño con armas físicas.",
-  DEX: "Destreza. Mejora la velocidad, la armadura y el daño con armas a distancia.",
-  INT: "Inteligencia. Incrementa el maná máximo, la regeneración de maná y el daño con armas mágicas.",
+  STR: "Fuerza. Aumenta la vida maxima y el daño con armas físicas.",
+  DEX: "Destreza. Mejora la velocidad, la armadura y el daño con armas de fineza.",
+  INT: "Inteligencia. Incrementa el maná máximo y el daño con hechizos.",
   WIS: "Sabiduria. Aumenta la resistencia magica, el poder de hechizos y el aprendizaje arcano.",
 };
 
