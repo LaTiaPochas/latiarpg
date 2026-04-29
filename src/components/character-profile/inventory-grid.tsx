@@ -344,15 +344,15 @@ function ClassicPaperDollPanel({
     character.className.replace(/^\s*clase\s+/i, "").trim() || character.className;
 
   return (
-    <section className="flex h-full min-h-0 flex-col rounded-xl border border-amber-800/60 bg-[#2a1812]/90 p-6 shadow-[0_0_30px_rgba(0,0,0,0.35)] lg:col-span-5">
+    <section className="flex h-full min-h-0 flex-col rounded-xl border border-amber-800/60 bg-[#2a1812]/90 p-4 shadow-[0_0_30px_rgba(0,0,0,0.35)] sm:p-5 lg:col-span-5 lg:p-6">
       <div className="shrink-0 text-center">
-        <h1 className="text-2xl font-bold text-amber-200 sm:text-3xl">{character.characterNameUppercase}</h1>
-        <p className="mt-2 text-sm text-amber-100/80 sm:text-base">
+        <h1 className="text-xl font-bold text-amber-200 sm:text-2xl lg:text-3xl">{character.characterNameUppercase}</h1>
+        <p className="mt-1 text-xs text-amber-100/80 sm:text-sm lg:mt-2 lg:text-base">
           Nivel <span className="font-semibold">{character.level}</span> -{" "}
           <span className="font-semibold">{classDisplay}</span>
         </p>
-        <div className="mx-auto mt-3 w-full max-w-md">
-          <div className="h-3 overflow-hidden rounded-full border border-violet-300/50 bg-[#140a1e]">
+        <div className="mx-auto mt-2 w-full max-w-md lg:mt-3">
+          <div className="h-2.5 overflow-hidden rounded-full border border-violet-300/50 bg-[#140a1e] lg:h-3">
             <div
               className="h-full bg-gradient-to-r from-violet-700 via-violet-500 to-fuchsia-400 transition-all duration-300"
               style={{ width: `${character.xpProgressPercent}%` }}
@@ -365,7 +365,7 @@ function ClassicPaperDollPanel({
         </div>
       </div>
 
-      <div className="relative mt-4 flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/65 bg-gradient-to-b from-[#1c100c] via-[#120a08] to-[#0a0605] shadow-inner shadow-black/50 lg:min-h-[14rem]">
+      <div className="relative mt-3 flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/65 bg-gradient-to-b from-[#1c100c] via-[#120a08] to-[#0a0605] shadow-inner shadow-black/50 lg:mt-4 lg:min-h-[14rem]">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(90,50,28,0.2)_0%,transparent_72%)]"
@@ -392,13 +392,13 @@ function ClassicPaperDollPanel({
             })}
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-1">
+          <div className="relative z-0 flex min-h-0 min-w-0 flex-1 items-center justify-center px-0.5 sm:px-1">
             <Image
               src={character.avatarSrc}
               alt="Avatar del personaje"
               width={384}
               height={384}
-              className="h-auto max-h-[min(280px,46dvh)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_14px_28px_rgba(0,0,0,0.5)] sm:max-h-[min(300px,50dvh)] lg:max-h-[min(320px,52dvh)]"
+              className="relative z-0 h-auto max-h-[min(480px,80dvh)] w-auto max-w-[150%] object-contain object-bottom drop-shadow-[0_14px_28px_rgba(0,0,0,0.5)] sm:max-h-[min(360px,60dvh)] sm:max-w-[112%] lg:max-h-[min(320px,52dvh)] lg:max-w-full"
               style={{ width: "auto", height: "auto" }}
               priority
             />
@@ -449,6 +449,9 @@ export function InventoryGrid({
   });
   const [toast, setToast] = useState<ToastState>({ open: false, message: "" });
   const [abilitiesOpen, setAbilitiesOpen] = useState(false);
+  const [activeMobilePanel, setActiveMobilePanel] = useState<"stats" | "inventory" | "abilities" | null>(
+    null,
+  );
   const [activeDragItem, setActiveDragItem] = useState<InventoryItem | null>(null);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -637,44 +640,94 @@ export function InventoryGrid({
           setActiveDragItem(null);
         }}
       >
-        <div className="grid items-stretch gap-6 lg:grid-cols-12">
-          {profileTopRow}
-          <ClassicPaperDollPanel
-            character={characterPaperDoll}
-            equippedBySlotId={equippedBySlotId}
-            dragState={dragState}
-            onEquippedTooltipEnter={(clientX, clientY, slotId) => {
-              const item = equippedBySlotId.get(slotId);
-              if (!item) return;
-              openEquippedTooltip(clientX, clientY, slotId, false);
-            }}
-            onEquippedTooltipMove={(clientX, clientY, slotId) => {
-              const item = equippedBySlotId.get(slotId);
-              if (!item) return;
-              openEquippedTooltip(clientX, clientY, slotId, false);
-            }}
-            onEquippedTooltipLeave={hideTooltip}
-            onEquippedTooltipClick={(clientX, clientY, slotId) => {
-              const item = equippedBySlotId.get(slotId);
-              if (!item) return;
-              togglePinnedEquippedTooltip(clientX, clientY, slotId);
-            }}
-          />
-          <section className="flex h-full min-h-0 flex-col rounded-xl border border-amber-800/60 bg-[#2a1812]/90 p-6 shadow-[0_0_30px_rgba(0,0,0,0.35)] lg:col-span-4">
-            <h2 className="shrink-0 text-lg font-semibold tracking-wide text-amber-300">INVENTARIO</h2>
-            <div className="mt-3 shrink-0 border-t border-amber-900/70" />
-            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] lg:mt-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-amber-900/80">
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4">
-                {slots.map((slot) => (
-                  <DraggableInventorySlot
-                    key={slot.slotNumber}
-                    slot={slot}
-                    onMouseEnter={(x, y) => openTooltip(x, y, slot.slotNumber, false)}
-                    onMouseMove={(x, y) => openTooltip(x, y, slot.slotNumber, false)}
-                    onMouseLeave={hideTooltip}
-                    onClick={(x, y) => togglePinnedTooltip(x, y, slot.slotNumber)}
-                  />
-                ))}
+        <div className="grid items-stretch gap-3 lg:gap-6 lg:grid-cols-12">
+          <div className="order-1 lg:order-2 lg:col-span-5">
+            <ClassicPaperDollPanel
+              character={characterPaperDoll}
+              equippedBySlotId={equippedBySlotId}
+              dragState={dragState}
+              onEquippedTooltipEnter={(clientX, clientY, slotId) => {
+                const item = equippedBySlotId.get(slotId);
+                if (!item) return;
+                openEquippedTooltip(clientX, clientY, slotId, false);
+              }}
+              onEquippedTooltipMove={(clientX, clientY, slotId) => {
+                const item = equippedBySlotId.get(slotId);
+                if (!item) return;
+                openEquippedTooltip(clientX, clientY, slotId, false);
+              }}
+              onEquippedTooltipLeave={hideTooltip}
+              onEquippedTooltipClick={(clientX, clientY, slotId) => {
+                const item = equippedBySlotId.get(slotId);
+                if (!item) return;
+                togglePinnedEquippedTooltip(clientX, clientY, slotId);
+              }}
+            />
+          </div>
+
+          <section className="order-3 rounded-lg border border-amber-800/60 bg-[#2a1812]/90 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:rounded-xl lg:shadow-[0_0_30px_rgba(0,0,0,0.35)] lg:order-1 lg:col-span-3 lg:border-none lg:bg-transparent lg:shadow-none">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-1 text-left lg:hidden"
+              aria-expanded={activeMobilePanel === "stats"}
+              onClick={() =>
+                setActiveMobilePanel((current) => (current === "stats" ? null : "stats"))
+              }
+            >
+              <span className="text-sm font-semibold tracking-wide text-amber-300">ESTADISTICAS</span>
+              <span
+                className={`text-amber-300/90 transition-transform ${
+                  activeMobilePanel === "stats" ? "rotate-180" : ""
+                }`}
+              >
+                ▼
+              </span>
+            </button>
+            <div
+              className={`${activeMobilePanel === "stats" ? "block" : "hidden"} lg:block [&_h2:first-of-type]:hidden lg:[&_h2:first-of-type]:block`}
+            >
+              {profileTopRow}
+            </div>
+          </section>
+
+          <section className="order-2 flex min-h-0 flex-col rounded-lg border border-amber-800/60 bg-[#2a1812]/90 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:rounded-xl lg:shadow-[0_0_30px_rgba(0,0,0,0.35)] lg:col-span-4">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-1 text-left lg:hidden"
+              aria-expanded={activeMobilePanel === "inventory"}
+              onClick={() =>
+                setActiveMobilePanel((current) => (current === "inventory" ? null : "inventory"))
+              }
+            >
+              <span className="text-sm font-semibold tracking-wide text-amber-300">INVENTARIO</span>
+              <span
+                className={`text-amber-300/90 transition-transform ${
+                  activeMobilePanel === "inventory" ? "rotate-180" : ""
+                }`}
+              >
+                ▼
+              </span>
+            </button>
+            <div className={`${activeMobilePanel === "inventory" ? "block" : "hidden"} lg:block`}>
+              <div className="px-3 pb-3 pt-1.5 lg:p-6">
+                <h2 className="hidden shrink-0 text-lg font-semibold tracking-wide text-amber-300 lg:block">
+                  INVENTARIO
+                </h2>
+                <div className="mt-2 shrink-0 border-t border-amber-900/70" />
+                <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] lg:mt-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-amber-900/80">
+                  <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-5 sm:gap-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {slots.map((slot) => (
+                      <DraggableInventorySlot
+                        key={slot.slotNumber}
+                        slot={slot}
+                        onMouseEnter={(x, y) => openTooltip(x, y, slot.slotNumber, false)}
+                        onMouseMove={(x, y) => openTooltip(x, y, slot.slotNumber, false)}
+                        onMouseLeave={hideTooltip}
+                        onClick={(x, y) => togglePinnedTooltip(x, y, slot.slotNumber)}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -709,40 +762,38 @@ export function InventoryGrid({
       </DndContext>
 
       <section
-        className="mt-6 w-full rounded-xl border border-amber-800/60 bg-[#2a1812]/90 shadow-[0_0_30px_rgba(0,0,0,0.35)]"
+        className="mt-1 w-full rounded-lg border border-amber-800/60 bg-[#2a1812]/90 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:mt-6 lg:rounded-xl lg:shadow-[0_0_30px_rgba(0,0,0,0.35)]"
         aria-label="Panel de habilidades"
       >
         <button
           type="button"
           id="habilidades-panel-toggle"
-          aria-expanded={abilitiesOpen}
+          aria-expanded={abilitiesOpen || activeMobilePanel === "abilities"}
           aria-controls="habilidades-panel-body"
-          onClick={() => setAbilitiesOpen((open) => !open)}
-          className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left transition hover:bg-amber-950/30"
+          onClick={() => {
+            setAbilitiesOpen((open) => !open);
+            setActiveMobilePanel((current) => (current === "abilities" ? null : "abilities"));
+          }}
+          className="flex w-full items-center justify-between px-3 py-1 text-left transition hover:bg-amber-950/30 lg:px-6 lg:py-4"
         >
-          <span id="habilidades-heading" className="text-lg font-semibold tracking-wide text-amber-300">
+          <span id="habilidades-heading" className="text-sm font-semibold tracking-wide text-amber-300 lg:text-lg">
             HABILIDADES
           </span>
-          <span className="shrink-0 text-amber-300/90" aria-hidden>
-            <svg
-              className={`h-5 w-5 transition-transform duration-200 ${abilitiesOpen ? "rotate-180" : ""}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
+          <span
+            className={`shrink-0 text-amber-300/90 transition-transform ${
+              abilitiesOpen || activeMobilePanel === "abilities" ? "rotate-180" : ""
+            }`}
+            aria-hidden
+          >
+            ▼
           </span>
         </button>
-        {abilitiesOpen ? (
+        {(abilitiesOpen || activeMobilePanel === "abilities") ? (
           <div
             id="habilidades-panel-body"
             role="region"
             aria-labelledby="habilidades-heading"
-            className="border-t border-amber-900/70 px-6 py-4"
+            className="border-t border-amber-900/70 px-3 py-2.5 lg:px-6 lg:py-4"
           >
             <p className="text-sm text-amber-100/65">Por el momento no hay habilidades</p>
           </div>
