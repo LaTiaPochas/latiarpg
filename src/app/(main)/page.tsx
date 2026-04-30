@@ -1,210 +1,133 @@
-import { createClient } from "@/lib/supabase/server";
 import Image from "next/image";
-import { redirect } from "next/navigation";
+import { Libre_Baskerville, Montserrat } from "next/font/google";
+import { ZoneMapModalRouter } from "@/components/maps/zone-map-modal-router";
+import { WorldEventJournal } from "@/components/home/world-event-journal";
+import { createClient } from "@/lib/supabase/server";
 
-export default async function Home() {
-  const hasSupabaseEnv =
-    !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const dialogueFont = Libre_Baskerville({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+});
 
-  if (!hasSupabaseEnv) {
-    return (
-      <div className="min-h-[100dvh] bg-slate-950 px-6 py-10 text-slate-100">
-        <main className="mx-auto w-full max-w-3xl rounded-xl border border-amber-700/40 bg-amber-950/30 p-6">
-          <h1 className="text-2xl font-bold">Faltan variables de Supabase</h1>
-          <p className="mt-3 text-amber-100">
-            Configura <code>NEXT_PUBLIC_SUPABASE_URL</code> y{" "}
-            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> en <code>.env.local</code>
-            .
-          </p>
-        </main>
-      </div>
-    );
-  }
+const homeFont = Montserrat({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
 
+type HomePageProps = {
+  searchParams: Promise<{ zone?: string }>;
+};
+
+type CampDialogueOption = {
+  faceSrc: string;
+  speaker: string;
+  text: string;
+};
+
+const CAMP_RETURN_DIALOGUES: CampDialogueOption[] = [
+  {
+    faceSrc: "/img/resources/caracters_faces/pj_checho_rpg_face.png",
+    speaker: "Checho",
+    text: "PIIIIIIIROOOOOOKAAAAAAAAA",
+  },
+  {
+    faceSrc: "/img/resources/caracters_faces/pj_chane_rpg_face.png",
+    speaker: "Chane",
+    text: "Ya hice el diseño industrial de como tenemos que construir la base, espero que consigamos suficiente madera.",
+  },
+  {
+    faceSrc: "/img/resources/caracters_faces/pj_leo_rpg_face.png",
+    speaker: "Leo",
+    text: "Bece nunca se va a dar cuenta que le estoy escondiendo la madera.",
+  },
+  {
+    faceSrc: "/img/resources/caracters_faces/pj_nacho_rpg_face.png",
+    speaker: "Nacho",
+    text: "¿Se podrá fumar alguna de estas hierbas? *suspira* Vamos a bucar madera.",
+  },
+  {
+    faceSrc: "/img/resources/caracters_faces/pj_delu_rpg_face.png",
+    speaker: "Delu",
+    text: "¿Si hago un pozo por acá cuando tardaran en encontrarme?",
+  },
+];
+
+export default async function Home({ searchParams }: HomePageProps) {
+  const params = await searchParams;
+  const activeZoneId = params.zone;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: milestones } = await supabase
-    .from("user_milestones")
-    .select("intro_completed, tutorial_completed, class_selected")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (!milestones?.intro_completed) {
-    redirect("/introduccion");
-  }
-
-  if (!milestones?.tutorial_completed) {
-    redirect("/fin-tutorial");
-  }
-
-  if (!milestones?.class_selected) {
-    redirect("/class-selection");
-  }
-
-  const profileResponse = await supabase
-    .from("user_profiles")
-    .select("email, miembro, puntos, color, role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const profile = profileResponse.data;
-
-  const response = await supabase
-    .from("rpg_classes")
-    .select("id, name, description")
-    .limit(4);
-
-  const classes = response.data;
-  const error = response.error;
-  const canPlay = !!profile;
-  const profileColor = profile?.color || "#22C55E";
-
-  const startCards = [
-    { label: "Miembro", value: profile?.miembro || "Sin asignar" },
-    { label: "Puntos", value: String(profile?.puntos ?? 0) },
-    { label: "Rango", value: profile?.role || "player" },
-    { label: "Estado", value: canPlay ? "Activo" : "Pendiente" },
-  ];
-
-  async function signOut() {
-    "use server";
-
-    const supabaseClient = await createClient();
-    await supabaseClient.auth.signOut();
-    redirect("/login");
-  }
+  const { data: milestones } = user
+    ? await supabase
+        .from("user_milestones")
+        .select("first_time_camp_entered")
+        .eq("user_id", user.id)
+        .maybeSingle()
+    : { data: null };
+  const showFirstCampDialogue = milestones?.first_time_camp_entered === false;
+  const returnCampDialogue = showFirstCampDialogue
+    ? null
+    : CAMP_RETURN_DIALOGUES[
+        Math.floor(Math.random() * CAMP_RETURN_DIALOGUES.length)
+      ];
+  const { data: worldEvents } = await supabase
+    .from("global_world_event_log")
+    .select("id, happened_at, event_html")
+    .order("happened_at", { ascending: false })
+    .limit(100);
 
   return (
-    <div className="min-h-[100dvh] bg-slate-950 px-6 py-10 text-slate-100">
-      <main className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-3">
-        <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6 lg:col-span-2">
-          <p className="text-sm uppercase tracking-widest text-emerald-300">
-            Lobby principal
-          </p>
-          <div className="mt-2">
+    <div
+      className={`relative min-h-[100dvh] overflow-hidden bg-slate-950 px-4 pb-8 pt-3 text-amber-50 lg:px-6 lg:pt-6 ${homeFont.className}`}
+    >
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{
+          backgroundImage:
+            "url('https://wallpapercave.com/wp/wp12719000.jpg')",
+        }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/35 via-slate-900/55 to-black/80" />
+
+      <main className="relative mx-auto w-full max-w-4xl">
+        <div
+          className={`flex items-start gap-3 rounded-lg border border-[#9f8352]/80 bg-[#d8c7a2]/92 p-1 lg:gap-4 lg:py-1 ${dialogueFont.className}`}
+        >
+          <div className="shrink-0 rounded-md border border-amber-900/70 bg-[#24130e] p-0">
             <Image
-              src="/img/resources/logos/logo_latia_rpg.png"
-              alt="La Tia RPG"
-              width={340}
-              height={150}
-              className="h-auto w-auto max-w-[340px]"
+              src={returnCampDialogue?.faceSrc ?? "/img/resources/other_faces/neutral_events.png"}
+              alt={returnCampDialogue?.speaker ?? "Silva"}
+              width={92}
+              height={92}
+              className="h-[52px] w-[52px] rounded-md object-cover lg:h-[72px] lg:w-[72px]"
               priority
             />
           </div>
-          <p className="mt-4 max-w-2xl text-slate-300">
-            Esta es la pantalla de inicio del juego. Desde aca podes revisar tu
-            progreso y entrar a las secciones principales.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-sm">
-            <p className="text-slate-300">Sesion iniciada como: {user.email}</p>
-            <p className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-200">
-              Mi color:{" "}
-              <span className="font-semibold" style={{ color: profileColor }}>
-                {profileColor}
-              </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs leading-relaxed text-slate-900/95 lg:text-sm lg: my-1">
+              {showFirstCampDialogue ? (
+                <i>
+                  “It's a dangerous business going out your door. You step onto the road, and if you don't keep your feet,
+                  there's no knowing where you might be swept off to.”
+                </i>
+              ) : (
+                <i>{returnCampDialogue?.text}</i>
+              )}
             </p>
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="rounded-md bg-slate-100 px-3 py-1 font-medium text-slate-900 hover:bg-white"
-              >
-                Cerrar sesion
-              </button>
-            </form>
           </div>
-
-          {!canPlay ? (
-            <div className="mt-6 rounded-lg border border-amber-600/40 bg-amber-950/40 p-4 text-sm text-amber-200">
-              Tu usuario existe en Auth, pero no tiene perfil en{" "}
-              <code>user_profiles</code>. Ejecuta el script de backfill en
-              Supabase para vincular usuarios ya creados.
-            </div>
-          ) : null}
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {startCards.map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-lg border border-slate-800 bg-slate-950/80 p-4"
-              >
-                <p className="text-xs uppercase tracking-wider text-slate-400">
-                  {stat.label}
-                </p>
-                <p className="mt-2 text-xl font-semibold">{stat.value}</p>
-              </div>
-            ))}
+        </div>
+        <ZoneMapModalRouter zoneId={activeZoneId} restrictToCamp={showFirstCampDialogue} />
+        <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-300">
+            Journal de La Tia
+          </h2>
+          <div className={dialogueFont.className}>
+            <WorldEventJournal events={worldEvents ?? []} />
           </div>
         </section>
-
-        <aside className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
-          <h2 className="text-lg font-semibold">Clases disponibles</h2>
-          <p className="mt-2 text-sm text-slate-300">
-            Lee datos de la tabla <code>rpg_classes</code>.
-          </p>
-
-          {!error && classes && classes.length > 0 ? (
-            <ul className="mt-4 space-y-3">
-              {classes.map((playerClass) => (
-                <li
-                  key={playerClass.id}
-                  className="rounded-lg border border-slate-800 bg-slate-950/70 p-3"
-                >
-                  <p className="font-medium">{playerClass.name}</p>
-                  <p className="text-sm text-slate-400">
-                    {playerClass.description ?? "Sin descripcion"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="mt-4 rounded-lg border border-amber-600/40 bg-amber-950/40 p-4 text-sm text-amber-200">
-              No hay datos aun o la tabla rpg_classes no existe. Crea la tabla
-              en Supabase y agrega filas para verla aqui.
-            </div>
-          )}
-        </aside>
       </main>
-
-      <section className="mx-auto mt-6 w-full max-w-6xl rounded-xl border border-slate-800 bg-slate-900/80 p-6">
-        <h2 className="text-lg font-semibold">Menu rapido</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <button
-            type="button"
-            className="rounded-lg border border-slate-700 bg-slate-950/80 p-4 text-left transition hover:border-slate-500"
-          >
-            <p className="text-sm font-semibold">Personaje</p>
-            <p className="mt-1 text-xs text-slate-400">
-              Equipamiento, atributos y progreso.
-            </p>
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-700 bg-slate-950/80 p-4 text-left transition hover:border-slate-500"
-          >
-            <p className="text-sm font-semibold">Misiones</p>
-            <p className="mt-1 text-xs text-slate-400">
-              Actividades para sumar puntos.
-            </p>
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-700 bg-slate-950/80 p-4 text-left transition hover:border-slate-500"
-          >
-            <p className="text-sm font-semibold">Ranking</p>
-            <p className="mt-1 text-xs text-slate-400">
-              Tabla general de miembros.
-            </p>
-          </button>
-        </div>
-      </section>
     </div>
   );
 }

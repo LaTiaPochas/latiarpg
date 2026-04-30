@@ -436,7 +436,13 @@ export default async function CharacterProfilePage() {
   ];
 
   return (
-    <div className="min-h-[100dvh] bg-[#1b0f0b] px-6 pb-8 pt-3 text-amber-50 lg:py-10 [background-image:linear-gradient(90deg,rgba(59,34,23,0.95)_0%,rgba(59,34,23,0.95)_16%,rgba(77,45,30,0.95)_16%,rgba(77,45,30,0.95)_33%,rgba(52,30,20,0.95)_33%,rgba(52,30,20,0.95)_50%,rgba(74,43,29,0.95)_50%,rgba(74,43,29,0.95)_66%,rgba(56,33,22,0.95)_66%,rgba(56,33,22,0.95)_83%,rgba(70,41,27,0.95)_83%,rgba(70,41,27,0.95)_100%),linear-gradient(180deg,rgba(0,0,0,0.2)_0%,rgba(0,0,0,0.08)_8%,rgba(0,0,0,0.2)_16%,rgba(0,0,0,0.08)_24%,rgba(0,0,0,0.2)_32%,rgba(0,0,0,0.08)_40%,rgba(0,0,0,0.2)_48%,rgba(0,0,0,0.08)_56%,rgba(0,0,0,0.2)_64%,rgba(0,0,0,0.08)_72%,rgba(0,0,0,0.2)_80%,rgba(0,0,0,0.08)_88%,rgba(0,0,0,0.2)_100%)] [background-size:420px_100%,100%_22px]">
+    <div
+      className="min-h-[100dvh] bg-cover bg-center bg-no-repeat px-6 pb-8 pt-3 text-amber-50 lg:py-10"
+      style={{
+        backgroundImage:
+          "linear-gradient(rgba(16, 10, 8, 0.74), rgba(16, 10, 8, 0.74)), url('/img/resources/background/bg_armory.jpg')",
+      }}
+    >
       <main className="mx-auto w-full max-w-7xl space-y-6">
         <InventoryGrid
           profileTopRow={
