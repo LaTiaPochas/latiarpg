@@ -11,6 +11,8 @@ const dialogueFont = Libre_Baskerville({
 
 const PJ_SILVA_RPG_STANDING_2 = "/img/resources/characters/pj_silva_rpg_standing_2.png";
 const PJ_SILVA_RPG_FACE_2 = "/img/resources/caracters_faces/pj_silva_rpg_face_2.png";
+const PJ_CHECHO_RPG_STANDING_2 = "/img/resources/characters/pj_checho_rpg_standing_2.png";
+const PJ_CHECHO_RPG_FACE = "/img/resources/caracters_faces/pj_checho_rpg_face.png";
 
 const CAMP_DIALOGUES = [
   "¡{Name}!, los muchachos ya empezaron con la construcción.",
@@ -30,6 +32,23 @@ export function CampsiteStory({ playerName, playerSpriteSrc, onViewContributions
   const [isPending, startTransition] = useTransition();
   const playerNameCapitalized =
     playerName.length > 0 ? `${playerName.charAt(0).toUpperCase()}${playerName.slice(1)}` : playerName;
+  const normalizedPlayerName = playerName
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const isSilvaPlayer = normalizedPlayerName === "silva";
+  const rightCharacter = isSilvaPlayer
+    ? {
+        standingSrc: PJ_CHECHO_RPG_STANDING_2,
+        faceSrc: PJ_CHECHO_RPG_FACE,
+        name: "Checho",
+      }
+    : {
+        standingSrc: PJ_SILVA_RPG_STANDING_2,
+        faceSrc: PJ_SILVA_RPG_FACE_2,
+        name: "Silva",
+      };
 
   const canAdvance = step <= CAMP_DIALOGUES.length;
   const isLastDialogue = step === CAMP_DIALOGUES.length;
@@ -80,7 +99,7 @@ export function CampsiteStory({ playerName, playerSpriteSrc, onViewContributions
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/40" />
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-start pb-[4.5rem] pl-1 sm:pb-0 sm:pl-6 md:pl-10">
-        <div className="intro-character-slide-in flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(92vw,520px)]">
+        <div className="intro-character-slide-in flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(52vw,320px)]">
           <Image
             src={playerSpriteSrc}
             alt={`Sprite de ${playerName}`}
@@ -93,13 +112,13 @@ export function CampsiteStory({ playerName, playerSpriteSrc, onViewContributions
 
       {step >= 1 ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-end pb-[4.5rem] pr-0 sm:pb-0 sm:pr-6 md:pr-10">
-          <div key={step >= 1 ? "silva-enter" : "silva-idle"} className="campsite-slide-in-right">
+          <div key={`${rightCharacter.name.toLowerCase()}-enter`} className="campsite-slide-in-right">
             <Image
-              src={PJ_SILVA_RPG_STANDING_2}
-              alt="Silva"
+              src={rightCharacter.standingSrc}
+              alt={rightCharacter.name}
               width={720}
               height={1080}
-              className="h-[min(40vh,230px)] w-auto max-w-[min(66vw,250px)] object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,640px)]"
+              className="h-[min(43vh,248px)] w-auto max-w-[min(70vw,370px)] object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(70vh,680px)]"
             />
           </div>
         </div>
@@ -129,8 +148,8 @@ export function CampsiteStory({ playerName, playerSpriteSrc, onViewContributions
             <div className="mx-auto flex w-full max-w-3xl gap-3 rounded-lg border border-amber-800/60 bg-[#1a100c]/92 px-4 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-3">
               <div className="my-0 -ml-1 w-16 shrink-0 self-stretch overflow-hidden rounded-md border border-amber-700/70 bg-black/30 sm:-ml-3.5 sm:w-28">
                 <Image
-                  src={PJ_SILVA_RPG_FACE_2}
-                  alt="Retrato de Silva"
+                  src={rightCharacter.faceSrc}
+                  alt={`Retrato de ${rightCharacter.name}`}
                   width={96}
                   height={96}
                   className="h-full w-full object-cover"
