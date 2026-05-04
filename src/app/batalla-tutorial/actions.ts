@@ -22,6 +22,18 @@ export async function markIntroCompleted() {
   const shouldGrantWoodReward = !milestones?.intro_completed;
 
   if (shouldGrantWoodReward) {
+    const { data: characterRow } = await supabase
+      .from("user_character")
+      .select("experience_current")
+      .eq("profile_id", user.id)
+      .maybeSingle();
+
+    const currentExperience = Math.max(0, characterRow?.experience_current ?? 0);
+    await supabase
+      .from("user_character")
+      .update({ experience_current: currentExperience + 10 })
+      .eq("profile_id", user.id);
+
     await supabase.from("user_inventory").insert({
       profile_id: user.id,
       quantity: 5,
