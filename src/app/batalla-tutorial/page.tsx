@@ -14,6 +14,7 @@ const PJ_FEDE_RPG_FIGHT_STICK =
   "/img/resources/characters/pj_fede_rpg_fight_stick.png";
 const ICON_XP = "/img/resources/iconos/icon_xp.png";
 const ICON_GOLD = "/img/resources/items/item_madera.png";
+const ICON_WOODEN_STICK = "/img/resources/items/item_wooden_stick.png";
 
 const MAX_PLAYER_HP = 100;
 const MAX_PLAYER_MANA = 20;
@@ -74,7 +75,8 @@ export default function BatallaTutorialPage() {
     x: number;
     y: number;
     pinned: boolean;
-  }>({ open: false, x: 0, y: 0, pinned: false });
+    lootType: "wood" | "woodenStick";
+  }>({ open: false, x: 0, y: 0, pinned: false, lootType: "wood" });
   const [turnOwner, setTurnOwner] = useState<"player" | "enemy">("enemy");
   const [turn, setTurn] = useState(1);
   const [playerHp, setPlayerHp] = useState(MAX_PLAYER_HP);
@@ -208,34 +210,47 @@ export default function BatallaTutorialPage() {
     );
   };
 
-  const openLootInfoTooltip = (x: number, y: number, pinned: boolean) => {
+  const openLootInfoTooltip = (
+    x: number,
+    y: number,
+    pinned: boolean,
+    lootType: "wood" | "woodenStick",
+  ) => {
     setLootInfoTooltip({
       open: true,
       x: Math.min(x + 12, window.innerWidth - 360),
       y: Math.min(y + 12, window.innerHeight - 170),
       pinned,
+      lootType,
     });
   };
 
   const hideLootInfoTooltip = () => {
     setLootInfoTooltip((prev) =>
-      prev.pinned ? prev : { open: false, x: 0, y: 0, pinned: false },
+      prev.pinned
+        ? prev
+        : { open: false, x: 0, y: 0, pinned: false, lootType: "wood" },
     );
   };
 
   const closeLootInfoTooltip = () => {
-    setLootInfoTooltip({ open: false, x: 0, y: 0, pinned: false });
+    setLootInfoTooltip({ open: false, x: 0, y: 0, pinned: false, lootType: "wood" });
   };
 
-  const toggleLootInfoTooltipPinned = (x: number, y: number) => {
+  const toggleLootInfoTooltipPinned = (
+    x: number,
+    y: number,
+    lootType: "wood" | "woodenStick",
+  ) => {
     setLootInfoTooltip((prev) =>
       prev.open && prev.pinned
-        ? { open: false, x: 0, y: 0, pinned: false }
+        ? { open: false, x: 0, y: 0, pinned: false, lootType: "wood" }
         : {
             open: true,
             x: Math.min(x + 12, window.innerWidth - 360),
             y: Math.min(y + 12, window.innerHeight - 170),
             pinned: true,
+            lootType,
           },
     );
   };
@@ -320,7 +335,13 @@ export default function BatallaTutorialPage() {
     if (!isCombatFinished) {
       setIsCombatResultVisible(false);
       setIsLootModalOpen(false);
-      setLootInfoTooltip({ open: false, x: 0, y: 0, pinned: false });
+      setLootInfoTooltip({
+        open: false,
+        x: 0,
+        y: 0,
+        pinned: false,
+        lootType: "wood",
+      });
       if (combatResultTimeoutRef.current) {
         window.clearTimeout(combatResultTimeoutRef.current);
         combatResultTimeoutRef.current = null;
@@ -424,7 +445,7 @@ export default function BatallaTutorialPage() {
 
               <div>
                 <p className="text-right text-[10px] uppercase tracking-[0.14em] text-red-200/80">
-                  BLACKWOLF
+                  BLACK WOLF
                 </p>
                 <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full bg-black/45">
                   <div
@@ -511,7 +532,7 @@ export default function BatallaTutorialPage() {
 
             <div>
               <p className="text-right text-xs uppercase tracking-[0.16em] text-red-200/80">
-                Blackwolf
+                Black wolf
               </p>
               <div className="mt-1 h-3 w-full overflow-hidden rounded-full bg-black/45">
                 <div
@@ -865,7 +886,7 @@ export default function BatallaTutorialPage() {
             <p className="text-center text-sm font-normal leading-relaxed text-amber-50/80 sm:text-base">
               Fuiste atacado por un enemigo. <br/><br/>Cuando comienza un combate, se
               decide quien ataca primero segun la estadistica de Velocidad. En
-              este caso, el Dark Wolf es mas rapido que Fede. <br/><br/>¡Preparate!
+              este caso, el Black Wolf es mas rapido que Fede. <br/><br/>¡Preparate!
             </p>
             <div className="mt-6 flex justify-center">
               <button
@@ -957,7 +978,7 @@ export default function BatallaTutorialPage() {
                   <p className="mb-5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/95">
                     Has Conseguido:
                   </p>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="text-center">
                       <div className="mx-auto w-[8.5rem]">
                         <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
@@ -983,16 +1004,16 @@ export default function BatallaTutorialPage() {
                           <button
                             type="button"
                             onMouseEnter={(e) =>
-                              openLootInfoTooltip(e.clientX, e.clientY, false)
+                              openLootInfoTooltip(e.clientX, e.clientY, false, "wood")
                             }
                             onMouseMove={(e) =>
-                              openLootInfoTooltip(e.clientX, e.clientY, false)
+                              openLootInfoTooltip(e.clientX, e.clientY, false, "wood")
                             }
                             onMouseLeave={hideLootInfoTooltip}
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              toggleLootInfoTooltipPinned(e.clientX, e.clientY);
+                              toggleLootInfoTooltipPinned(e.clientX, e.clientY, "wood");
                             }}
                             className="absolute right-1 top-1 z-[2] flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-[#d5deee]/75 bg-[#25354f]/95 text-xs font-black text-[#eef4ff] shadow-[0_1px_4px_rgba(0,0,0,0.45)] transition hover:bg-[#304665]"
                             aria-label="Ver información de Madera"
@@ -1014,6 +1035,48 @@ export default function BatallaTutorialPage() {
                         </div>
                       </div>
                     </div>
+
+                    <div className="text-center">
+                      <div className="mx-auto w-[8.5rem]">
+                        <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
+                          <button
+                            type="button"
+                            onMouseEnter={(e) =>
+                              openLootInfoTooltip(e.clientX, e.clientY, false, "woodenStick")
+                            }
+                            onMouseMove={(e) =>
+                              openLootInfoTooltip(e.clientX, e.clientY, false, "woodenStick")
+                            }
+                            onMouseLeave={hideLootInfoTooltip}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleLootInfoTooltipPinned(
+                                e.clientX,
+                                e.clientY,
+                                "woodenStick",
+                              );
+                            }}
+                            className="absolute right-1 top-1 z-[2] flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-[#d5deee]/75 bg-[#25354f]/95 text-xs font-black text-[#eef4ff] shadow-[0_1px_4px_rgba(0,0,0,0.45)] transition hover:bg-[#304665]"
+                            aria-label="Ver información de Palo de madera"
+                          >
+                            ?
+                          </button>
+                          <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
+                            <Image
+                              src={ICON_WOODEN_STICK}
+                              alt="Palo de madera"
+                              width={112}
+                              height={112}
+                              className="h-full w-full object-contain"
+                            />
+                          </div>
+                          <span className="absolute -bottom-1 -right-1 rounded-full border border-[#1f2d44] bg-[#0f1828]/95 px-2 py-0.5 text-xs font-black leading-none text-white shadow-[0_2px_5px_rgba(0,0,0,0.5)]">
+                            x1
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   {lootInfoTooltip.open && (
                     <div
@@ -1021,8 +1084,19 @@ export default function BatallaTutorialPage() {
                       style={{ left: lootInfoTooltip.x, top: lootInfoTooltip.y }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <span className="font-bold">Madera:</span> Recurso natural
-                      utilizado para diversos fines en este mundo.
+                      {lootInfoTooltip.lootType === "wood" ? (
+                        <>
+                          <span className="font-bold">Madera:</span> Recurso
+                          natural utilizado para diversos fines en este mundo,
+                          como la construcción y crafteo de equipamiento.
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-bold">Palo de madera:</span> Un
+                          palo de madera que puede usarse para defenderse de los
+                          enemigos.
+                        </>
+                      )}
                     </div>
                   )}
                   <button

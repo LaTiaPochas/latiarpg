@@ -46,7 +46,7 @@ export function WorldEventJournal({ events }: WorldEventJournalProps) {
             key={event.id}
             className="rounded-md border border-amber-900/60 bg-[#1f120e]/90 px-3 py-1.5"
           >
-            <div className="text-sm text-amber-100/95">
+            <div className="text-xs text-amber-100/95 lg:text-sm">
               <span className="mr-2 text-[11px] uppercase tracking-wide text-amber-200/80">
                 {formatJournalTimestamp(event.happened_at)} -
               </span>
