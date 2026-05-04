@@ -322,6 +322,21 @@ export default async function CampsitePage() {
                   el primer campamento y protegerse de los peligros de este
                   mundo.
                 </p>
+                
+                <p className="mt-12 text-center text-sm font-semibold leading-relaxed text-slate-900 lg:text-base">
+                  {milestoneTitle}
+                </p>
+                <div className="mx-auto mt-3 h-4 w-3/5 max-w-2xl overflow-hidden rounded-full border border-[#9b7a46]/80 bg-[#e8d8b4]">
+                  <div
+                    className="h-full bg-gradient-to-r from-lime-500 to-emerald-600 transition-all duration-500"
+                    style={{ width: `${milestoneProgressPercent}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-center text-xs uppercase tracking-wide text-slate-700">
+                  {milestoneCurrentValue} / {milestoneTargetValue} (
+                  {milestoneProgressPercent}%)
+                </p>
+                
                 <div className="mt-10 flex items-center justify-center gap-2 text-sm font-semibold leading-relaxed text-slate-700 lg:text-base">
                   <p>Tenés disponible: {userWoodQuantity}</p>
                   <Image
@@ -336,20 +351,7 @@ export default async function CampsitePage() {
                   maxAmount={userWoodQuantity}
                   onContribute={contributeWood}
                 />
-                <p className="mt-10 text-center text-sm font-semibold leading-relaxed text-slate-900 lg:text-base">
-                  {milestoneTitle}
-                </p>
 
-                <div className="mx-auto mt-3 h-4 w-3/5 max-w-2xl overflow-hidden rounded-full border border-[#9b7a46]/80 bg-[#e8d8b4]">
-                  <div
-                    className="h-full bg-gradient-to-r from-lime-500 to-emerald-600 transition-all duration-500"
-                    style={{ width: `${milestoneProgressPercent}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-center text-xs uppercase tracking-wide text-slate-700">
-                  {milestoneCurrentValue} / {milestoneTargetValue} (
-                  {milestoneProgressPercent}%)
-                </p>
               </>
             )}
           </div>

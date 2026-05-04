@@ -79,25 +79,27 @@ export function CampsiteStory({ playerName, playerSpriteSrc, onViewContributions
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/40" />
 
-      <div className="pointer-events-none absolute inset-y-10 left-80 z-10 flex items-end pb-6 pl-2 sm:pl-6 md:pl-10">
-        <Image
-          src={playerSpriteSrc}
-          alt={`Sprite de ${playerName}`}
-          width={720}
-          height={1080}
-          className="h-[min(60vh,420px)] w-auto max-w-[min(70vw,320px)] object-contain object-bottom drop-shadow-[0_10px_26px_rgba(0,0,0,0.6)]"
-        />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-start pb-[4.5rem] pl-1 sm:pb-0 sm:pl-6 md:pl-10">
+        <div className="intro-character-slide-in flex max-h-[min(50vh,280px)] max-w-[min(64vw,240px)] items-end sm:max-h-[min(68vh,640px)] sm:max-w-[min(92vw,520px)]">
+          <Image
+            src={playerSpriteSrc}
+            alt={`Sprite de ${playerName}`}
+            width={720}
+            height={1080}
+            className="h-[min(32vh,184px)] w-auto max-w-full object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,500px)]"
+          />
+        </div>
       </div>
 
       {step >= 1 ? (
-        <div className="pointer-events-none absolute inset-y-10 right-80 z-10 flex items-end pb-6 pr-2 sm:pr-6 md:pr-10">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-end pb-[4.5rem] pr-0 sm:pb-0 sm:pr-6 md:pr-10">
           <div key={step >= 1 ? "silva-enter" : "silva-idle"} className="campsite-slide-in-right">
             <Image
               src={PJ_SILVA_RPG_STANDING_2}
               alt="Silva"
               width={720}
               height={1080}
-              className="h-[min(60vh,420px)] w-auto max-w-[min(70vw,340px)] object-contain object-bottom drop-shadow-[0_10px_26px_rgba(0,0,0,0.6)]"
+              className="h-[min(40vh,230px)] w-auto max-w-[min(66vw,250px)] object-contain object-bottom drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[min(68vh,640px)]"
             />
           </div>
         </div>

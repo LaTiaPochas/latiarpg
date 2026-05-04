@@ -3,6 +3,7 @@ import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { ZoneMapModalRouter } from "@/components/maps/zone-map-modal-router";
 import { WorldEventJournal } from "@/components/home/world-event-journal";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 const dialogueFont = Libre_Baskerville({
   subsets: ["latin"],
@@ -59,13 +60,25 @@ export default async function Home({ searchParams }: HomePageProps) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: milestones } = user
-    ? await supabase
-        .from("user_milestones")
-        .select("first_time_camp_entered")
-        .eq("user_id", user.id)
-        .maybeSingle()
-    : { data: null };
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: milestones } = await supabase
+    .from("user_milestones")
+    .select("intro_completed, tutorial_completed, first_time_camp_entered")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!milestones?.intro_completed) {
+    redirect("/introduccion");
+  }
+
+  if (!milestones?.tutorial_completed) {
+    redirect("/fin-tutorial");
+  }
+
   const showFirstCampDialogue = milestones?.first_time_camp_entered === false;
   const returnCampDialogue = showFirstCampDialogue
     ? null
@@ -120,7 +133,7 @@ export default async function Home({ searchParams }: HomePageProps) {
         </div>
         <ZoneMapModalRouter zoneId={activeZoneId} restrictToCamp={showFirstCampDialogue} />
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-300">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-300 lg:text-sm">
             Journal de La Tia
           </h2>
           <div className={dialogueFont.className}>

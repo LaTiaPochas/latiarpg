@@ -137,7 +137,7 @@ export default async function CharacterProfilePage() {
   const { data: character, error: characterError } = await supabase
     .from("user_character")
     .select(
-      "character_name, level, experience_current, str, dex, int, wis, speed_total, hp_total, mana_total, armor_total, mr_total, attack_damage_total, magic_damage_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, stat_points_remaining",
+      "character_name, level, experience_current, str, dex, int, wis, speed_total, hp_total, hp_actual, mana_total, mana_actual, armor_total, mr_total, attack_damage_total, magic_damage_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, stat_points_remaining",
     )
     .eq("profile_id", user.id)
     .maybeSingle();
@@ -396,18 +396,14 @@ export default async function CharacterProfilePage() {
   const weaponMax = character?.weapon_damage_max ?? 0;
   const magicSheetMin = character?.magic_damage_min ?? 0;
   const magicSheetMax = character?.magic_damage_max ?? 0;
+  const hpTotal = Math.max(0, character?.hp_total ?? 0);
+  const hpActual = Math.min(hpTotal, Math.max(0, character?.hp_actual ?? hpTotal));
+  const manaTotal = Math.max(0, character?.mana_total ?? 0);
+  const manaActual = Math.min(manaTotal, Math.max(0, character?.mana_actual ?? manaTotal));
+  const hpPercent = hpTotal > 0 ? Math.round((hpActual / hpTotal) * 100) : 0;
+  const manaPercent = manaTotal > 0 ? Math.round((manaActual / manaTotal) * 100) : 0;
 
   const derivedStats: Array<{ label: string; value: string; icon: string }> = [
-    {
-      label: "HP",
-      value: String(character?.hp_total ?? 0),
-      icon: "/img/resources/iconos/icon_hp_profile.png",
-    },
-    {
-      label: "MANA",
-      value: String(character?.mana_total ?? 0),
-      icon: "/img/resources/iconos/icon_mana_profile.png",
-    },
     {
       label: "ATK Damage",
       value: `${weaponMin} - ${weaponMax}`,
@@ -437,7 +433,7 @@ export default async function CharacterProfilePage() {
 
   return (
     <div
-      className="min-h-[100dvh] bg-cover bg-center bg-no-repeat px-6 pb-8 pt-3 text-amber-50 lg:py-10"
+      className="min-h-[100dvh] bg-fixed bg-cover bg-center bg-no-repeat px-6 pb-8 pt-3 text-amber-50 lg:py-10"
       style={{
         backgroundImage:
           "linear-gradient(rgba(16, 10, 8, 0.74), rgba(16, 10, 8, 0.74)), url('/img/resources/background/bg_armory.jpg')",
@@ -458,6 +454,54 @@ export default async function CharacterProfilePage() {
 
               <div className="mt-5 border-t border-amber-900/70" />
               <div className="mt-3 grid grid-cols-1 gap-2">
+                <div className="rounded-md border border-amber-900/60 bg-[#1f120e]/90 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src="/img/resources/iconos/icon_hp_profile.png"
+                      alt="HP"
+                      width={22}
+                      height={22}
+                      className="h-[22px] w-[22px] rounded-sm object-cover"
+                    />
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-amber-200/70">HP</p>
+                      <p className="mt-0.5 text-base font-bold leading-none text-amber-100">
+                        {hpActual} / {hpTotal}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-black/45">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-300"
+                      style={{ width: `${hpPercent}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-amber-900/60 bg-[#1f120e]/90 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src="/img/resources/iconos/icon_mana_profile.png"
+                      alt="Mana"
+                      width={22}
+                      height={22}
+                      className="h-[22px] w-[22px] rounded-sm object-cover"
+                    />
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-amber-200/70">MANA</p>
+                      <p className="mt-0.5 text-base font-bold leading-none text-amber-100">
+                        {manaActual} / {manaTotal}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-black/45">
+                    <div
+                      className="h-full bg-gradient-to-r from-sky-600 to-cyan-400 transition-all duration-300"
+                      style={{ width: `${manaPercent}%` }}
+                    />
+                  </div>
+                </div>
+
                 {derivedStats.map((stat) => (
                   <div
                     key={stat.label}

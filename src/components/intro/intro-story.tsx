@@ -1127,7 +1127,7 @@ export function IntroStory({ completeIntro }: IntroStoryProps) {
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="font-bold">Madera:</span> Recurso natural
-                utilizado para diversos fines en este mundo.
+                utilizado para diversos fines en este mundo, como la construcción y crafteo de equipamiento.
               </div>
             )}
             <button
