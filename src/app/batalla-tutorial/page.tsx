@@ -292,6 +292,7 @@ export default function BatallaTutorialPage() {
   const playerManaPercent = Math.round((playerMana / MAX_PLAYER_MANA) * 100);
   const enemyHpPercent = Math.round((enemyHp / MAX_ENEMY_HP) * 100);
   const isVictory = enemyHp <= 0 && playerHp > 0;
+  const isDefeat = playerHp <= 0;
 
   useEffect(() => {
     if (!isVictory || didMarkIntroCompleted) return;
@@ -1116,6 +1117,35 @@ export default function BatallaTutorialPage() {
                   CONTINUAR
                 </button>
               )}
+            </div>
+          ) : isDefeat ? (
+            <div className="w-full max-w-xl">
+              <div
+                className={`${menuFont.className} relative overflow-hidden rounded-xl border border-red-400/80 bg-gradient-to-b from-red-700/95 via-red-900/95 to-red-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.65),0_0_24px_rgba(239,68,68,0.22),inset_0_1px_0_rgba(254,226,226,0.25)]`}
+              >
+                <span
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(254,226,226,0.2),transparent_58%)]"
+                  aria-hidden
+                />
+                <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+                <p className="relative text-3xl font-black uppercase tracking-[0.2em] text-red-50 drop-shadow-[0_0_12px_rgba(254,202,202,0.55)] sm:text-4xl">
+                  DERROTA
+                </p>
+                <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-red-100/90">
+                  Momento de recobrar fuerzas.
+                </p>
+                <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push("/");
+                }}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+              >
+                Volver al campamento
+              </button>
             </div>
           ) : (
             <div

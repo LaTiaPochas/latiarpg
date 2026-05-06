@@ -79,3 +79,26 @@ body {
     animation: none;
   }
 }
+
+/* Combate: enemigo avanza hacia el PJ (izquierda) y vuelve al sitio */
+@keyframes combat-enemy-lunge-at-player {
+  0% {
+    transform: translateX(0);
+  }
+  40% {
+    transform: translateX(calc(-1 * min(5.25rem, 20vw)));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.combat-enemy-lunge-at-player {
+  animation: combat-enemy-lunge-at-player 0.55s ease-in-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .combat-enemy-lunge-at-player {
+    animation: none;
+  }
+}

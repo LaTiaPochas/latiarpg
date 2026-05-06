@@ -10,6 +10,7 @@ const mapFont = Montserrat({
   weight: ["400", "500", "600", "700"],
 });
 
+/** `combat_encounters.code` coincide con `id` del hotspot (misma zona en Supabase). */
 type Hotspot = {
   id: string;
   step: number;
@@ -75,9 +76,11 @@ const HOTSPOTS: Hotspot[] = [
 
 type HiddenForestMapProps = {
   currentCombatStep: number;
+  /** `zones.code` del área (p. ej. `hidden_forest` desde `game-zones`). */
+  zoneCode: string;
 };
 
-export function HiddenForestMap({ currentCombatStep }: HiddenForestMapProps) {
+export function HiddenForestMap({ currentCombatStep, zoneCode }: HiddenForestMapProps) {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapNaturalSize, setMapNaturalSize] = useState<{ width: number; height: number } | null>(null);
@@ -251,9 +254,9 @@ export function HiddenForestMap({ currentCombatStep }: HiddenForestMapProps) {
             type="button"
             disabled={selectedHotspot.step > currentCombatStep}
             onClick={() => {
-              router.push(
-                `/bosque-inexplorado?combat_step=${selectedHotspot.step}`,
-              );
+              const encounterCode = encodeURIComponent(selectedHotspot.id);
+              const z = encodeURIComponent(zoneCode.trim());
+              router.push(`/combate/${encounterCode}?zone=${z}`);
             }}
             className="shrink-0 cursor-pointer rounded border border-slate-700/90 bg-gradient-to-b from-slate-600 to-slate-800 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-100 shadow-[0_0_8px_rgba(25,25,25,0.8)] transition hover:from-slate-500 hover:to-slate-700 disabled:cursor-not-allowed disabled:border-slate-700 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-300 disabled:shadow-none"
           >
