@@ -500,6 +500,14 @@ export type CombatEncounterEnemyView = {
   aiProfile: string | null;
 };
 
+export type CombatPlayerConsumableView = {
+  inventoryId: number;
+  itemId: string;
+  name: string;
+  description: string | null;
+  quantity: number;
+};
+
 export type CombatEncounterDebugPayload = {
   encounterCode: string;
   /** `zones.code` usado en la URL (?zone=), o null si no se filtró por zona. */
@@ -554,6 +562,8 @@ export type CombatEncounterShellProps = {
   playerMr?: number;
   /** Skills aprendidos del PJ (`user_character_skills` + `player_skills`). */
   playerSkills?: CombatPlayerSkillView[];
+  /** Consumibles visibles en combate (`user_inventory` + `items`, item_type_id=consumable). */
+  playerConsumables?: CombatPlayerConsumableView[];
   /** Destino para "Escapar" (normalmente el mapa de la zona origen). */
   escapeHref?: string;
 };
@@ -817,6 +827,7 @@ export function CombatEncounterShell({
   playerArmor = 0,
   playerMr = 0,
   playerSkills = [],
+  playerConsumables = [],
   escapeHref = "/",
 }: CombatEncounterShellProps) {
   const backgroundResolved = backgroundSrc?.trim() || BG_INTRO_FOREST;
@@ -853,7 +864,7 @@ export function CombatEncounterShell({
 
   const [isActionsPanelOpen, setIsActionsPanelOpen] = useState(false);
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
-  const [actionMenu, setActionMenu] = useState<"main" | "skills">("main");
+  const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory">("main");
   const [isTurnTransitioning, setIsTurnTransitioning] = useState(true);
   const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
   const combatLogDesktopRef = useRef<HTMLDivElement | null>(null);
@@ -1691,7 +1702,7 @@ export function CombatEncounterShell({
                 </button>
 
                 <div className="flex items-center gap-2">
-                  {actionMenu === "skills" && (
+                  {actionMenu !== "main" && (
                     <button
                       type="button"
                       onClick={() => setActionMenu("main")}
@@ -1738,90 +1749,121 @@ export function CombatEncounterShell({
                     </button>
                     <button
                       type="button"
-                      disabled
-                      className="w-full cursor-not-allowed rounded-md border border-slate-500/70 bg-slate-700/45 px-2 py-1 text-left text-xs font-semibold text-slate-200/75 opacity-60"
-                      aria-disabled="true"
+                      disabled={isPlayerActionsLocked}
+                      onClick={() => setActionMenu("inventory")}
+                      className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
+                        isPlayerActionsLocked
+                          ? "cursor-not-allowed border-slate-600/70 bg-slate-800/40 text-slate-300 opacity-55"
+                          : "cursor-pointer border-violet-600/70 bg-violet-900/45 text-violet-100 hover:bg-violet-800/65"
+                      }`}
                     >
                       Inventario
                     </button>
                   </div>
-                ) : playerCombatSkills.length === 0 ? (
+                ) : actionMenu === "skills" ? (
+                  playerCombatSkills.length === 0 ? (
+                    <p
+                      className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-[11px] text-amber-200/75`}
+                    >
+                      No tenés habilidades aprendidas.
+                    </p>
+                  ) : (
+                    <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
+                    <div className="grid gap-1">
+                      {playerCombatSkills.map((entry) => {
+                        const sk = getPlayerSkillSubtypeStyles(getPlayerSkillEffectSubtype(entry.skill.effect));
+                        const usable = canUsePlayerSkill(entry);
+                        const cdLeft = playerSkillCooldownTurnsRemaining(entry);
+                        return (
+                          <div key={entry.userCharacterSkillId} className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handlePlayerSkillChosen(entry)}
+                              disabled={!usable}
+                              className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug transition disabled:opacity-95 ${
+                                usable ? sk.rowButtonActive : sk.rowButtonDisabled
+                              }`}
+                            >
+                              {entry.skill.name}
+                            </button>
+                            <span
+                              className={`${SKILL_COST_BADGE_BOX} rounded-md border px-1 py-0.5 text-[10px] font-bold leading-none ${
+                                cdLeft > 0
+                                  ? "border-amber-700/60 bg-amber-950/50 text-amber-200/90"
+                                  : sk.mpBadge
+                              }`}
+                            >
+                              {cdLeft > 0 ? (
+                                <>
+                                  <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-90" />
+                                  <span>{cdLeft}</span>
+                                </>
+                              ) : (
+                                `${entry.skill.manaCost} MP`
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              onMouseEnter={(e) =>
+                                openSkillInfoTooltip(
+                                  entry.userCharacterSkillId,
+                                  e.clientX,
+                                  e.clientY,
+                                  false,
+                                )
+                              }
+                              onMouseMove={(e) =>
+                                openSkillInfoTooltip(
+                                  entry.userCharacterSkillId,
+                                  e.clientX,
+                                  e.clientY,
+                                  false,
+                                )
+                              }
+                              onMouseLeave={hideSkillInfoTooltip}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleSkillInfoTooltipPinned(
+                                  entry.userCharacterSkillId,
+                                  e.clientX,
+                                  e.clientY,
+                                );
+                              }}
+                              className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border text-[10px] font-black leading-none transition ${sk.infoButton}`}
+                              aria-label={`Información de ${entry.skill.name}`}
+                            >
+                              ?
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    </div>
+                  )
+                ) : playerConsumables.length === 0 ? (
                   <p
                     className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-[11px] text-amber-200/75`}
                   >
-                    No tenés habilidades aprendidas.
+                    No tenés consumibles disponibles.
                   </p>
                 ) : (
                   <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
                   <div className="grid gap-1">
-                    {playerCombatSkills.map((entry) => {
-                      const sk = getPlayerSkillSubtypeStyles(getPlayerSkillEffectSubtype(entry.skill.effect));
-                      const usable = canUsePlayerSkill(entry);
-                      const cdLeft = playerSkillCooldownTurnsRemaining(entry);
-                      return (
-                        <div key={entry.userCharacterSkillId} className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handlePlayerSkillChosen(entry)}
-                            disabled={!usable}
-                            className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug transition disabled:opacity-95 ${
-                              usable ? sk.rowButtonActive : sk.rowButtonDisabled
-                            }`}
-                          >
-                            {entry.skill.name}
-                          </button>
-                          <span
-                            className={`${SKILL_COST_BADGE_BOX} rounded-md border px-1 py-0.5 text-[10px] font-bold leading-none ${
-                              cdLeft > 0
-                                ? "border-amber-700/60 bg-amber-950/50 text-amber-200/90"
-                                : sk.mpBadge
-                            }`}
-                          >
-                            {cdLeft > 0 ? (
-                              <>
-                                <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-90" />
-                                <span>{cdLeft}</span>
-                              </>
-                            ) : (
-                              `${entry.skill.manaCost} MP`
-                            )}
-                          </span>
-                          <button
-                            type="button"
-                            onMouseEnter={(e) =>
-                              openSkillInfoTooltip(
-                                entry.userCharacterSkillId,
-                                e.clientX,
-                                e.clientY,
-                                false,
-                              )
-                            }
-                            onMouseMove={(e) =>
-                              openSkillInfoTooltip(
-                                entry.userCharacterSkillId,
-                                e.clientX,
-                                e.clientY,
-                                false,
-                              )
-                            }
-                            onMouseLeave={hideSkillInfoTooltip}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              toggleSkillInfoTooltipPinned(
-                                entry.userCharacterSkillId,
-                                e.clientX,
-                                e.clientY,
-                              );
-                            }}
-                            className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border text-[10px] font-black leading-none transition ${sk.infoButton}`}
-                            aria-label={`Información de ${entry.skill.name}`}
-                          >
-                            ?
-                          </button>
-                        </div>
-                      );
-                    })}
+                    {playerConsumables.map((item) => (
+                      <div key={item.inventoryId} className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled
+                          className="w-full cursor-not-allowed rounded-md border border-violet-700/65 bg-violet-950/35 px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug text-violet-100/90 opacity-90"
+                        >
+                          {item.name}
+                        </button>
+                        <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-violet-700/65 bg-violet-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-violet-100`}>
+                          x{item.quantity}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                   </div>
                 )}
@@ -1907,7 +1949,7 @@ export function CombatEncounterShell({
             className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/90 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-3`}
           >
             <div className="flex items-center gap-2">
-              {actionMenu === "skills" && (
+              {actionMenu !== "main" && (
                 <button
                   type="button"
                   onClick={() => setActionMenu("main")}
@@ -1918,7 +1960,11 @@ export function CombatEncounterShell({
                 </button>
               )}
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90">
-                {actionMenu === "main" ? "Acciones" : "Habilidades"}
+                {actionMenu === "main"
+                  ? "Acciones"
+                  : actionMenu === "skills"
+                    ? "Habilidades"
+                    : "Inventario"}
               </p>
             </div>
 
@@ -1957,76 +2003,107 @@ export function CombatEncounterShell({
                 </button>
                 <button
                   type="button"
-                  disabled
-                  className="w-full cursor-not-allowed rounded-md border border-slate-500/70 bg-slate-700/45 px-2 py-1 text-left text-xs font-semibold text-slate-200/75 opacity-60 sm:px-3 sm:py-1.5 sm:text-sm"
-                  aria-disabled="true"
+                  disabled={isPlayerActionsLocked}
+                  onClick={() => setActionMenu("inventory")}
+                  className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
+                    isPlayerActionsLocked
+                      ? "cursor-not-allowed border-slate-500/70 bg-slate-700/45 text-slate-300 opacity-55"
+                      : "cursor-pointer border-violet-600/70 bg-violet-900/45 text-violet-100 hover:bg-violet-800/65"
+                  }`}
                 >
                   Inventario
                 </button>
               </div>
-            ) : playerCombatSkills.length === 0 ? (
+            ) : actionMenu === "skills" ? (
+              playerCombatSkills.length === 0 ? (
+                <p
+                  className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-sm text-amber-200/75`}
+                >
+                  No tenés habilidades aprendidas.
+                </p>
+              ) : (
+                <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
+                <div className="grid gap-1 sm:gap-1.5">
+                  {playerCombatSkills.map((entry) => {
+                    const sk = getPlayerSkillSubtypeStyles(getPlayerSkillEffectSubtype(entry.skill.effect));
+                    const usable = canUsePlayerSkill(entry);
+                    const cdLeft = playerSkillCooldownTurnsRemaining(entry);
+                    return (
+                      <div key={entry.userCharacterSkillId} className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handlePlayerSkillChosen(entry)}
+                          disabled={!usable}
+                          className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug transition disabled:opacity-95 sm:px-2 sm:py-1 sm:text-xs ${
+                            usable ? sk.rowButtonActive : sk.rowButtonDisabled
+                          }`}
+                        >
+                          {entry.skill.name}
+                        </button>
+                        <span
+                          className={`${SKILL_COST_BADGE_BOX} rounded-md border px-1 py-0.5 text-[10px] font-bold leading-none sm:text-[11px] ${
+                            cdLeft > 0
+                              ? "border-amber-700/60 bg-amber-950/50 text-amber-200/90"
+                              : sk.mpBadge
+                          }`}
+                        >
+                          {cdLeft > 0 ? (
+                            <>
+                              <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-90 sm:h-3.5 sm:w-3.5" />
+                              <span>{cdLeft}</span>
+                            </>
+                          ) : (
+                            `${entry.skill.manaCost} MP`
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onMouseEnter={(e) =>
+                            openSkillInfoTooltip(entry.userCharacterSkillId, e.clientX, e.clientY, false)
+                          }
+                          onMouseMove={(e) =>
+                            openSkillInfoTooltip(entry.userCharacterSkillId, e.clientX, e.clientY, false)
+                          }
+                          onMouseLeave={hideSkillInfoTooltip}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleSkillInfoTooltipPinned(entry.userCharacterSkillId, e.clientX, e.clientY);
+                          }}
+                          className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border text-[10px] font-black leading-none transition sm:text-xs ${sk.infoButton}`}
+                          aria-label={`Información de ${entry.skill.name}`}
+                        >
+                          ?
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                </div>
+              )
+            ) : playerConsumables.length === 0 ? (
               <p
                 className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-sm text-amber-200/75`}
               >
-                No tenés habilidades aprendidas.
+                No tenés consumibles disponibles.
               </p>
             ) : (
               <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
               <div className="grid gap-1 sm:gap-1.5">
-                {playerCombatSkills.map((entry) => {
-                  const sk = getPlayerSkillSubtypeStyles(getPlayerSkillEffectSubtype(entry.skill.effect));
-                  const usable = canUsePlayerSkill(entry);
-                  const cdLeft = playerSkillCooldownTurnsRemaining(entry);
-                  return (
-                    <div key={entry.userCharacterSkillId} className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handlePlayerSkillChosen(entry)}
-                        disabled={!usable}
-                        className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug transition disabled:opacity-95 sm:px-2 sm:py-1 sm:text-xs ${
-                          usable ? sk.rowButtonActive : sk.rowButtonDisabled
-                        }`}
-                      >
-                        {entry.skill.name}
-                      </button>
-                      <span
-                        className={`${SKILL_COST_BADGE_BOX} rounded-md border px-1 py-0.5 text-[10px] font-bold leading-none sm:text-[11px] ${
-                          cdLeft > 0
-                            ? "border-amber-700/60 bg-amber-950/50 text-amber-200/90"
-                            : sk.mpBadge
-                        }`}
-                      >
-                        {cdLeft > 0 ? (
-                          <>
-                            <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-90 sm:h-3.5 sm:w-3.5" />
-                            <span>{cdLeft}</span>
-                          </>
-                        ) : (
-                          `${entry.skill.manaCost} MP`
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        onMouseEnter={(e) =>
-                          openSkillInfoTooltip(entry.userCharacterSkillId, e.clientX, e.clientY, false)
-                        }
-                        onMouseMove={(e) =>
-                          openSkillInfoTooltip(entry.userCharacterSkillId, e.clientX, e.clientY, false)
-                        }
-                        onMouseLeave={hideSkillInfoTooltip}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          toggleSkillInfoTooltipPinned(entry.userCharacterSkillId, e.clientX, e.clientY);
-                        }}
-                        className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border text-[10px] font-black leading-none transition sm:text-xs ${sk.infoButton}`}
-                        aria-label={`Información de ${entry.skill.name}`}
-                      >
-                        ?
-                      </button>
-                    </div>
-                  );
-                })}
+                {playerConsumables.map((item) => (
+                  <div key={item.inventoryId} className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full cursor-not-allowed rounded-md border border-violet-700/65 bg-violet-950/35 px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug text-violet-100/90 opacity-90 sm:px-2 sm:py-1 sm:text-xs"
+                    >
+                      {item.name}
+                    </button>
+                    <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-violet-700/65 bg-violet-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-violet-100 sm:text-[11px]`}>
+                      x{item.quantity}
+                    </span>
+                  </div>
+                ))}
               </div>
               </div>
             )}

@@ -6,6 +6,7 @@ import {
   type CombatEncounterDebugPayload,
   type CombatEncounterEnemyView,
   type CombatEncounterEnemySkill,
+  type CombatPlayerConsumableView,
   type CombatPlayerSkillView,
 } from "@/components/combat/combat-encounter-shell";
 import { mapPathByZoneCode } from "@/lib/game-zones";
@@ -49,6 +50,26 @@ type UserCharacterRow = {
   armor_total: number | null;
   mr_total: number | null;
   active_combat_sprite: string | null;
+};
+
+type CombatConsumableInventoryRow = {
+  id: number;
+  quantity: number | null;
+  item_id: string | null;
+  items:
+    | {
+        id: string;
+        name: string | null;
+        description: string | null;
+        item_type_id: string | null;
+      }
+    | Array<{
+        id: string;
+        name: string | null;
+        description: string | null;
+        item_type_id: string | null;
+      }>
+    | null;
 };
 
 function pickTemplate(raw: EncounterEnemyRow["enemy_templates"]): EnemyTemplateRow | null {
@@ -806,6 +827,43 @@ export default async function CombatEncounterPage({
     })
     .filter((entry): entry is CombatPlayerSkillView => entry !== null);
 
+  const consumableProfileIds = Array.from(
+    new Set([characterSkillsProfileId, user.id].map((v) => String(v).trim()).filter(Boolean)),
+  );
+
+  const { data: consumableRows } = await supabase
+    .from("user_inventory")
+    .select(
+      "id, quantity, item_id, items!inner(id, name, description, item_type_id)",
+    )
+    .in("profile_id", consumableProfileIds)
+    .gt("quantity", 0)
+    .eq("items.item_type_id", 3)
+    .order("id", { ascending: true });
+
+  const playerConsumables: CombatPlayerConsumableView[] = ((consumableRows ??
+    []) as CombatConsumableInventoryRow[])
+    .map((row) => {
+      const itemJoin = Array.isArray(row.items) ? (row.items[0] ?? null) : row.items;
+      if (!itemJoin) return null;
+      const itemId = typeof itemJoin.id === "string" ? itemJoin.id : row.item_id;
+      if (!itemId || itemId.trim().length === 0) return null;
+      return {
+        inventoryId: Math.trunc(Number(row.id)),
+        itemId,
+        name:
+          typeof itemJoin.name === "string" && itemJoin.name.trim().length > 0
+            ? itemJoin.name.trim()
+            : "Consumible",
+        description:
+          typeof itemJoin.description === "string" && itemJoin.description.trim().length > 0
+            ? itemJoin.description.trim()
+            : null,
+        quantity: Math.max(0, Math.trunc(num(row.quantity, 0))),
+      };
+    })
+    .filter((entry): entry is CombatPlayerConsumableView => entry !== null && entry.quantity > 0);
+
   return (
     <CombatEncounterShell
       encounterName={String(encounter.name ?? code)}
@@ -842,6 +900,7 @@ export default async function CombatEncounterPage({
       playerArmor={playerArmor}
       playerMr={playerMr}
       playerSkills={playerSkills}
+      playerConsumables={playerConsumables}
     />
   );
 }
