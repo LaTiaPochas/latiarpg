@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { HiddenForestMap } from "@/components/maps/hidden-forest-map";
+import { HIDDEN_FOREST_ZONE_CODE } from "@/lib/game-zones";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -49,7 +50,10 @@ export default async function BosqueInexploradoPage() {
             Volver al campamento
           </Link>
         </div>
-        <HiddenForestMap currentCombatStep={currentCombatStep} />
+        <HiddenForestMap
+          currentCombatStep={currentCombatStep}
+          zoneCode={HIDDEN_FOREST_ZONE_CODE}
+        />
       </main>
     </div>
   );

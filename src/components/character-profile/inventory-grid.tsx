@@ -12,6 +12,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import Image from "next/image";
+import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState, useTransition, type ReactNode } from "react";
 import { equipInventoryItem } from "@/app/(main)/character_profile/actions";
@@ -39,6 +40,21 @@ type InventorySlot = {
 type EquippedEntry = {
   slot: string;
   item: InventoryItem;
+};
+type PlayerAbilityEntry = {
+  id: string;
+  name: string;
+  description: string;
+  manaCost: number;
+  cooldownTurns: number;
+  target: string;
+  effect: Record<string, unknown>;
+};
+type AbilityStatSnapshot = {
+  str: number;
+  dex: number;
+  int: number;
+  wis: number;
 };
 
 type TooltipState = {
@@ -72,6 +88,15 @@ const INITIAL_TOOLTIP: TooltipState = {
 /** Badge de cantidad: un poco más de lectura que el plano, sin competir con el icono. */
 const INVENTORY_QUANTITY_BADGE_CLASS =
   "absolute bottom-1 right-1 min-w-[1.25rem] select-none rounded-md border border-amber-900/45 bg-gradient-to-b from-black/78 to-black/88 px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums leading-none tracking-tight text-amber-200/90 shadow-sm sm:min-w-[1.35rem] sm:px-2 sm:py-1 sm:text-xs";
+
+const abilitiesFont = Montserrat({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+});
+const itemTooltipFont = Libre_Baskerville({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+});
 
 /** Inventario UI: `id` único (DnD); `dbSlot` = `items.equip_slot` / `user_equipment.slot`. */
 const EQUIPMENT_SLOT_DEFS = [
@@ -138,6 +163,56 @@ function weaponDamageRange(
   return `${a} - ${b}`;
 }
 
+type AbilitySubtype = "physical" | "magical" | "buff" | "neutral";
+function abilitySubtype(effect: Record<string, unknown>): AbilitySubtype {
+  const raw = effect.subtype;
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "physical") return "physical";
+  if (s === "magical") return "magical";
+  if (s === "buff") return "buff";
+  return "neutral";
+}
+function abilityTargetKind(effect: Record<string, unknown>): "Single" | "AoE" | "Self" {
+  const raw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
+  if (["self", "player", "ally", "friendly"].includes(raw)) return "Self";
+  if (["area", "aoe", "all", "enemies_all", "enemies"].includes(raw)) return "AoE";
+  return "Single";
+}
+function effectNum(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+function abilityDamageRange(
+  effect: Record<string, unknown>,
+  stats: AbilityStatSnapshot,
+): { min: number; max: number } | null {
+  const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  if (typeRaw !== "damage") return null;
+  const minV = Math.max(0, effectNum(effect.min, 0));
+  const maxV = Math.max(minV, effectNum(effect.max, minV));
+  let bonus = 0;
+  const scaling = effect.scaling;
+  if (scaling && typeof scaling === "object" && !Array.isArray(scaling)) {
+    const rec = scaling as Record<string, unknown>;
+    const stat = typeof rec.stat === "string" ? rec.stat.trim().toUpperCase() : "";
+    const ratio = effectNum(rec.ratio, Number.NaN);
+    const statValue =
+      stat === "STR" ? stats.str : stat === "DEX" ? stats.dex : stat === "INT" ? stats.int : stat === "WIS" ? stats.wis : 0;
+    if (Number.isFinite(ratio)) bonus = Math.floor(Math.max(0, statValue) * ratio);
+  }
+  return { min: Math.max(0, minV + bonus), max: Math.max(0, maxV + bonus) };
+}
+function abilityCardClass(subtype: AbilitySubtype): string {
+  if (subtype === "physical") return "border-red-700/65 bg-red-950/40";
+  if (subtype === "magical") return "border-sky-800/65 bg-sky-950/40";
+  if (subtype === "buff") return "border-emerald-900/90 bg-emerald-500/30";
+  return "border-slate-700/65 bg-slate-900/35";
+}
+
 function DraggableInventorySlot({
   slot,
   onMouseEnter,
@@ -161,9 +236,8 @@ function DraggableInventorySlot({
     },
   });
 
-  const isEquipment = slot.item?.itemTypeId === 1;
   const rarityBorderStyle =
-    isEquipment && slot.item?.rarityColor
+    slot.item?.rarityColor
       ? { borderColor: slot.item.rarityColor }
       : undefined;
 
@@ -435,12 +509,16 @@ export function InventoryGrid({
   characterPaperDoll,
   slots,
   equippedItems,
+  abilities,
+  abilityStats,
 }: {
   /** Solo columna de estadísticas (izquierda). */
   profileTopRow: ReactNode;
   characterPaperDoll: CharacterPaperDollData;
   slots: InventorySlot[];
   equippedItems: EquippedEntry[];
+  abilities: PlayerAbilityEntry[];
+  abilityStats: AbilityStatSnapshot;
 }) {
   const [tooltip, setTooltip] = useState<TooltipState>(INITIAL_TOOLTIP);
   const [dragState, setDragState] = useState<DragOverState>({
@@ -471,11 +549,11 @@ export function InventoryGrid({
     return null;
   }, [tooltip.equippedSlotId, tooltip.slotNumber, slots, equippedBySlotId]);
   const activeTooltipBorderStyle =
-    activeItem?.itemTypeId === 1 && activeItem?.rarityColor
+    activeItem?.rarityColor
       ? { borderColor: activeItem.rarityColor }
       : undefined;
   const activeTooltipNameStyle =
-    activeItem?.itemTypeId === 1 && activeItem?.rarityColor
+    activeItem?.rarityColor
       ? { color: activeItem.rarityColor }
       : undefined;
 
@@ -762,7 +840,7 @@ export function InventoryGrid({
       </DndContext>
 
       <section
-        className="mt-1 w-full rounded-lg border border-amber-800/60 bg-[#2a1812]/90 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:mt-6 lg:rounded-xl lg:shadow-[0_0_30px_rgba(0,0,0,0.35)]"
+        className={`${abilitiesFont.className} mt-1 w-full rounded-lg border border-amber-800/60 bg-[#2a1812]/90 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:mt-6 lg:rounded-xl lg:shadow-[0_0_30px_rgba(0,0,0,0.35)]`}
         aria-label="Panel de habilidades"
       >
         <button
@@ -795,7 +873,40 @@ export function InventoryGrid({
             aria-labelledby="habilidades-heading"
             className="border-t border-amber-900/70 px-3 py-2.5 lg:px-6 lg:py-4"
           >
-            <p className="text-sm text-amber-100/65">Por el momento no hay habilidades</p>
+            {abilities.length === 0 ? (
+              <p className="text-sm text-amber-100/65">No tenés habilidades aprendidas.</p>
+            ) : (
+              <div className="grid gap-2 lg:grid-cols-2">
+                {abilities.map((ability) => {
+                  const subtype = abilitySubtype(ability.effect);
+                  const targetKind = abilityTargetKind(ability.effect);
+                  const dmg = abilityDamageRange(ability.effect, abilityStats);
+                  return (
+                    <article
+                      key={ability.id}
+                      className={`rounded-md border px-3 py-2 ${abilityCardClass(subtype)}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm font-semibold text-amber-100">
+                          {ability.name} ({ability.manaCost} MP) - {targetKind}
+                        </p>
+                        <span className="shrink-0 text-[11px] font-semibold text-amber-300/90">
+                          CD {ability.cooldownTurns}
+                        </span>
+                      </div>
+                      {dmg ? (
+                        <p className="mt-1 text-xs font-semibold text-amber-100/90">
+                          Daño: {dmg.min}-{dmg.max}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
+                        {ability.description}
+                      </p>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : null}
       </section>
@@ -818,7 +929,10 @@ export function InventoryGrid({
             {activeItem.itemTypeId === 1 ? (
               <>
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-base font-bold leading-tight text-amber-200" style={activeTooltipNameStyle}>
+                  <p
+                    className={`${abilitiesFont.className} text-base font-bold leading-tight text-amber-200`}
+                    style={activeTooltipNameStyle}
+                  >
                     {activeItem.name}
                   </p>
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-200">
@@ -832,7 +946,9 @@ export function InventoryGrid({
                     <span>{activeItem.sellValue}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-xs italic text-amber-100/80">{activeItem.description}</p>
+                <p className={`${itemTooltipFont.className} mt-1 text-xs italic text-amber-100/80`}>
+                  {activeItem.description}
+                </p>
                 <div className="mt-2 h-px w-full bg-gradient-to-r from-transparent via-amber-400/45 to-transparent" />
                 <p className="mt-1.5 text-[11px] uppercase tracking-wide text-amber-200/90">
                   {(activeItem.equipSlot ?? "Sin slot").toUpperCase()}
@@ -873,10 +989,12 @@ export function InventoryGrid({
               </>
             ) : (
               <>
-                <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                <p className={`${abilitiesFont.className} text-xs font-bold uppercase tracking-wider text-amber-300`}>
                   {activeItem.name}
                 </p>
-                <p className="mt-2 italic leading-relaxed text-amber-50/90">{activeItem.description}</p>
+                <p className={`${itemTooltipFont.className} mt-2 italic leading-relaxed text-amber-50/90`}>
+                  {activeItem.description}
+                </p>
               </>
             )}
             {activeItem.equipSlot && tooltip.slotNumber != null ? (

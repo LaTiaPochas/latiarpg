@@ -2,11 +2,16 @@ import { createClient } from "@/lib/supabase/server";
 import { InventoryGrid, type CharacterPaperDollData } from "@/components/character-profile/inventory-grid";
 import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/components/character-profile/inventory-types";
 import Image from "next/image";
+import { Montserrat } from "next/font/google";
 import { redirect } from "next/navigation";
 import { confirmStatAllocation } from "./actions";
 import { StatsPanel } from "./stats-panel";
 
 const inventorySlots = Array.from({ length: 24 }, (_, index) => index + 1);
+const profileFont = Montserrat({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
 
 function resolveInventoryIconPath(iconPath: string | null | undefined) {
   if (!iconPath || typeof iconPath !== "string") {
@@ -59,6 +64,16 @@ type EquipmentInstanceRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+};
+
+type CharacterAbilityView = {
+  id: string;
+  name: string;
+  description: string;
+  manaCost: number;
+  cooldownTurns: number;
+  target: string;
+  effect: Record<string, unknown>;
 };
 
 function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null): WeaponInstanceTooltip | null {
@@ -241,7 +256,7 @@ export default async function CharacterProfilePage() {
     inventoryItemIds.length > 0
       ? await supabase
           .from("items")
-          .select("id, name, description, icon_path, equip_slot, sell_value, item_type_id")
+          .select("id, name, description, icon_path, equip_slot, sell_value, item_type_id, rarity_color")
           .in("id", inventoryItemIds)
       : { data: [] };
   const inventoryItemMap = new Map((inventoryItems ?? []).map((item) => [item.id, item]));
@@ -268,6 +283,9 @@ export default async function CharacterProfilePage() {
         : null) ??
       (row.equipment_instance_id
         ? equipmentInstanceMap.get(row.equipment_instance_id)?.rarity_color ?? null
+        : null) ??
+      (typeof item.rarity_color === "string" && item.rarity_color.trim().length > 0
+        ? item.rarity_color.trim()
         : null);
 
     const weaponInstance = row.weapon_instance_id
@@ -314,6 +332,9 @@ export default async function CharacterProfilePage() {
           : null) ??
         (row.equipment_instance_id
           ? equipmentInstanceMap.get(row.equipment_instance_id)?.rarity_color ?? null
+          : null) ??
+        (typeof item.rarity_color === "string" && item.rarity_color.trim().length > 0
+          ? item.rarity_color.trim()
           : null);
       const weaponInstanceEquipped = row.weapon_instance_id
         ? mapWeaponInstanceForTooltip(weaponInstanceMap.get(row.weapon_instance_id))
@@ -431,9 +452,83 @@ export default async function CharacterProfilePage() {
     },
   ];
 
+  const { data: rawAbilityRows } = await supabase
+    .from("user_character_skills")
+    .select(
+      `
+      id,
+      profile_id,
+      player_skills (
+        id,
+        name,
+        description,
+        mana_cost,
+        cooldown_turns,
+        target,
+        effect_json,
+        is_active
+      )
+    `,
+    )
+    .eq("profile_id", user.id)
+    .order("id", { ascending: true });
+
+  const abilities: CharacterAbilityView[] = ((rawAbilityRows ?? []) as Array<Record<string, unknown>>)
+    .map((row) => {
+      const skillJoin = row.player_skills;
+      const skill = Array.isArray(skillJoin)
+        ? ((skillJoin[0] as Record<string, unknown> | undefined) ?? null)
+        : (skillJoin as Record<string, unknown> | null);
+      if (!skill || skill.is_active === false) return null;
+
+      const skillId =
+        typeof skill.id === "string" || typeof skill.id === "number" ? String(skill.id) : "";
+      if (!skillId) return null;
+
+      const name =
+        typeof skill.name === "string" && skill.name.trim().length > 0
+          ? skill.name.trim()
+          : "Habilidad";
+      const description =
+        typeof skill.description === "string" && skill.description.trim().length > 0
+          ? skill.description.trim()
+          : typeof skill.effect_json === "object" &&
+              skill.effect_json !== null &&
+              typeof (skill.effect_json as Record<string, unknown>).description === "string" &&
+              ((skill.effect_json as Record<string, unknown>).description as string).trim().length > 0
+            ? ((skill.effect_json as Record<string, unknown>).description as string).trim()
+            : "Sin descripción.";
+      const manaCost =
+        typeof skill.mana_cost === "number" ? Math.max(0, Math.trunc(skill.mana_cost)) : 0;
+      
+        const cooldownTurns =
+        typeof skill.cooldown_turns === "number"
+          ? Math.max(1, Math.trunc(skill.cooldown_turns))
+          : 1;
+      const target =
+        typeof skill.target === "string" && skill.target.trim().length > 0
+          ? skill.target.trim()
+          : "enemy_single";
+      const effect =
+        skill.effect_json && typeof skill.effect_json === "object" && !Array.isArray(skill.effect_json)
+          ? (skill.effect_json as Record<string, unknown>)
+          : {};
+
+      return {
+        id: skillId,
+        name,
+        description,
+        manaCost,
+        cooldownTurns,
+        target,
+        effect,
+      };
+    })
+    .filter((entry): entry is CharacterAbilityView => entry !== null);
+
   return (
     <div
-      className="min-h-[100dvh] bg-fixed bg-cover bg-center bg-no-repeat px-6 pb-8 pt-3 text-amber-50 lg:py-10"
+      className={`${profileFont.className} min-h-[100dvh] bg-fixed bg-cover bg-center bg-no-repeat px-6 pb-8 pt-3 text-amber-50 lg:py-10`}
       style={{
         backgroundImage:
           "linear-gradient(rgba(16, 10, 8, 0.74), rgba(16, 10, 8, 0.74)), url('/img/resources/background/bg_armory.jpg')",
@@ -530,6 +625,13 @@ export default async function CharacterProfilePage() {
           characterPaperDoll={characterPaperDoll}
           slots={inventorySlotsData}
           equippedItems={equippedItems}
+          abilities={abilities}
+          abilityStats={{
+            str: character?.str ?? 0,
+            dex: character?.dex ?? 0,
+            int: character?.int ?? 0,
+            wis: character?.wis ?? 0,
+          }}
         />
       </main>
     </div>
