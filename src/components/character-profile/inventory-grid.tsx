@@ -22,11 +22,15 @@ type InventoryItem = {
   id: number;
   name: string;
   description: string;
+  quoteText: string | null;
   iconPath: string;
   quantity: number;
   equipSlot: string | null;
   sellValue: number;
   itemTypeId: number | null;
+  usableByClassNames: string[];
+  requiredMinLevel: number;
+  requiredStats: Array<{ key: string; value: number }>;
   rarityColor: string | null;
   equippedSlot?: string | null;
   weaponInstance?: WeaponInstanceTooltip | null;
@@ -61,6 +65,7 @@ type TooltipState = {
   open: boolean;
   x: number;
   y: number;
+  flipY: boolean;
   pinned: boolean;
   /** Celda del inventario (1–24); null si el tooltip es de un slot equipado. */
   slotNumber: number | null;
@@ -80,6 +85,7 @@ const INITIAL_TOOLTIP: TooltipState = {
   open: false,
   x: 0,
   y: 0,
+  flipY: false,
   pinned: false,
   slotNumber: null,
   equippedSlotId: null,
@@ -509,6 +515,9 @@ export function InventoryGrid({
   characterPaperDoll,
   slots,
   equippedItems,
+  currentClassName,
+  currentLevel,
+  currentStats,
   abilities,
   abilityStats,
 }: {
@@ -517,6 +526,9 @@ export function InventoryGrid({
   characterPaperDoll: CharacterPaperDollData;
   slots: InventorySlot[];
   equippedItems: EquippedEntry[];
+  currentClassName: string;
+  currentLevel: number;
+  currentStats: { str: number; dex: number; int: number; wis: number };
   abilities: PlayerAbilityEntry[];
   abilityStats: AbilityStatSnapshot;
 }) {
@@ -525,7 +537,7 @@ export function InventoryGrid({
     slot: null,
     isCompatible: false,
   });
-  const [toast, setToast] = useState<ToastState>({ open: false, message: "" });
+  const [errorModal, setErrorModal] = useState<ToastState>({ open: false, message: "" });
   const [abilitiesOpen, setAbilitiesOpen] = useState(false);
   const [activeMobilePanel, setActiveMobilePanel] = useState<"stats" | "inventory" | "abilities" | null>(
     null,
@@ -557,11 +569,27 @@ export function InventoryGrid({
       ? { color: activeItem.rarityColor }
       : undefined;
 
+  function tooltipPositionFromPointer(x: number, y: number): { x: number; y: number; flipY: boolean } {
+    const TOOLTIP_W = 320;
+    // Solo decide si conviene abrir arriba; el anclaje exacto se resuelve con transform.
+    const TOOLTIP_MIN_H = 220;
+    const GAP = 12;
+    const EDGE = 8;
+
+    const nextX = Math.min(Math.max(EDGE, x + GAP), Math.max(EDGE, window.innerWidth - TOOLTIP_W));
+    const shouldFlipUp = y + GAP + TOOLTIP_MIN_H > window.innerHeight - EDGE;
+    const nextY = shouldFlipUp ? y - GAP : y + GAP;
+
+    return { x: nextX, y: nextY, flipY: shouldFlipUp };
+  }
+
   function openTooltip(x: number, y: number, slotNumber: number, pinned: boolean) {
+    const pos = tooltipPositionFromPointer(x, y);
     setTooltip({
       open: true,
-      x: Math.min(x + 12, window.innerWidth - 320),
-      y: Math.min(y + 12, window.innerHeight - 180),
+      x: pos.x,
+      y: pos.y,
+      flipY: pos.flipY,
       pinned,
       slotNumber,
       equippedSlotId: null,
@@ -569,10 +597,12 @@ export function InventoryGrid({
   }
 
   function openEquippedTooltip(x: number, y: number, equippedSlotId: string, pinned: boolean) {
+    const pos = tooltipPositionFromPointer(x, y);
     setTooltip({
       open: true,
-      x: Math.min(x + 12, window.innerWidth - 320),
-      y: Math.min(y + 12, window.innerHeight - 180),
+      x: pos.x,
+      y: pos.y,
+      flipY: pos.flipY,
       pinned,
       slotNumber: null,
       equippedSlotId,
@@ -588,6 +618,7 @@ export function InventoryGrid({
   }
 
   function togglePinnedTooltip(x: number, y: number, slotNumber: number) {
+    const pos = tooltipPositionFromPointer(x, y);
     setTooltip((previous) =>
       previous.open &&
       previous.pinned &&
@@ -596,8 +627,9 @@ export function InventoryGrid({
         ? INITIAL_TOOLTIP
         : {
             open: true,
-            x: Math.min(x + 12, window.innerWidth - 320),
-            y: Math.min(y + 12, window.innerHeight - 180),
+            x: pos.x,
+            y: pos.y,
+            flipY: pos.flipY,
             pinned: true,
             slotNumber,
             equippedSlotId: null,
@@ -606,13 +638,15 @@ export function InventoryGrid({
   }
 
   function togglePinnedEquippedTooltip(x: number, y: number, equippedSlotId: string) {
+    const pos = tooltipPositionFromPointer(x, y);
     setTooltip((previous) =>
       previous.open && previous.pinned && previous.equippedSlotId === equippedSlotId
         ? INITIAL_TOOLTIP
         : {
             open: true,
-            x: Math.min(x + 12, window.innerWidth - 320),
-            y: Math.min(y + 12, window.innerHeight - 180),
+            x: pos.x,
+            y: pos.y,
+            flipY: pos.flipY,
             pinned: true,
             slotNumber: null,
             equippedSlotId,
@@ -630,8 +664,7 @@ export function InventoryGrid({
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "No se pudo equipar el objeto.";
-        setToast({ open: true, message });
-        window.setTimeout(() => setToast({ open: false, message: "" }), 2600);
+        setErrorModal({ open: true, message });
       }
     });
   }
@@ -647,8 +680,7 @@ export function InventoryGrid({
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "No se pudo equipar el objeto.";
-        setToast({ open: true, message });
-        window.setTimeout(() => setToast({ open: false, message: "" }), 2600);
+        setErrorModal({ open: true, message });
       }
     });
   }
@@ -666,11 +698,10 @@ export function InventoryGrid({
     const targetDbSlot = def.dbSlot;
     const draggedEquipSlot = String(event.active.data.current?.equipSlot ?? "");
     if (!draggedEquipSlot || draggedEquipSlot !== targetDbSlot) {
-      setToast({
+      setErrorModal({
         open: true,
         message: "Ese objeto no se puede equipar en ese slot.",
       });
-      window.setTimeout(() => setToast({ open: false, message: "" }), 2600);
       return;
     }
     const inventoryId = Number(event.active.data.current?.inventoryId ?? "");
@@ -923,7 +954,12 @@ export function InventoryGrid({
           ) : null}
           <div
             className="fixed z-50 w-72 rounded-lg border border-amber-700/70 bg-[#120f2a]/95 p-3 text-sm text-amber-50 shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
-            style={{ left: tooltip.x, top: tooltip.y, ...activeTooltipBorderStyle }}
+            style={{
+              left: tooltip.x,
+              top: tooltip.y,
+              transform: tooltip.flipY ? "translateY(-100%)" : undefined,
+              ...activeTooltipBorderStyle,
+            }}
             onClick={(event) => event.stopPropagation()}
           >
             {activeItem.itemTypeId === 1 ? (
@@ -949,6 +985,14 @@ export function InventoryGrid({
                 <p className={`${itemTooltipFont.className} mt-1 text-xs italic text-amber-100/80`}>
                   {activeItem.description}
                 </p>
+                {activeItem.quoteText ? (
+                  <p
+                    className={`${itemTooltipFont.className} mt-1.5 text-[11px] italic leading-relaxed text-amber-200/85`}
+                    style={{ fontStyle: "italic" }}
+                  >
+                    - <em>"{activeItem.quoteText}"</em>
+                  </p>
+                ) : null}
                 <div className="mt-2 h-px w-full bg-gradient-to-r from-transparent via-amber-400/45 to-transparent" />
                 <p className="mt-1.5 text-[11px] uppercase tracking-wide text-amber-200/90">
                   {(activeItem.equipSlot ?? "Sin slot").toUpperCase()}
@@ -986,6 +1030,57 @@ export function InventoryGrid({
                     </div>
                   );
                 })()}
+                {(() => {
+                  const classReqs = activeItem.usableByClassNames;
+                  const classReqVisible = classReqs.length > 0;
+                  const classReqMet = classReqVisible
+                    ? classReqs.some(
+                        (name) => name.trim().toLowerCase() === currentClassName.trim().toLowerCase(),
+                      )
+                    : true;
+
+                  const levelReqVisible = activeItem.requiredMinLevel > 0;
+                  const levelReqMet = currentLevel >= activeItem.requiredMinLevel;
+
+                  const statReqs = activeItem.requiredStats;
+                  const hasAnyReq = classReqVisible || levelReqVisible || statReqs.length > 0;
+                  if (!hasAnyReq) return null;
+
+                  const statValueFor = (key: string): number => {
+                    const k = key.trim().toLowerCase();
+                    if (k === "str") return currentStats.str;
+                    if (k === "dex") return currentStats.dex;
+                    if (k === "int") return currentStats.int;
+                    if (k === "wis") return currentStats.wis;
+                    return 0;
+                  };
+
+                  return (
+                    <div className="mt-2">
+                      <p className={`${abilitiesFont.className} text-[11px] font-bold uppercase tracking-wide text-amber-300/95`}>
+                        REQUISITOS
+                      </p>
+                      {classReqVisible ? (
+                        <p className={`mt-1 text-xs font-semibold ${classReqMet ? "text-emerald-300" : "text-red-300"}`}>
+                          Clase: {classReqs.join(", ")}
+                        </p>
+                      ) : null}
+                      {levelReqVisible ? (
+                        <p className={`mt-1 text-xs font-semibold ${levelReqMet ? "text-emerald-300" : "text-red-300"}`}>
+                          Nivel: {activeItem.requiredMinLevel}
+                        </p>
+                      ) : null}
+                      {statReqs.map((req, idx) => {
+                        const met = statValueFor(req.key) >= req.value;
+                        return (
+                          <p key={`${req.key}-${req.value}-${idx}`} className={`mt-1 text-xs font-semibold ${met ? "text-emerald-300" : "text-red-300"}`}>
+                            {req.value} {req.key.toUpperCase()}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </>
             ) : (
               <>
@@ -995,6 +1090,14 @@ export function InventoryGrid({
                 <p className={`${itemTooltipFont.className} mt-2 italic leading-relaxed text-amber-50/90`}>
                   {activeItem.description}
                 </p>
+                {activeItem.quoteText ? (
+                  <p
+                    className={`${itemTooltipFont.className} mt-1.5 text-[11px] italic leading-relaxed text-amber-200/85`}
+                    style={{ fontStyle: "italic" }}
+                  >
+                    - <em>"{activeItem.quoteText}"</em>
+                  </p>
+                ) : null}
               </>
             )}
             {activeItem.equipSlot && tooltip.slotNumber != null ? (
@@ -1015,9 +1118,24 @@ export function InventoryGrid({
         </>
       ) : null}
 
-      {toast.open ? (
-        <div className="fixed bottom-4 right-4 z-[60] max-w-sm rounded-md border border-red-700/70 bg-[#2a120f]/95 px-3 py-2 text-sm text-red-100 shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
-          {toast.message}
+      {errorModal.open ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+          <div
+            className={`${abilitiesFont.className} relative w-full max-w-md rounded-xl border border-red-700/80 bg-[#2a120f]/95 p-4 pr-10 text-red-100 shadow-[0_14px_40px_rgba(0,0,0,0.55)]`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Error al equipar objeto"
+          >
+            <button
+              type="button"
+              onClick={() => setErrorModal({ open: false, message: "" })}
+              className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-red-500/80 bg-red-950/70 text-xs font-black text-red-100 transition hover:bg-red-800/80"
+              aria-label="Cerrar error"
+            >
+              X
+            </button>
+            <p className="text-sm font-semibold leading-relaxed">{errorModal.message}</p>
+          </div>
         </div>
       ) : null}
     </>
