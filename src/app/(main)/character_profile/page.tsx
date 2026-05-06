@@ -75,6 +75,22 @@ type CharacterAbilityView = {
   target: string;
   effect: Record<string, unknown>;
 };
+type ItemClassRequirementRow = {
+  item_id: string;
+  min_level: number | null;
+  required_stat_key_1: string | null;
+  required_stat_value_1: number | null;
+  required_stat_key_2: string | null;
+  required_stat_value_2: number | null;
+  classes:
+    | {
+        name: string | null;
+      }
+    | Array<{
+        name: string | null;
+      }>
+    | null;
+};
 
 function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null): WeaponInstanceTooltip | null {
   if (!row) return null;
@@ -256,10 +272,50 @@ export default async function CharacterProfilePage() {
     inventoryItemIds.length > 0
       ? await supabase
           .from("items")
-          .select("id, name, description, icon_path, equip_slot, sell_value, item_type_id, rarity_color")
+          .select("id, name, description, quote_text, icon_path, equip_slot, sell_value, item_type_id, rarity_color")
           .in("id", inventoryItemIds)
       : { data: [] };
   const inventoryItemMap = new Map((inventoryItems ?? []).map((item) => [item.id, item]));
+  const { data: itemClassRequirements } =
+    inventoryItemIds.length > 0
+      ? await supabase
+          .from("item_class_requirements")
+          .select("item_id, min_level, required_stat_key_1, required_stat_value_1, required_stat_key_2, required_stat_value_2, classes(name)")
+          .in("item_id", inventoryItemIds)
+      : { data: [] };
+  const itemAllowedClassNamesMap = new Map<string, string[]>();
+  const itemRequiredMinLevelMap = new Map<string, number>();
+  const itemRequiredStatsMap = new Map<string, Array<{ key: string; value: number }>>();
+  for (const row of (itemClassRequirements ?? []) as ItemClassRequirementRow[]) {
+    const classJoin = Array.isArray(row.classes) ? row.classes[0] ?? null : row.classes;
+    const className =
+      classJoin && typeof classJoin.name === "string" && classJoin.name.trim().length > 0
+        ? classJoin.name.trim()
+        : null;
+    if (!className) continue;
+    const list = itemAllowedClassNamesMap.get(row.item_id) ?? [];
+    if (!list.includes(className)) list.push(className);
+    itemAllowedClassNamesMap.set(row.item_id, list);
+
+    const minLevel = Math.max(0, Math.trunc(Number(row.min_level ?? 0)));
+    if (minLevel > 0) {
+      const prev = itemRequiredMinLevelMap.get(row.item_id) ?? 0;
+      itemRequiredMinLevelMap.set(row.item_id, Math.max(prev, minLevel));
+    }
+
+    const addStatReq = (rawKey: string | null, rawVal: number | null) => {
+      const statKey = typeof rawKey === "string" ? rawKey.trim().toLowerCase() : "";
+      const statVal = Math.max(0, Math.trunc(Number(rawVal ?? 0)));
+      if (!statKey || statVal <= 0) return;
+      const stats = itemRequiredStatsMap.get(row.item_id) ?? [];
+      if (!stats.some((s) => s.key === statKey && s.value === statVal)) {
+        stats.push({ key: statKey, value: statVal });
+      }
+      itemRequiredStatsMap.set(row.item_id, stats);
+    };
+    addStatReq(row.required_stat_key_1, row.required_stat_value_1);
+    addStatReq(row.required_stat_key_2, row.required_stat_value_2);
+  }
   const inventoryRowById = new Map((inventoryRows ?? []).map((row) => [row.id, row]));
   const inventorySlotsData = inventorySlots.map((slotNumber, index) => {
     const row = visibleInventoryRows[index];
@@ -302,11 +358,18 @@ export default async function CharacterProfilePage() {
         id: row.id,
         name: item.name,
         description: item.description ?? "Sin descripción.",
+        quoteText:
+          typeof item.quote_text === "string" && item.quote_text.trim().length > 0
+            ? item.quote_text.trim()
+            : null,
         iconPath: resolveInventoryIconPath(item.icon_path),
         quantity: row.quantity,
         equipSlot: item.equip_slot,
         sellValue: item.sell_value ?? 0,
         itemTypeId: item.item_type_id ?? null,
+        usableByClassNames: itemAllowedClassNamesMap.get(item.id) ?? [],
+        requiredMinLevel: itemRequiredMinLevelMap.get(item.id) ?? 0,
+        requiredStats: itemRequiredStatsMap.get(item.id) ?? [],
         rarityColor,
         equippedSlot: null,
         weaponInstance: weaponInstance ?? undefined,
@@ -350,11 +413,18 @@ export default async function CharacterProfilePage() {
           id: row.id,
           name: item.name,
           description: item.description ?? "Sin descripción.",
+          quoteText:
+            typeof item.quote_text === "string" && item.quote_text.trim().length > 0
+              ? item.quote_text.trim()
+              : null,
           iconPath: resolveInventoryIconPath(item.icon_path),
           quantity: row.quantity,
           equipSlot: item.equip_slot,
           sellValue: item.sell_value ?? 0,
           itemTypeId: item.item_type_id ?? null,
+          usableByClassNames: itemAllowedClassNamesMap.get(item.id) ?? [],
+          requiredMinLevel: itemRequiredMinLevelMap.get(item.id) ?? 0,
+          requiredStats: itemRequiredStatsMap.get(item.id) ?? [],
           rarityColor,
           equippedSlot: equippedRow.slot,
           weaponInstance: weaponInstanceEquipped ?? undefined,
@@ -625,6 +695,14 @@ export default async function CharacterProfilePage() {
           characterPaperDoll={characterPaperDoll}
           slots={inventorySlotsData}
           equippedItems={equippedItems}
+          currentClassName={className}
+          currentLevel={level}
+          currentStats={{
+            str: character?.str ?? 0,
+            dex: character?.dex ?? 0,
+            int: character?.int ?? 0,
+            wis: character?.wis ?? 0,
+          }}
           abilities={abilities}
           abilityStats={{
             str: character?.str ?? 0,

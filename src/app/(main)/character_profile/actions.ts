@@ -137,6 +137,135 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
   if (!equipSlot) {
     throw new Error("Este objeto no se puede equipar.");
   }
+
+  const { data: classReqRows, error: classReqError } = await supabase
+    .from("item_class_requirements")
+    .select("min_level, required_stat_key_1, required_stat_value_1, required_stat_key_2, required_stat_value_2, classes(name)")
+    .eq("item_id", itemId);
+  if (classReqError) {
+    throw new Error("No se pudieron validar las restricciones de clase del objeto.");
+  }
+  const requiredClassNames = (classReqRows ?? [])
+    .map((row) => {
+      const join = (row as { classes?: { name?: string } | Array<{ name?: string }> }).classes;
+      const cls = Array.isArray(join) ? join[0] : join;
+      const name = typeof cls?.name === "string" ? cls.name.trim() : "";
+      return name.length > 0 ? name : null;
+    })
+    .filter((name): name is string => name !== null);
+
+  const loadCharacterForRequirements = async () => {
+    const selectWithMods = "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod";
+    const selectFallback = "class_name, level, str, dex, int, wis";
+
+    const byProfileWithMods = await supabase
+      .from("user_character")
+      .select(selectWithMods)
+      .eq("profile_id", user.id)
+      .maybeSingle();
+    const byProfile =
+      byProfileWithMods.error?.code === "42703"
+        ? await supabase
+            .from("user_character")
+            .select(selectFallback)
+            .eq("profile_id", user.id)
+            .maybeSingle()
+        : byProfileWithMods;
+
+    if (byProfile.data) return byProfile.data as Record<string, unknown>;
+
+    const byUserWithMods = await supabase
+      .from("user_character")
+      .select(selectWithMods)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const byUser =
+      byUserWithMods.error?.code === "42703"
+        ? await supabase
+            .from("user_character")
+            .select(selectFallback)
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : byUserWithMods;
+
+    return (byUser.data ?? null) as Record<string, unknown> | null;
+  };
+
+  const userCharacterForReq = await loadCharacterForRequirements();
+
+  if (requiredClassNames.length > 0) {
+    const rawClassName = userCharacterForReq?.class_name;
+    let playerClassName =
+      typeof rawClassName === "string" && rawClassName.trim().length > 0
+        ? rawClassName.trim()
+        : "";
+    if (playerClassName) {
+      const { data: classById } = await supabase
+        .from("classes")
+        .select("name")
+        .eq("id", playerClassName)
+        .maybeSingle();
+      if (classById?.name) playerClassName = classById.name.trim();
+    }
+
+    const isAllowed = requiredClassNames.some(
+      (name) => name.toLowerCase() === playerClassName.toLowerCase(),
+    );
+    if (!isAllowed) {
+      throw new Error(`Tu clase no puede equipar este objeto. Usable por: ${requiredClassNames.join(", ")}.`);
+    }
+  }
+
+  const playerLevel = Math.max(0, Math.trunc(Number(userCharacterForReq?.level ?? 0)));
+  const playerStats = {
+    str: Math.max(
+      0,
+      Math.trunc(Number(userCharacterForReq?.str ?? 0)) +
+        Math.trunc(Number(userCharacterForReq?.str_mod ?? 0)),
+    ),
+    dex: Math.max(
+      0,
+      Math.trunc(Number(userCharacterForReq?.dex ?? 0)) +
+        Math.trunc(Number(userCharacterForReq?.dex_mod ?? 0)),
+    ),
+    int: Math.max(
+      0,
+      Math.trunc(Number(userCharacterForReq?.int ?? 0)) +
+        Math.trunc(Number(userCharacterForReq?.int_mod ?? 0)),
+    ),
+    wis: Math.max(
+      0,
+      Math.trunc(Number(userCharacterForReq?.wis ?? 0)) +
+        Math.trunc(Number(userCharacterForReq?.wis_mod ?? 0)),
+    ),
+  };
+  const statValueFor = (key: string): number => {
+    const k = key.trim().toLowerCase();
+    if (k === "str") return playerStats.str;
+    if (k === "dex") return playerStats.dex;
+    if (k === "int") return playerStats.int;
+    if (k === "wis") return playerStats.wis;
+    return 0;
+  };
+  for (const row of (classReqRows ?? []) as Array<Record<string, unknown>>) {
+    const minLevel = Math.max(0, Math.trunc(Number(row.min_level ?? 0)));
+    if (minLevel > 0 && playerLevel < minLevel) {
+      throw new Error(`No cumplís el requisito de nivel (${minLevel}).`);
+    }
+    const pairs: Array<{ key: unknown; value: unknown }> = [
+      { key: row.required_stat_key_1, value: row.required_stat_value_1 },
+      { key: row.required_stat_key_2, value: row.required_stat_value_2 },
+    ];
+    for (const pair of pairs) {
+      const reqKey = typeof pair.key === "string" ? pair.key.trim().toLowerCase() : "";
+      const reqVal = Math.max(0, Math.trunc(Number(pair.value ?? 0)));
+      if (!reqKey || reqVal <= 0) continue;
+      if (statValueFor(reqKey) < reqVal) {
+        throw new Error(`No cumplís el requisito de stats: ${reqVal} ${reqKey.toUpperCase()}.`);
+      }
+    }
+  }
+
   if (targetSlot && targetSlot !== equipSlot) {
     throw new Error("No podés equipar este objeto en ese slot.");
   }

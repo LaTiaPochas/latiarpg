@@ -5,6 +5,7 @@ import { Libre_Baskerville } from "next/font/google";
 import { Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 import { markIntroCompleted } from "./actions";
 
@@ -74,9 +75,23 @@ export default function BatallaTutorialPage() {
     open: boolean;
     x: number;
     y: number;
+    flipY: boolean;
     pinned: boolean;
     lootType: "wood" | "woodenStick";
-  }>({ open: false, x: 0, y: 0, pinned: false, lootType: "wood" });
+  }>({ open: false, x: 0, y: 0, flipY: false, pinned: false, lootType: "wood" });
+  const [playerClassName, setPlayerClassName] = useState<string>("");
+  const [woodenStickAllowedClasses, setWoodenStickAllowedClasses] = useState<string[]>([]);
+  const [playerLevel, setPlayerLevel] = useState<number>(0);
+  const [playerStats, setPlayerStats] = useState<{ str: number; dex: number; int: number; wis: number }>({
+    str: 0,
+    dex: 0,
+    int: 0,
+    wis: 0,
+  });
+  const [woodenStickMinLevel, setWoodenStickMinLevel] = useState<number>(0);
+  const [woodenStickRequiredStats, setWoodenStickRequiredStats] = useState<
+    Array<{ key: string; value: number }>
+  >([]);
   const [turnOwner, setTurnOwner] = useState<"player" | "enemy">("enemy");
   const [turn, setTurn] = useState(1);
   const [playerHp, setPlayerHp] = useState(MAX_PLAYER_HP);
@@ -210,16 +225,29 @@ export default function BatallaTutorialPage() {
     );
   };
 
+  const lootTooltipPositionFromPointer = (x: number, y: number) => {
+    const TOOLTIP_W = 360;
+    const TOOLTIP_MIN_H = 220;
+    const GAP = 12;
+    const EDGE = 8;
+    const nextX = Math.min(Math.max(EDGE, x + GAP), Math.max(EDGE, window.innerWidth - TOOLTIP_W));
+    const flipY = y + GAP + TOOLTIP_MIN_H > window.innerHeight - EDGE;
+    const nextY = flipY ? y - GAP : y + GAP;
+    return { x: nextX, y: nextY, flipY };
+  };
+
   const openLootInfoTooltip = (
     x: number,
     y: number,
     pinned: boolean,
     lootType: "wood" | "woodenStick",
   ) => {
+    const pos = lootTooltipPositionFromPointer(x, y);
     setLootInfoTooltip({
       open: true,
-      x: Math.min(x + 12, window.innerWidth - 360),
-      y: Math.min(y + 12, window.innerHeight - 170),
+      x: pos.x,
+      y: pos.y,
+      flipY: pos.flipY,
       pinned,
       lootType,
     });
@@ -229,12 +257,12 @@ export default function BatallaTutorialPage() {
     setLootInfoTooltip((prev) =>
       prev.pinned
         ? prev
-        : { open: false, x: 0, y: 0, pinned: false, lootType: "wood" },
+        : { open: false, x: 0, y: 0, flipY: false, pinned: false, lootType: "wood" },
     );
   };
 
   const closeLootInfoTooltip = () => {
-    setLootInfoTooltip({ open: false, x: 0, y: 0, pinned: false, lootType: "wood" });
+    setLootInfoTooltip({ open: false, x: 0, y: 0, flipY: false, pinned: false, lootType: "wood" });
   };
 
   const toggleLootInfoTooltipPinned = (
@@ -242,13 +270,15 @@ export default function BatallaTutorialPage() {
     y: number,
     lootType: "wood" | "woodenStick",
   ) => {
+    const pos = lootTooltipPositionFromPointer(x, y);
     setLootInfoTooltip((prev) =>
       prev.open && prev.pinned
-        ? { open: false, x: 0, y: 0, pinned: false, lootType: "wood" }
+        ? { open: false, x: 0, y: 0, flipY: false, pinned: false, lootType: "wood" }
         : {
             open: true,
-            x: Math.min(x + 12, window.innerWidth - 360),
-            y: Math.min(y + 12, window.innerHeight - 170),
+            x: pos.x,
+            y: pos.y,
+            flipY: pos.flipY,
             pinned: true,
             lootType,
           },
@@ -340,6 +370,7 @@ export default function BatallaTutorialPage() {
         open: false,
         x: 0,
         y: 0,
+        flipY: false,
         pinned: false,
         lootType: "wood",
       });
@@ -360,6 +391,106 @@ export default function BatallaTutorialPage() {
       combatResultTimeoutRef.current = null;
     }, HP_BAR_ANIMATION_MS);
   }, [isCombatFinished]);
+
+  useEffect(() => {
+    let alive = true;
+    const loadLootRestrictions = async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || !alive) return;
+
+        const { data: ucByProfile } = await supabase
+          .from("user_character")
+          .select("class_name, level, str, dex, int, wis")
+          .eq("profile_id", user.id)
+          .maybeSingle();
+        const { data: ucByUser } = ucByProfile
+          ? { data: null }
+          : await supabase
+              .from("user_character")
+              .select("class_name, level, str, dex, int, wis")
+              .eq("user_id", user.id)
+              .maybeSingle();
+        const classRaw = (ucByProfile ?? ucByUser)?.class_name;
+        let classNameResolved =
+          typeof classRaw === "string" && classRaw.trim().length > 0 ? classRaw.trim() : "";
+        if (classNameResolved) {
+          const { data: classById } = await supabase
+            .from("classes")
+            .select("name")
+            .eq("id", classNameResolved)
+            .maybeSingle();
+          if (classById?.name) classNameResolved = classById.name;
+        }
+        if (alive) setPlayerClassName(classNameResolved);
+        const uc = (ucByProfile ?? ucByUser) as
+          | { level?: number | null; str?: number | null; dex?: number | null; int?: number | null; wis?: number | null }
+          | null;
+        if (alive) {
+          setPlayerLevel(Math.max(0, Math.trunc(Number(uc?.level ?? 0))));
+          setPlayerStats({
+            str: Math.max(0, Math.trunc(Number(uc?.str ?? 0))),
+            dex: Math.max(0, Math.trunc(Number(uc?.dex ?? 0))),
+            int: Math.max(0, Math.trunc(Number(uc?.int ?? 0))),
+            wis: Math.max(0, Math.trunc(Number(uc?.wis ?? 0))),
+          });
+        }
+
+        const { data: woodenStickInstance } = await supabase
+          .from("weapon_instance")
+          .select("item_id")
+          .eq("id", 1)
+          .maybeSingle();
+        const itemId =
+          woodenStickInstance && typeof woodenStickInstance.item_id === "string"
+            ? woodenStickInstance.item_id
+            : "";
+        if (!itemId || !alive) return;
+
+        const { data: reqRows } = await supabase
+          .from("item_class_requirements")
+          .select("classes(name), min_level, required_stat_key_1, required_stat_value_1, required_stat_key_2, required_stat_value_2")
+          .eq("item_id", itemId);
+        const names: string[] = [];
+        let minLevel = 0;
+        const statReqs: Array<{ key: string; value: number }> = [];
+        for (const row of (reqRows ?? []) as Array<Record<string, unknown>>) {
+          const join = row.classes;
+          const cls =
+            Array.isArray(join)
+              ? (join[0] as { name?: string } | undefined)
+              : (join as { name?: string } | null);
+          const n = typeof cls?.name === "string" ? cls.name.trim() : "";
+          if (n && !names.includes(n)) names.push(n);
+          const lvl = Math.max(0, Math.trunc(Number(row.min_level ?? 0)));
+          if (lvl > minLevel) minLevel = lvl;
+          const addStatReq = (rawKey: unknown, rawVal: unknown) => {
+            const keyRaw = typeof rawKey === "string" ? rawKey.trim().toLowerCase() : "";
+            const val = Math.max(0, Math.trunc(Number(rawVal ?? 0)));
+            if (keyRaw && val > 0 && !statReqs.some((s) => s.key === keyRaw && s.value === val)) {
+              statReqs.push({ key: keyRaw, value: val });
+            }
+          };
+          addStatReq(row.required_stat_key_1, row.required_stat_value_1);
+          addStatReq(row.required_stat_key_2, row.required_stat_value_2);
+        }
+        if (alive) {
+          setWoodenStickAllowedClasses(names);
+          setWoodenStickMinLevel(minLevel);
+          setWoodenStickRequiredStats(statReqs);
+        }
+      } catch {
+        // no-op
+      }
+    };
+    void loadLootRestrictions();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1082,7 +1213,11 @@ export default function BatallaTutorialPage() {
                   {lootInfoTooltip.open && (
                     <div
                       className={`${helpCardFont.className} fixed z-[80] max-w-sm rounded-lg border border-amber-700/70 bg-[#1c120e]/95 px-3 py-2 text-sm leading-relaxed text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
-                      style={{ left: lootInfoTooltip.x, top: lootInfoTooltip.y }}
+                      style={{
+                        left: lootInfoTooltip.x,
+                        top: lootInfoTooltip.y,
+                        transform: lootInfoTooltip.flipY ? "translateY(-100%)" : undefined,
+                      }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       {lootInfoTooltip.lootType === "wood" ? (
@@ -1096,6 +1231,60 @@ export default function BatallaTutorialPage() {
                           <span className="font-bold">Palo de madera:</span> Un
                           palo de madera que puede usarse para defenderse de los
                           enemigos.
+                          {(woodenStickAllowedClasses.length > 0 ||
+                            woodenStickMinLevel > 0 ||
+                            woodenStickRequiredStats.length > 0) ? (
+                            <span className="mt-1 block">
+                              <span className="block text-[11px] font-bold uppercase tracking-wide text-amber-300/95">
+                                REQUISITOS
+                              </span>
+                              {woodenStickAllowedClasses.length > 0 ? (
+                                <span
+                                  className={`mt-1 block font-semibold ${
+                                    woodenStickAllowedClasses.some(
+                                      (name) =>
+                                        name.trim().toLowerCase() ===
+                                        playerClassName.trim().toLowerCase(),
+                                    )
+                                      ? "text-emerald-300"
+                                      : "text-red-300"
+                                  }`}
+                                >
+                                  Clase: {woodenStickAllowedClasses.join(", ")}
+                                </span>
+                              ) : null}
+                              {woodenStickMinLevel > 0 ? (
+                                <span
+                                  className={`mt-1 block font-semibold ${
+                                    playerLevel >= woodenStickMinLevel ? "text-emerald-300" : "text-red-300"
+                                  }`}
+                                >
+                                  Nivel: {woodenStickMinLevel}
+                                </span>
+                              ) : null}
+                              {woodenStickRequiredStats.map((req, idx) => {
+                                const current =
+                                  req.key === "str"
+                                    ? playerStats.str
+                                    : req.key === "dex"
+                                      ? playerStats.dex
+                                      : req.key === "int"
+                                        ? playerStats.int
+                                        : req.key === "wis"
+                                          ? playerStats.wis
+                                          : 0;
+                                const met = current >= req.value;
+                                return (
+                                  <span
+                                    key={`${req.key}-${req.value}-${idx}`}
+                                    className={`mt-1 block font-semibold ${met ? "text-emerald-300" : "text-red-300"}`}
+                                  >
+                                    {req.value} {req.key.toUpperCase()}
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          ) : null}
                         </>
                       )}
                     </div>
