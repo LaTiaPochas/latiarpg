@@ -28,7 +28,7 @@ export default async function BosqueInexploradoPage({ searchParams }: BosqueInex
     .from("user_combat_progress")
     .select("combat_step")
     .eq("user_id", user.id)
-    .eq("zone_id", "hidden_forest_1")
+    .eq("zone_id", HIDDEN_FOREST_ZONE_CODE)
     .order("combat_step", { ascending: false })
     .limit(1)
     .maybeSingle();

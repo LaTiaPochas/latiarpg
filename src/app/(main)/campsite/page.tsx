@@ -4,6 +4,7 @@ import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
 import { createClient } from "@/lib/supabase/server";
 import { Libre_Baskerville } from "next/font/google";
 import Image from "next/image";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 const dialogueFont = Libre_Baskerville({
@@ -263,6 +264,23 @@ export default async function CampsitePage() {
       })
       .eq("id", 1);
 
+    const { data: currentStats } = await supabaseClient
+      .from("user_stats")
+      .select("wood_given")
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    const currentWoodGiven =
+      typeof currentStats?.wood_given === "number" && Number.isFinite(currentStats.wood_given)
+        ? Math.max(0, Math.trunc(currentStats.wood_given))
+        : 0;
+    await supabaseClient.from("user_stats").upsert(
+      {
+        user_id: currentUser.id,
+        wood_given: currentWoodGiven + amountToApply,
+      },
+      { onConflict: "user_id" },
+    );
+
     const { data: currentProfile } = await supabaseClient
       .from("user_profiles")
       .select("miembro, color")
@@ -322,8 +340,9 @@ export default async function CampsitePage() {
                   el primer campamento y protegerse de los peligros de este
                   mundo.
                 </p>
-                
-                <p className="mt-12 text-center text-sm font-semibold leading-relaxed text-slate-900 lg:text-base">
+
+                <div className="mt-12 rounded-lg border border-[#9f8352]/80 bg-[#d8c7a2]/92">  
+                <p className="mt-2 text-center text-sm font-semibold leading-relaxed text-slate-900 lg:text-base">
                   {milestoneTitle}
                 </p>
                 <div className="mx-auto mt-3 h-4 w-3/5 max-w-2xl overflow-hidden rounded-full border border-[#9b7a46]/80 bg-[#e8d8b4]">
@@ -332,11 +351,11 @@ export default async function CampsitePage() {
                     style={{ width: `${milestoneProgressPercent}%` }}
                   />
                 </div>
-                <p className="mt-2 text-center text-xs uppercase tracking-wide text-slate-700">
+                <p className="mt-2 mb-2 text-center text-xs uppercase tracking-wide text-slate-700">
                   {milestoneCurrentValue} / {milestoneTargetValue} (
                   {milestoneProgressPercent}%)
                 </p>
-                
+                </div> 
                 <div className="mt-10 flex items-center justify-center gap-2 text-sm font-semibold leading-relaxed text-slate-700 lg:text-base">
                   <p>Tenés disponible: {userWoodQuantity}</p>
                   <Image
@@ -351,6 +370,17 @@ export default async function CampsitePage() {
                   maxAmount={userWoodQuantity}
                   onContribute={contributeWood}
                 />
+                <div className="mt-15 flex justify-center">
+                  <Link
+                    href="/"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-3 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] lg:text-xs"
+                  >
+                    <span className="text-base leading-none" aria-hidden>
+                      ←
+                    </span>
+                    Volver al Mapa
+                  </Link>
+                </div>
 
               </>
             )}

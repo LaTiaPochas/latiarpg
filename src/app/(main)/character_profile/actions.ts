@@ -306,3 +306,43 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
 
   revalidatePath("/character_profile");
 }
+
+export async function discardInventoryItem(inventoryId: number) {
+  const safeInventoryId = Math.max(0, Math.trunc(Number(inventoryId)));
+  if (safeInventoryId <= 0) {
+    throw new Error("Ítem inválido.");
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Usuario no autenticado.");
+  }
+
+  const { data: inventoryRow, error: readError } = await supabase
+    .from("user_inventory")
+    .select("id, profile_id")
+    .eq("id", safeInventoryId)
+    .maybeSingle();
+
+  if (readError || !inventoryRow) {
+    throw new Error("No se encontró el ítem en inventario.");
+  }
+  if (inventoryRow.profile_id !== user.id) {
+    throw new Error("No podés descartar un ítem que no te pertenece.");
+  }
+
+  const { error: deleteError } = await supabase
+    .from("user_inventory")
+    .delete()
+    .eq("id", safeInventoryId)
+    .eq("profile_id", user.id);
+  if (deleteError) {
+    throw new Error("No se pudo descartar el ítem.");
+  }
+
+  revalidatePath("/character_profile");
+}

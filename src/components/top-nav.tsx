@@ -52,7 +52,7 @@ export async function TopNav() {
               height={18}
               className="h-[18px] w-[18px]"
             />
-            <span className="text-sm font-semibold">Perfíl y Stats</span>
+            <span className="text-sm font-semibold">Perfíl</span>
           </Link>
 
           <div className="flex items-center gap-2 rounded-md border border-amber-800/70 bg-[#2a1812]/85 px-2 py-1 text-amber-100">

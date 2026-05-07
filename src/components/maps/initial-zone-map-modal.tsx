@@ -36,6 +36,13 @@ const HOTSPOTS: Hotspot[] = [
     yPercent: 26,
     description: "Una forma fácil de recolectar madera sin exponerse a grandes peligros.",
   },
+  {
+    id: "relaxing-waters",
+    label: "Aguas relajantes",
+    xPercent: 40,
+    yPercent: 87,
+    description: "Podés tomar un descanso en estas aguas.",
+  }
 ];
 
 type InitialZoneMapModalProps = {
@@ -137,6 +144,7 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
             src={MAP_SRC}
             alt="Mapa zona inicial campamento"
             fill
+            sizes="(max-width: 1024px) 100vw, 1024px"
             className="object-contain select-none"
             onLoad={(event) => {
               const imageElement = event.currentTarget;
@@ -218,6 +226,10 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
               }
               if (selectedHotspot.id === "wood-forest") {
                 router.push("/bosque-inexplorado");
+                return;
+              }
+              if (selectedHotspot.id === "relaxing-waters") {
+                router.push("/relaxing-waters");
                 return;
               }
               router.push(`/?destino=${encodeURIComponent(selectedHotspot.id)}`);

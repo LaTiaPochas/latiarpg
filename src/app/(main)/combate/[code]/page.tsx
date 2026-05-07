@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import {
   CombatEncounterShell,
+  type CombatEncounterStatsPayload,
   type CombatConsumeResult,
   type CombatEncounterDebugPayload,
   type CombatEncounterEnemyView,
@@ -10,6 +11,7 @@ import {
   type CombatVictoryLootItem,
   type CombatPlayerConsumableView,
   type CombatPlayerSkillView,
+  type CombatDefeatLostItem,
 } from "@/components/combat/combat-encounter-shell";
 import { mapPathByZoneCode } from "@/lib/game-zones";
 import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
@@ -38,6 +40,10 @@ type UserCharacterRow = {
   /** Puede ser `user_profiles.id` u otro UUID; no siempre es igual a `auth.uid()`. */
   profile_id?: string | null;
   character_name: string | null;
+  level: number | null;
+  class_name: string | null;
+  experience_to_next: number | null;
+  experience_current: number | null;
   hp_total: number | null;
   hp_actual: number | null;
   mana_total: number | null;
@@ -72,6 +78,25 @@ type CombatConsumableInventoryRow = {
         description: string | null;
         item_type_id: string | null;
         json_consumable_effect: unknown;
+      }>
+    | null;
+};
+type DefeatPenaltyInventoryRow = {
+  id: number;
+  profile_id: string | null;
+  quantity: number | null;
+  weapon_instance_id: number | null;
+  equipment_instance_id: number | null;
+  items:
+    | {
+        name: string | null;
+        icon_path: string | null;
+        is_stackable: boolean | null;
+      }
+    | Array<{
+        name: string | null;
+        icon_path: string | null;
+        is_stackable: boolean | null;
       }>
     | null;
 };
@@ -697,7 +722,7 @@ export default async function CombatEncounterPage({
 
   /** Sin `id`: en tu esquema `user_character` puede no tener PK `id` y PostgREST devuelve 42703 si se pide. */
   const userCharacterSelect =
-    "profile_id, character_name, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
+    "profile_id, character_name, level, class_name, experience_to_next, experience_current, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
   const {
     character: userCharacter,
     steps: combatCharacterLoadSteps,
@@ -753,6 +778,29 @@ export default async function CombatEncounterPage({
   if (encounterError || !encounter) {
     notFound();
   }
+  const encounterZoneRefId =
+    typeof encounter.zone_id === "string" && encounter.zone_id.trim().length > 0
+      ? encounter.zone_id.trim()
+      : null;
+  let combatProgressZoneCode = zoneCode || null;
+  if (!combatProgressZoneCode && encounterZoneRefId) {
+    const { data: encounterZoneRow } = await supabase
+      .from("zones")
+      .select("code")
+      .eq("id", encounterZoneRefId)
+      .maybeSingle();
+    if (
+      encounterZoneRow &&
+      typeof encounterZoneRow.code === "string" &&
+      encounterZoneRow.code.trim().length > 0
+    ) {
+      combatProgressZoneCode = encounterZoneRow.code.trim();
+    }
+  }
+  const encounterCombatStepForProgress =
+    typeof encounter.combat_step === "number" && Number.isFinite(encounter.combat_step)
+      ? Math.max(0, Math.trunc(encounter.combat_step))
+      : 0;
 
   const baseEnemySelect = `
       spawn_index,
@@ -1461,6 +1509,63 @@ export default async function CombatEncounterPage({
   const playerStatWis = Math.max(0, num(userCharacter.wis, 0));
   const playerArmor = Math.max(0, num(userCharacter.armor_total, 0));
   const playerMr = Math.max(0, num(userCharacter.mr_total, 0));
+  const playerExperienceToNext = Math.max(0, Math.trunc(num(userCharacter.experience_to_next, 0)));
+  const playerLevel = Math.max(1, Math.trunc(num(userCharacter.level, 1)));
+  const rawPlayerClassName =
+    typeof userCharacter.class_name === "string" && userCharacter.class_name.trim().length > 0
+      ? userCharacter.class_name.trim()
+      : "";
+  let playerClassId: string | null = null;
+  let playerClassName: string | null = null;
+  if (rawPlayerClassName) {
+    const { data: classById } = await supabase
+      .from("classes")
+      .select("id, name")
+      .eq("id", rawPlayerClassName)
+      .maybeSingle<{ id: string; name: string | null }>();
+    if (classById) {
+      playerClassId = classById.id;
+      playerClassName =
+        typeof classById.name === "string" && classById.name.trim().length > 0
+          ? classById.name.trim()
+          : null;
+    } else {
+      const { data: classByName } = await supabase
+        .from("classes")
+        .select("id, name")
+        .eq("name", rawPlayerClassName)
+        .maybeSingle<{ id: string; name: string | null }>();
+      if (classByName) {
+        playerClassId = classByName.id;
+        playerClassName =
+          typeof classByName.name === "string" && classByName.name.trim().length > 0
+            ? classByName.name.trim()
+            : null;
+      }
+    }
+  }
+  const playerClassKeys = new Set(
+    [rawPlayerClassName, playerClassId ?? "", playerClassName ?? ""]
+      .map((v) => v.trim().toLowerCase())
+      .filter((v) => v.length > 0),
+  );
+  const victoryXpGain = enemies.reduce(
+    (sum, enemy) => sum + Math.max(0, Math.trunc(num(enemy.xpReward, 0))),
+    0,
+  );
+  const playerExperienceCurrent = Math.max(0, Math.trunc(num(userCharacter.experience_current, 0)));
+  const projectedExperienceAfterVictory = playerExperienceCurrent + Math.max(0, Math.trunc(victoryXpGain));
+  const { data: projectedLevelProgress } = await supabase
+    .from("level_progression")
+    .select("level")
+    .lte("xp_required_total", projectedExperienceAfterVictory)
+    .order("level", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ level: number }>();
+  const projectedLevelAfterVictory = Math.max(
+    playerLevel,
+    Math.max(1, Math.trunc(Number(projectedLevelProgress?.level ?? playerLevel))),
+  );
 
   /**
    * `user_character_skills.profile_id` referencia el personaje igual que `user_character.profile_id`.
@@ -1532,6 +1637,7 @@ export default async function CombatEncounterPage({
       .from("user_character_skills")
       .select(selectExpr)
       .eq("profile_id", characterSkillsProfileId)
+      .lte("player_skills.unlock_level", playerLevel)
       .order("id", { ascending: true });
 
     if (!error) {
@@ -1551,7 +1657,20 @@ export default async function CombatEncounterPage({
   }
 
   const skillMapSkips: Array<{ ucsId: string; reason: string }> = [];
-  const playerSkills: CombatPlayerSkillView[] = (characterSkillRowsRaw ?? [])
+  const classAndLevelFilteredRows = (characterSkillRowsRaw ?? []).filter((row) => {
+    if (!(typeof row === "object" && row !== null)) return false;
+    const rec = row as Record<string, unknown>;
+    const ps = pickPlayerSkillJoin(rec.player_skills);
+    if (!ps) return false;
+    const unlockLevel = Math.max(0, Math.trunc(num(ps.unlock_level, 0)));
+    if (unlockLevel > playerLevel) return false;
+    if (playerClassKeys.size === 0) return true;
+    const skillClassRaw = firstNonEmptyString(ps.class_id, ps.class_name);
+    if (!skillClassRaw) return false;
+    return playerClassKeys.has(skillClassRaw.trim().toLowerCase());
+  });
+
+  const playerSkills: CombatPlayerSkillView[] = classAndLevelFilteredRows
     .map((row) => {
       if (!(typeof row === "object" && row !== null)) return null;
       const rec = row as Record<string, unknown>;
@@ -1609,6 +1728,62 @@ export default async function CombatEncounterPage({
     })
     .filter((entry): entry is CombatPlayerConsumableView => entry !== null && entry.quantity > 0);
 
+  const profileIdForPenalty =
+    typeof characterSkillsProfileId === "string" && characterSkillsProfileId.trim().length > 0
+      ? characterSkillsProfileId.trim()
+      : user.id;
+  const { data: penaltyInventoryRows } = await supabase
+    .from("user_inventory")
+    .select(
+      "id, profile_id, quantity, weapon_instance_id, equipment_instance_id, items!inner(name, icon_path, is_stackable)",
+    )
+    .eq("profile_id", profileIdForPenalty)
+    .gt("quantity", 0);
+  const { data: penaltyEquippedRows } = await supabase
+    .from("user_equipment")
+    .select("inventory_id")
+    .eq("profile_id", profileIdForPenalty);
+  const equippedPenaltyIds = new Set(
+    (penaltyEquippedRows ?? [])
+      .map((row) => Number(row.inventory_id))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.trunc(value)),
+  );
+  const penaltyCandidates = ((penaltyInventoryRows ?? []) as DefeatPenaltyInventoryRow[])
+    .filter((row) => {
+      const id = Number(row.id);
+      if (!Number.isFinite(id)) return false;
+      if (equippedPenaltyIds.has(Math.trunc(id))) return false;
+      return true;
+    })
+    .map((row) => {
+      const itemJoin = Array.isArray(row.items) ? (row.items[0] ?? null) : row.items;
+      const quantity = Math.max(0, Math.trunc(num(row.quantity, 0)));
+      const isStackable = itemJoin?.is_stackable === true;
+      const quantityLost = isStackable ? Math.max(1, Math.floor(quantity * 0.2)) : 1;
+      return {
+        inventoryId: Math.trunc(Number(row.id)),
+        name:
+          typeof itemJoin?.name === "string" && itemJoin.name.trim().length > 0
+            ? itemJoin.name.trim()
+            : "Item",
+        iconPath: normalizePublicAssetUrl(
+          typeof itemJoin?.icon_path === "string" ? itemJoin.icon_path : null,
+        ),
+        quantityLost: Math.max(1, Math.min(quantityLost, quantity)),
+      } satisfies CombatDefeatLostItem;
+    })
+    .filter((entry) => entry.quantityLost > 0);
+  const defeatLostItems: CombatDefeatLostItem[] = [];
+  const penaltyPool = [...penaltyCandidates];
+  while (penaltyPool.length > 0 && defeatLostItems.length < 2) {
+    const randomIndex = Math.floor(Math.random() * penaltyPool.length);
+    const picked = penaltyPool[randomIndex];
+    if (!picked) break;
+    defeatLostItems.push(picked);
+    penaltyPool.splice(randomIndex, 1);
+  }
+
   async function logPlayerDefeatedInGlobalLog() {
     "use server";
 
@@ -1627,6 +1802,384 @@ export default async function CombatEncounterPage({
       member_name: playerLogName,
       event_html: eventHtml,
     });
+  }
+
+  async function logPlayerLevelUpInGlobalLog(newLevel: number) {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const safePlayerName = escapeHtml(playerLogName);
+    const safePlayerColor = escapeHtml(playerLogColor);
+    const safeLevel = Math.max(1, Math.trunc(Number.isFinite(Number(newLevel)) ? Number(newLevel) : 1));
+    const eventHtml = `¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
+
+    await supabaseAction.from("global_world_event_log").insert({
+      member_name: playerLogName,
+      event_html: eventHtml,
+    });
+  }
+
+  async function persistCombatStats(payload: CombatEncounterStatsPayload) {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const asNonNegativeInt = (value: unknown): number =>
+      Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
+    const didWin = payload.didWin === true;
+    const didLose = !didWin;
+    const combatsWonDelta = didWin ? 1 : 0;
+    const deathsDelta = didWin ? 0 : 1;
+    const enemiesDefeatedDelta = asNonNegativeInt(payload.enemiesDefeated);
+    const bossesDefeatedDelta = asNonNegativeInt(payload.bossesDefeated);
+    const totalDamageDealtDelta = asNonNegativeInt(payload.totalDamageDealt);
+    const totalDamageTakenDelta = asNonNegativeInt(payload.totalDamageTaken);
+    const totalHealingDelta = asNonNegativeInt(payload.totalHealing);
+    const highestHitDealtThisCombat = asNonNegativeInt(payload.highestHitDealt);
+    const highestHitReceivedThisCombat = asNonNegativeInt(payload.highestHitReceived);
+    const finalHpAfterCombat = asNonNegativeInt(payload.finalHp);
+    const finalManaAfterCombat = asNonNegativeInt(payload.finalMana);
+
+    const { data: currentStats } = await supabaseAction
+      .from("user_stats")
+      .select(
+        "combats_won, deaths, enemies_defeated, bosses_defeated, total_damage_dealt, total_damage_taken, total_healing, highest_hit_dealt, highest_hit_received",
+      )
+      .eq("user_id", actionUser.id)
+      .maybeSingle();
+
+    const currentCombatsWon = asNonNegativeInt(currentStats?.combats_won);
+    const currentDeaths = asNonNegativeInt(currentStats?.deaths);
+    const currentEnemiesDefeated = asNonNegativeInt(currentStats?.enemies_defeated);
+    const currentBossesDefeated = asNonNegativeInt(currentStats?.bosses_defeated);
+    const currentTotalDamageDealt = asNonNegativeInt(currentStats?.total_damage_dealt);
+    const currentTotalDamageTaken = asNonNegativeInt(currentStats?.total_damage_taken);
+    const currentTotalHealing = asNonNegativeInt(currentStats?.total_healing);
+    const currentHighestHitDealt = asNonNegativeInt(currentStats?.highest_hit_dealt);
+    const currentHighestHitReceived = asNonNegativeInt(currentStats?.highest_hit_received);
+
+    await supabaseAction.from("user_stats").upsert(
+      {
+        user_id: actionUser.id,
+        combats_won: currentCombatsWon + combatsWonDelta,
+        deaths: currentDeaths + deathsDelta,
+        enemies_defeated: currentEnemiesDefeated + enemiesDefeatedDelta,
+        bosses_defeated: currentBossesDefeated + bossesDefeatedDelta,
+        total_damage_dealt: currentTotalDamageDealt + totalDamageDealtDelta,
+        total_damage_taken: currentTotalDamageTaken + totalDamageTakenDelta,
+        total_healing: currentTotalHealing + totalHealingDelta,
+        highest_hit_dealt: Math.max(currentHighestHitDealt, highestHitDealtThisCombat),
+        highest_hit_received: Math.max(currentHighestHitReceived, highestHitReceivedThisCombat),
+      },
+      { onConflict: "user_id" },
+    );
+
+    const profileTargets = Array.from(
+      new Set([characterSkillsProfileId, actionUser.id].map((v) => String(v).trim()).filter(Boolean)),
+    );
+    const persistCharacterVitals = async () => {
+      for (const profileId of profileTargets) {
+        const { data: characterRow, error: characterReadError } = await supabaseAction
+          .from("user_character")
+          .select("hp_total, mana_total")
+          .eq("profile_id", profileId)
+          .maybeSingle();
+        if (characterReadError || !characterRow) continue;
+        const hpTotal = asNonNegativeInt(characterRow.hp_total);
+        const manaTotal = asNonNegativeInt(characterRow.mana_total);
+        const nextHpActual = didLose ? Math.min(hpTotal, 10) : Math.min(hpTotal, finalHpAfterCombat);
+        const nextManaActual = didLose
+          ? Math.min(manaTotal, 10)
+          : Math.min(manaTotal, finalManaAfterCombat);
+        const { error: characterUpdateError } = await supabaseAction
+          .from("user_character")
+          .update({ hp_actual: nextHpActual, mana_actual: nextManaActual })
+          .eq("profile_id", profileId);
+        if (!characterUpdateError) break;
+      }
+    };
+
+    if (!didWin) {
+      await persistCharacterVitals();
+      if (defeatLostItems.length > 0) {
+        for (const lost of defeatLostItems) {
+          const { data: inventoryRow, error: inventoryReadError } = await supabaseAction
+            .from("user_inventory")
+            .select("id, quantity")
+            .eq("id", lost.inventoryId)
+            .eq("profile_id", profileIdForPenalty)
+            .maybeSingle();
+          if (inventoryReadError || !inventoryRow) continue;
+          const currentQty = Math.max(0, Math.trunc(num(inventoryRow.quantity, 0)));
+          if (currentQty <= 0) continue;
+          const toRemove = Math.max(1, Math.min(Math.trunc(lost.quantityLost), currentQty));
+          const nextQty = currentQty - toRemove;
+          if (nextQty <= 0) {
+            await supabaseAction.from("user_inventory").delete().eq("id", lost.inventoryId);
+          } else {
+            await supabaseAction
+              .from("user_inventory")
+              .update({ quantity: nextQty })
+              .eq("id", lost.inventoryId);
+          }
+        }
+      }
+      return;
+    }
+    const profileIdForInventory =
+      typeof characterSkillsProfileId === "string" && characterSkillsProfileId.trim().length > 0
+        ? characterSkillsProfileId.trim()
+        : actionUser.id;
+
+    const safeVictoryXpGain = Math.max(0, Math.trunc(victoryXpGain));
+    const didLevelUpOnVictory =
+      didWin &&
+      playerExperienceToNext > 0 &&
+      safeVictoryXpGain >= playerExperienceToNext;
+    if (safeVictoryXpGain > 0) {
+      for (const profileId of profileTargets) {
+        const { data: characterRow, error: characterReadError } = await supabaseAction
+          .from("user_character")
+          .select("experience_current")
+          .eq("profile_id", profileId)
+          .maybeSingle();
+        if (characterReadError || !characterRow) continue;
+        const currentExperience =
+          typeof characterRow.experience_current === "number" &&
+          Number.isFinite(characterRow.experience_current)
+            ? Math.max(0, Math.trunc(characterRow.experience_current))
+            : 0;
+        const { error: characterUpdateError } = await supabaseAction
+          .from("user_character")
+          .update({ experience_current: currentExperience + safeVictoryXpGain })
+          .eq("profile_id", profileId);
+        if (!characterUpdateError) break;
+      }
+    }
+    // Si hubo level up, dejamos que el trigger conserve HP/Mana al máximo.
+    if (!didLevelUpOnVictory) {
+      // Persistir HP/Mana al final de la rama de victoria (después de update de XP/triggeres).
+      await persistCharacterVitals();
+    }
+
+    const lootItemIds = Array.from(
+      new Set(
+        victoryLootItems
+          .map((loot) => (typeof loot.itemId === "string" ? loot.itemId.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+    const { data: inventoryRowsForCapacity } = await supabaseAction
+      .from("user_inventory")
+      .select("id, item_id, weapon_instance_id, equipment_instance_id, quantity")
+      .eq("profile_id", profileIdForInventory)
+      .gt("quantity", 0);
+    const { data: equippedRowsForCapacity } = await supabaseAction
+      .from("user_equipment")
+      .select("inventory_id")
+      .eq("profile_id", profileIdForInventory);
+    const equippedInventoryIdSet = new Set<number>(
+      (equippedRowsForCapacity ?? [])
+        .map((row) => Number(row.inventory_id))
+        .filter((value) => Number.isFinite(value))
+        .map((value) => Math.trunc(value)),
+    );
+    const currentInventoryRows = (inventoryRowsForCapacity ?? []) as Array<{
+      id: number;
+      item_id: string | null;
+      weapon_instance_id: number | null;
+      equipment_instance_id: number | null;
+      quantity: number | null;
+    }>;
+    const unequippedInventoryCount = currentInventoryRows.reduce((sum, row) => {
+      const id = Number(row.id);
+      if (!Number.isFinite(id)) return sum;
+      return equippedInventoryIdSet.has(Math.trunc(id)) ? sum : sum + 1;
+    }, 0);
+    let remainingInventorySlots = Math.max(0, 24 - unequippedInventoryCount);
+    const { data: lootItemsData } =
+      lootItemIds.length > 0
+        ? await supabaseAction.from("items").select("id, is_stackable").in("id", lootItemIds)
+        : { data: [] };
+    const lootItemsMap = new Map<string, boolean>(
+      (lootItemsData ?? []).map((row) => [String(row.id), row.is_stackable === true]),
+    );
+    const stackableItemRows = new Map<string, { id: number; quantity: number }>();
+    for (const row of currentInventoryRows) {
+      const itemId = typeof row.item_id === "string" ? row.item_id.trim() : "";
+      const id = Number(row.id);
+      if (!itemId || !Number.isFinite(id)) continue;
+      if (row.weapon_instance_id != null || row.equipment_instance_id != null) continue;
+      const currentQty =
+        typeof row.quantity === "number" && Number.isFinite(row.quantity)
+          ? Math.max(0, Math.trunc(row.quantity))
+          : 0;
+      const existing = stackableItemRows.get(itemId);
+      if (!existing || existing.id > Math.trunc(id)) {
+        stackableItemRows.set(itemId, { id: Math.trunc(id), quantity: currentQty });
+      }
+    }
+    const parseLootInstanceId = (lootKey: string, prefix: "weapon" | "equipment"): number | null => {
+      if (!lootKey.startsWith(`${prefix}:`)) return null;
+      const raw = lootKey.slice(prefix.length + 1).trim();
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    };
+
+    for (const loot of victoryLootItems) {
+      const qty = Math.max(0, Math.trunc(Number(loot.quantity ?? 0)));
+      if (qty <= 0) continue;
+      const itemId = typeof loot.itemId === "string" ? loot.itemId.trim() : "";
+      if (!itemId) continue;
+
+      const weaponInstanceId = parseLootInstanceId(loot.lootKey, "weapon");
+      const equipmentInstanceId = parseLootInstanceId(loot.lootKey, "equipment");
+      if (weaponInstanceId != null) {
+        if (remainingInventorySlots <= 0) continue;
+        await supabaseAction.from("user_inventory").insert({
+          profile_id: profileIdForInventory,
+          quantity: qty,
+          weapon_instance_id: weaponInstanceId,
+        });
+        remainingInventorySlots -= 1;
+        continue;
+      }
+      if (equipmentInstanceId != null) {
+        if (remainingInventorySlots <= 0) continue;
+        await supabaseAction.from("user_inventory").insert({
+          profile_id: profileIdForInventory,
+          quantity: qty,
+          equipment_instance_id: equipmentInstanceId,
+        });
+        remainingInventorySlots -= 1;
+        continue;
+      }
+
+      const isStackable = lootItemsMap.get(itemId) === true;
+      if (isStackable) {
+        const existingItemRow = stackableItemRows.get(itemId) ?? null;
+        if (existingItemRow && typeof existingItemRow.id === "number") {
+          const currentQty = Math.max(0, Math.trunc(existingItemRow.quantity));
+          await supabaseAction
+            .from("user_inventory")
+            .update({ quantity: currentQty + qty })
+            .eq("id", Math.trunc(existingItemRow.id));
+          stackableItemRows.set(itemId, {
+            id: Math.trunc(existingItemRow.id),
+            quantity: currentQty + qty,
+          });
+        } else {
+          if (remainingInventorySlots <= 0) continue;
+          await supabaseAction.from("user_inventory").insert({
+            profile_id: profileIdForInventory,
+            quantity: qty,
+            item_id: itemId,
+          });
+          remainingInventorySlots -= 1;
+        }
+        continue;
+      }
+
+      if (remainingInventorySlots <= 0) continue;
+      await supabaseAction.from("user_inventory").insert({
+        profile_id: profileIdForInventory,
+        quantity: qty,
+        item_id: itemId,
+      });
+      remainingInventorySlots -= 1;
+    }
+
+    const zoneProgressId = combatProgressZoneCode;
+    if (!zoneProgressId) return;
+    const nextCombatStep = encounterCombatStepForProgress + 1;
+    if (process.env.NODE_ENV === "development") {
+      console.log("[combat-progress] start", {
+        encounterCode: code,
+        encounterZoneId: encounterZoneRefId,
+        resolvedZoneCode: zoneProgressId,
+        encounterCombatStep: encounterCombatStepForProgress,
+        nextCombatStep,
+        userId: actionUser.id,
+        didWin,
+      });
+    }
+
+    const { data: currentProgress, error: currentProgressError } = await supabaseAction
+      .from("user_combat_progress")
+      .select("id, combat_step")
+      .eq("user_id", actionUser.id)
+      .eq("zone_id", zoneProgressId)
+      .order("combat_step", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (process.env.NODE_ENV === "development") {
+      console.log("[combat-progress] current-row", {
+        zoneId: zoneProgressId,
+        row: currentProgress ?? null,
+        error: currentProgressError
+          ? {
+              message: currentProgressError.message,
+              code: currentProgressError.code,
+              details: currentProgressError.details,
+            }
+          : null,
+      });
+    }
+    const currentCombatStep =
+      typeof currentProgress?.combat_step === "number" && Number.isFinite(currentProgress.combat_step)
+        ? Math.max(0, Math.trunc(currentProgress.combat_step))
+        : 0;
+    if (nextCombatStep <= currentCombatStep) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[combat-progress] skip-update", {
+          reason: "next_step_not_greater",
+          currentCombatStep,
+          nextCombatStep,
+          zoneId: zoneProgressId,
+          userId: actionUser.id,
+        });
+      }
+      return;
+    }
+
+    let progressWriteError:
+      | { message: string; code?: string; details?: string | null }
+      | null = null;
+    if (currentProgress && typeof currentProgress.id === "number") {
+      const { error: updateError } = await supabaseAction
+        .from("user_combat_progress")
+        .update({ combat_step: nextCombatStep })
+        .eq("id", currentProgress.id);
+      progressWriteError = updateError
+        ? { message: updateError.message, code: updateError.code, details: updateError.details }
+        : null;
+    } else {
+      const { error: insertError } = await supabaseAction.from("user_combat_progress").insert({
+        user_id: actionUser.id,
+        zone_id: zoneProgressId,
+        combat_step: nextCombatStep,
+      });
+      progressWriteError = insertError
+        ? { message: insertError.message, code: insertError.code, details: insertError.details }
+        : null;
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.log("[combat-progress] upsert-result", {
+        zoneId: zoneProgressId,
+        userId: actionUser.id,
+        writtenCombatStep: nextCombatStep,
+        error: progressWriteError,
+      });
+    }
   }
 
   async function consumeCombatConsumable(inventoryId: number): Promise<CombatConsumeResult> {
@@ -1678,6 +2231,45 @@ export default async function CombatEncounterPage({
     return { ok: true, remainingQuantity: nextQty };
   }
 
+  async function persistEscapeCombatState(payload: {
+    finalHp: number;
+    finalMana: number;
+  }) {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const asNonNegativeInt = (value: unknown): number =>
+      Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
+    const finalHpAfterEscape = asNonNegativeInt(payload.finalHp);
+    const finalManaAfterEscape = asNonNegativeInt(payload.finalMana);
+    const profileTargets = Array.from(
+      new Set([characterSkillsProfileId, actionUser.id].map((v) => String(v).trim()).filter(Boolean)),
+    );
+
+    for (const profileId of profileTargets) {
+      const { data: characterRow, error: characterReadError } = await supabaseAction
+        .from("user_character")
+        .select("hp_total, mana_total")
+        .eq("profile_id", profileId)
+        .maybeSingle();
+      if (characterReadError || !characterRow) continue;
+      const hpTotal = asNonNegativeInt(characterRow.hp_total);
+      const manaTotal = asNonNegativeInt(characterRow.mana_total);
+      const nextHpActual = Math.min(hpTotal, finalHpAfterEscape);
+      const nextManaActual = Math.min(manaTotal, finalManaAfterEscape);
+      const { error: characterUpdateError } = await supabaseAction
+        .from("user_character")
+        .update({ hp_actual: nextHpActual, mana_actual: nextManaActual })
+        .eq("profile_id", profileId);
+      if (!characterUpdateError) break;
+    }
+  }
+
   return (
     <CombatEncounterShell
       encounterName={String(encounter.name ?? code)}
@@ -1713,12 +2305,19 @@ export default async function CombatEncounterPage({
       playerStatWis={playerStatWis}
       playerArmor={playerArmor}
       playerMr={playerMr}
+      playerExperienceToNext={playerExperienceToNext}
+      playerLevelCurrent={playerLevel}
+      playerLevelAfterVictory={projectedLevelAfterVictory}
       playerSkills={playerSkills}
       playerConsumables={playerConsumables}
       victoryLootItems={victoryLootItems}
+      defeatLostItems={defeatLostItems}
       victoryGoldFromLoot={victoryGoldFromLoot}
       onConsumeConsumable={consumeCombatConsumable}
+      onEscapePersistState={persistEscapeCombatState}
       onPlayerDefeatedGlobalLog={logPlayerDefeatedInGlobalLog}
+      onPlayerLevelUpGlobalLog={logPlayerLevelUpInGlobalLog}
+      onCombatFinishedStats={persistCombatStats}
     />
   );
 }

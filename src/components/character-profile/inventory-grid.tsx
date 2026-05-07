@@ -14,8 +14,8 @@ import {
 import Image from "next/image";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useState, useTransition, type ReactNode } from "react";
-import { equipInventoryItem } from "@/app/(main)/character_profile/actions";
+import { useEffect, useId, useMemo, useState, useTransition, type ReactNode } from "react";
+import { discardInventoryItem, equipInventoryItem } from "@/app/(main)/character_profile/actions";
 import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/components/character-profile/inventory-types";
 
 type InventoryItem = {
@@ -52,6 +52,7 @@ type PlayerAbilityEntry = {
   description: string;
   manaCost: number;
   cooldownTurns: number;
+  unlockLevel: number;
   target: string;
   effect: Record<string, unknown>;
 };
@@ -80,6 +81,10 @@ type DragOverState = {
 type ToastState = {
   open: boolean;
   message: string;
+};
+type DiscardConfirmState = {
+  open: boolean;
+  item: InventoryItem | null;
 };
 
 const INITIAL_TOOLTIP: TooltipState = {
@@ -176,6 +181,11 @@ function weaponDamageRange(
   return `${a} - ${b}`;
 }
 
+function isDesktopViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+
 type AbilitySubtype = "physical" | "magical" | "buff" | "neutral";
 function abilitySubtype(effect: Record<string, unknown>): AbilitySubtype {
   const raw = effect.subtype;
@@ -226,18 +236,41 @@ function abilityCardClass(subtype: AbilitySubtype): string {
   return "border-slate-700/65 bg-slate-900/35";
 }
 
+function SkillCooldownClockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  );
+}
+
 function DraggableInventorySlot({
   slot,
+  isSelected,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
   onClick,
+  onSelect,
 }: {
   slot: InventorySlot;
+  isSelected: boolean;
   onMouseEnter: (x: number, y: number) => void;
   onMouseMove: (x: number, y: number) => void;
   onMouseLeave: () => void;
   onClick: (x: number, y: number) => void;
+  onSelect: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     // Debe ser único por celda: NO usar user_inventory.id solo, choca con slotNumber (1..24).
@@ -260,6 +293,8 @@ function DraggableInventorySlot({
       type="button"
       className={`relative aspect-square rounded-md border-2 border-amber-900/70 bg-[#1f120e]/85 shadow-inner shadow-black/40 ${
         isDragging ? "opacity-40 ring-2 ring-amber-400/60" : ""
+      } ${
+        isSelected ? "border-6 border-amber-300 shadow-[0_0_18px_rgba(251,191,36,0.7)]" : ""
       }`}
       style={rarityBorderStyle}
       aria-label={`Espacio de inventario ${slot.slotNumber}`}
@@ -276,6 +311,7 @@ function DraggableInventorySlot({
         if (!slot.item) return;
         event.preventDefault();
         event.stopPropagation();
+        onSelect();
         onClick(event.clientX, event.clientY);
       }}
       {...listeners}
@@ -288,7 +324,7 @@ function DraggableInventorySlot({
             alt={slot.item.name}
             width={700}
             height={700}
-            quality={100}
+            quality={75}
             className="h-auto w-auto max-h-full max-w-full object-contain p-1.5"
           />
           {slot.item.quantity > 1 ? (
@@ -386,7 +422,7 @@ function EquipmentDropSlot({
               alt={equippedItem.name}
               width={64}
               height={64}
-              quality={100}
+              quality={75}
               className="max-h-[55%] max-w-[92%] object-contain"
             />
             <p className="line-clamp-2 w-full text-[8px] leading-tight text-amber-100">{equippedItem.name}</p>
@@ -545,11 +581,16 @@ export function InventoryGrid({
     isCompatible: false,
   });
   const [errorModal, setErrorModal] = useState<ToastState>({ open: false, message: "" });
+  const [discardConfirmModal, setDiscardConfirmModal] = useState<DiscardConfirmState>({
+    open: false,
+    item: null,
+  });
   const [abilitiesOpen, setAbilitiesOpen] = useState(false);
   const [activeMobilePanel, setActiveMobilePanel] = useState<"stats" | "inventory" | "abilities" | null>(
     null,
   );
   const [activeDragItem, setActiveDragItem] = useState<InventoryItem | null>(null);
+  const [selectedInventorySlot, setSelectedInventorySlot] = useState<number | null>(null);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -575,6 +616,15 @@ export function InventoryGrid({
     activeItem?.rarityColor
       ? { color: activeItem.rarityColor }
       : undefined;
+  const selectedInventoryItem = useMemo(
+    () => slots.find((slot) => slot.slotNumber === selectedInventorySlot)?.item ?? null,
+    [selectedInventorySlot, slots],
+  );
+  useEffect(() => {
+    if (selectedInventorySlot == null) return;
+    const stillExists = slots.some((slot) => slot.slotNumber === selectedInventorySlot && Boolean(slot.item));
+    if (!stillExists) setSelectedInventorySlot(null);
+  }, [selectedInventorySlot, slots]);
 
   function tooltipPositionFromPointer(x: number, y: number): { x: number; y: number; flipY: boolean } {
     const TOOLTIP_W = 320;
@@ -625,6 +675,10 @@ export function InventoryGrid({
   }
 
   function togglePinnedTooltip(x: number, y: number, slotNumber: number) {
+    if (isDesktopViewport()) {
+      openTooltip(x, y, slotNumber, false);
+      return;
+    }
     const pos = tooltipPositionFromPointer(x, y);
     setTooltip((previous) =>
       previous.open &&
@@ -645,6 +699,10 @@ export function InventoryGrid({
   }
 
   function togglePinnedEquippedTooltip(x: number, y: number, equippedSlotId: string) {
+    if (isDesktopViewport()) {
+      openEquippedTooltip(x, y, equippedSlotId, false);
+      return;
+    }
     const pos = tooltipPositionFromPointer(x, y);
     setTooltip((previous) =>
       previous.open && previous.pinned && previous.equippedSlotId === equippedSlotId
@@ -687,6 +745,29 @@ export function InventoryGrid({
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "No se pudo equipar el objeto.";
+        setErrorModal({ open: true, message });
+      }
+    });
+  }
+
+  function handleDiscardSelectedItem() {
+    if (!selectedInventoryItem) return;
+    setDiscardConfirmModal({ open: true, item: selectedInventoryItem });
+  }
+
+  function handleConfirmDiscardItem() {
+    const inventoryId = discardConfirmModal.item?.id ?? null;
+    if (!inventoryId) return;
+    startTransition(async () => {
+      try {
+        await discardInventoryItem(inventoryId);
+        setDiscardConfirmModal({ open: false, item: null });
+        setSelectedInventorySlot(null);
+        closeTooltip();
+        router.refresh();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "No se pudo descartar el objeto.";
         setErrorModal({ open: true, message });
       }
     });
@@ -836,13 +917,51 @@ export function InventoryGrid({
                       <DraggableInventorySlot
                         key={slot.slotNumber}
                         slot={slot}
+                        isSelected={selectedInventorySlot === slot.slotNumber}
                         onMouseEnter={(x, y) => openTooltip(x, y, slot.slotNumber, false)}
                         onMouseMove={(x, y) => openTooltip(x, y, slot.slotNumber, false)}
                         onMouseLeave={hideTooltip}
                         onClick={(x, y) => togglePinnedTooltip(x, y, slot.slotNumber)}
+                        onSelect={() =>
+                          setSelectedInventorySlot((previous) =>
+                            previous === slot.slotNumber ? null : slot.slotNumber,
+                          )
+                        }
                       />
                     ))}
                   </div>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={!selectedInventoryItem || isPending}
+                    onClick={handleDiscardSelectedItem}
+                    className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                      !selectedInventoryItem || isPending
+                        ? "cursor-not-allowed border-red-800/65 bg-red-950/45 text-red-200/70"
+                        : "cursor-pointer border-red-700/85 bg-red-900/70 text-red-100 hover:bg-red-800/80"
+                    }`}
+                    aria-label="Descartar Item"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-4 w-4"
+                      aria-hidden
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M6 6l1 14h10l1-14" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
+                    Descartar Item
+                  </button>
                 </div>
               </div>
             </div>
@@ -866,7 +985,7 @@ export function InventoryGrid({
                 alt={activeDragItem.name}
                 width={700}
                 height={700}
-                quality={100}
+                quality={75}
                 className="h-auto w-auto max-h-full max-w-full object-contain p-1.5"
               />
               {activeDragItem.quantity > 1 ? (
@@ -914,7 +1033,7 @@ export function InventoryGrid({
             {abilities.length === 0 ? (
               <p className="text-sm text-amber-100/65">No tenés habilidades aprendidas.</p>
             ) : (
-              <div className="grid gap-2 lg:grid-cols-2">
+              <div className="grid gap-2 lg:grid-cols-3">
                 {abilities.map((ability) => {
                   const subtype = abilitySubtype(ability.effect);
                   const targetKind = abilityTargetKind(ability.effect);
@@ -928,14 +1047,21 @@ export function InventoryGrid({
                         <p className="text-sm font-semibold text-amber-100">
                           {ability.name} ({ability.manaCost} MP) - {targetKind}
                         </p>
-                        <span className="shrink-0 text-[11px] font-semibold text-amber-300/90">
+                        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
+                          <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
                           CD {ability.cooldownTurns}
                         </span>
                       </div>
                       {dmg ? (
-                        <p className="mt-1 text-xs font-semibold text-amber-100/90">
-                          Daño: {dmg.min}-{dmg.max}
-                        </p>
+                        <>
+                          <p className="mt-1 text-xs font-semibold text-amber-100/90">
+                            Daño: {dmg.min}-{dmg.max}
+                          </p>
+                          <div
+                            className="mt-1 h-px w-full bg-gradient-to-r from-transparent via-amber-300/50 to-transparent"
+                            aria-hidden
+                          />
+                        </>
                       ) : null}
                       <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
                         {ability.description}
@@ -1126,7 +1252,12 @@ export function InventoryGrid({
                 ) : null}
               </>
             )}
-            {activeItem.equipSlot && tooltip.slotNumber != null ? (
+            {(() => {
+              if (!activeItem.equipSlot || tooltip.slotNumber == null) return null;
+              const equipSlot = (activeItem.equipSlot ?? "").trim().toLowerCase();
+              const hideEquipButton = ["material", "consumable", "resource"].includes(equipSlot);
+              if (hideEquipButton) return null;
+              return (
               <button
                 type="button"
                 disabled={isPending}
@@ -1139,7 +1270,8 @@ export function InventoryGrid({
               >
                 {isPending ? "Equipando..." : "Equipar"}
               </button>
-            ) : null}
+              );
+            })()}
           </div>
         </>
       ) : null}
@@ -1161,6 +1293,46 @@ export function InventoryGrid({
               X
             </button>
             <p className="text-sm font-semibold leading-relaxed">{errorModal.message}</p>
+          </div>
+        </div>
+      ) : null}
+      {discardConfirmModal.open && discardConfirmModal.item ? (
+        <div className="fixed inset-0 z-[81] flex items-center justify-center bg-black/65 p-4">
+          <div
+            className={`${abilitiesFont.className} w-full max-w-md rounded-xl border border-amber-700/80 bg-[#2a1812]/95 p-5 text-amber-100 shadow-[0_14px_40px_rgba(0,0,0,0.55)]`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirmar descarte de item"
+          >
+            <p className="text-base font-semibold leading-relaxed">
+              ¿Seguro que querés descartar {discardConfirmModal.item.name}?
+            </p>
+            {discardConfirmModal.item.quantity > 1 ? (
+              <p className="mt-2 text-sm italic text-amber-200/85">
+                (Si el item es stackeable, se eliminarán todos los stacks.)
+              </p>
+            ) : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDiscardConfirmModal({ open: false, item: null })}
+                className="rounded-md border border-amber-700/80 bg-amber-950/45 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-amber-100 transition hover:bg-amber-900/60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={handleConfirmDiscardItem}
+                className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                  isPending
+                    ? "cursor-wait border-red-800/65 bg-red-950/45 text-red-200/70"
+                    : "cursor-pointer border-red-700/85 bg-red-900/75 text-red-100 hover:bg-red-800/85"
+                }`}
+              >
+                {isPending ? "Eliminando..." : "Aceptar"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

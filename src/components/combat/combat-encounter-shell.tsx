@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
+import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
@@ -546,6 +547,12 @@ export type CombatVictoryLootItem = {
     valuePct3: number | null;
   } | null;
 };
+export type CombatDefeatLostItem = {
+  inventoryId: number;
+  name: string;
+  iconPath: string | null;
+  quantityLost: number;
+};
 
 function capitalizeFirst(value: string): string {
   const trimmed = value.trim();
@@ -591,6 +598,19 @@ export type CombatConsumeResult = {
   ok: boolean;
   remainingQuantity?: number;
   error?: string;
+};
+
+export type CombatEncounterStatsPayload = {
+  didWin: boolean;
+  enemiesDefeated: number;
+  bossesDefeated: number;
+  totalDamageDealt: number;
+  highestHitDealt: number;
+  totalDamageTaken: number;
+  totalHealing: number;
+  highestHitReceived: number;
+  finalHp: number;
+  finalMana: number;
 };
 
 export type CombatEncounterDebugPayload = {
@@ -646,18 +666,29 @@ export type CombatEncounterShellProps = {
   playerStatWis?: number;
   playerArmor?: number;
   playerMr?: number;
+  playerExperienceToNext?: number;
+  playerLevelCurrent?: number;
+  playerLevelAfterVictory?: number;
   /** Skills aprendidos del PJ (`user_character_skills` + `player_skills`). */
   playerSkills?: CombatPlayerSkillView[];
   /** Consumibles visibles en combate (`user_inventory` + `items`, item_type_id=consumable). */
   playerConsumables?: CombatPlayerConsumableView[];
   /** Loot ya rolado al iniciar el combate (`enemy_drop_tables.combat_encounter_id` = `combat_encounters.code`). */
   victoryLootItems?: CombatVictoryLootItem[];
+  /** Items que se perderán al ser derrotado (penalidad de combate). */
+  defeatLostItems?: CombatDefeatLostItem[];
   /** Oro calculado desde los drops rolados (no desde enemy_templates.gold_rewards). */
   victoryGoldFromLoot?: number;
   /** Acción servidor para consumir 1 unidad en inventario. */
   onConsumeConsumable?: (inventoryId: number) => Promise<CombatConsumeResult>;
+  /** Persiste estado actual (HP/Mana) cuando el usuario escapa. */
+  onEscapePersistState?: (payload: { finalHp: number; finalMana: number }) => Promise<void>;
   /** Registra en el log global cuando el PJ cae en combate. */
   onPlayerDefeatedGlobalLog?: () => Promise<void>;
+  /** Registra en el log global cuando el PJ sube de nivel. */
+  onPlayerLevelUpGlobalLog?: (newLevel: number) => Promise<void>;
+  /** Persiste estadísticas acumuladas del combate al finalizar (victoria/derrota). */
+  onCombatFinishedStats?: (payload: CombatEncounterStatsPayload) => Promise<void>;
   /** Destino para "Escapar" (normalmente el mapa de la zona origen). */
   escapeHref?: string;
 };
@@ -920,14 +951,22 @@ export function CombatEncounterShell({
   playerStatWis = 0,
   playerArmor = 0,
   playerMr = 0,
+  playerExperienceToNext = 0,
+  playerLevelCurrent = 1,
+  playerLevelAfterVictory = 1,
   playerSkills = [],
   playerConsumables = [],
   victoryLootItems = [],
+  defeatLostItems = [],
   victoryGoldFromLoot = 0,
   onConsumeConsumable,
+  onEscapePersistState,
   onPlayerDefeatedGlobalLog,
+  onPlayerLevelUpGlobalLog,
+  onCombatFinishedStats,
   escapeHref = "/",
 }: CombatEncounterShellProps) {
+  const router = useRouter();
   const backgroundResolved = backgroundSrc?.trim() || BG_INTRO_FOREST;
   /** Copia en memoria del combate para uso al activar habilidades del PJ. */
   const playerCombatSkills = useMemo(() => [...playerSkills], [playerSkills]);
@@ -968,6 +1007,7 @@ export function CombatEncounterShell({
 
   const [isActionsPanelOpen, setIsActionsPanelOpen] = useState(false);
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
+  const [isEscaping, setIsEscaping] = useState(false);
   const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory">("main");
   const [isTurnTransitioning, setIsTurnTransitioning] = useState(true);
   const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
@@ -998,8 +1038,20 @@ export function CombatEncounterShell({
     inventoryId: number | null;
   }>({ open: false, x: 0, y: 0, pinned: false, inventoryId: null });
   const [isDefeatOverlayVisible, setIsDefeatOverlayVisible] = useState(false);
+  const [isDefeatPenaltyOpen, setIsDefeatPenaltyOpen] = useState(false);
   const [isVictoryOverlayVisible, setIsVictoryOverlayVisible] = useState(false);
   const [isVictoryLootOpen, setIsVictoryLootOpen] = useState(false);
+  const [isLevelUpModalOpen, setIsLevelUpModalOpen] = useState(false);
+  const didOpenLevelUpModalRef = useRef(false);
+  const didReportLevelUpRef = useRef(false);
+  const combatStatsRef = useRef({
+    totalDamageDealt: 0,
+    highestHitDealt: 0,
+    totalDamageTaken: 0,
+    totalHealing: 0,
+    highestHitReceived: 0,
+  });
+  const didPersistCombatStatsRef = useRef(false);
 
   const [turn, setTurn] = useState(1);
 
@@ -1041,9 +1093,21 @@ export function CombatEncounterShell({
 
   useEffect(() => {
     setIsDefeatOverlayVisible(false);
+    setIsDefeatPenaltyOpen(false);
     setIsVictoryOverlayVisible(false);
     setIsVictoryLootOpen(false);
+    setIsLevelUpModalOpen(false);
+    didOpenLevelUpModalRef.current = false;
+    didReportLevelUpRef.current = false;
     didReportDefeatRef.current = false;
+    didPersistCombatStatsRef.current = false;
+    combatStatsRef.current = {
+      totalDamageDealt: 0,
+      highestHitDealt: 0,
+      totalDamageTaken: 0,
+      totalHealing: 0,
+      highestHitReceived: 0,
+    };
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
       defeatModalDelayRef.current = null;
@@ -1057,6 +1121,7 @@ export function CombatEncounterShell({
   useEffect(() => {
     if (playerCurrentHp > 0) {
       setIsDefeatOverlayVisible(false);
+      setIsDefeatPenaltyOpen(false);
       if (defeatModalDelayRef.current) {
         clearTimeout(defeatModalDelayRef.current);
         defeatModalDelayRef.current = null;
@@ -1087,9 +1152,33 @@ export function CombatEncounterShell({
   }, [playerCurrentHp, onPlayerDefeatedGlobalLog]);
   const hasAnyEnemy = displayEnemies.length > 0;
   const hasAliveEnemies = displayEnemies.some((enemy) => enemy.hp > 0);
+  const recordPlayerDamageDealt = (amount: number) => {
+    const safe = Math.max(0, Math.trunc(amount));
+    if (safe <= 0) return;
+    combatStatsRef.current.totalDamageDealt += safe;
+    combatStatsRef.current.highestHitDealt = Math.max(combatStatsRef.current.highestHitDealt, safe);
+  };
+  const recordPlayerDamageTaken = (amount: number) => {
+    const safe = Math.max(0, Math.trunc(amount));
+    if (safe <= 0) return;
+    combatStatsRef.current.totalDamageTaken += safe;
+    combatStatsRef.current.highestHitReceived = Math.max(combatStatsRef.current.highestHitReceived, safe);
+  };
+  const recordPlayerHealing = (amount: number) => {
+    const safe = Math.max(0, Math.trunc(amount));
+    if (safe <= 0) return;
+    combatStatsRef.current.totalHealing += safe;
+  };
   const victoryTotalXp = useMemo(
     () => initialEnemies.reduce((sum, enemy) => sum + Math.max(0, Math.trunc(enemy.xpReward)), 0),
     [initialEnemies],
+  );
+  const playerExperienceToNextSafe = Math.max(0, Math.trunc(playerExperienceToNext));
+  const shouldTriggerLevelUpModal =
+    playerExperienceToNextSafe > 0 && victoryTotalXp >= playerExperienceToNextSafe;
+  const levelAfterVictorySafe = Math.max(
+    Math.max(1, Math.trunc(playerLevelCurrent)),
+    Math.max(1, Math.trunc(playerLevelAfterVictory)),
   );
   const victoryTotalGold = Math.max(0, Math.trunc(victoryGoldFromLoot));
   useEffect(() => {
@@ -1117,6 +1206,47 @@ export function CombatEncounterShell({
       }
     };
   }, [hasAnyEnemy, hasAliveEnemies, playerCurrentHp, isVictoryOverlayVisible]);
+  useEffect(() => {
+    if (!isVictoryOverlayVisible || !isVictoryLootOpen || !shouldTriggerLevelUpModal) return;
+    if (didOpenLevelUpModalRef.current) return;
+    didOpenLevelUpModalRef.current = true;
+    setIsLevelUpModalOpen(true);
+  }, [isVictoryOverlayVisible, isVictoryLootOpen, shouldTriggerLevelUpModal]);
+  useEffect(() => {
+    if (!isLevelUpModalOpen) return;
+    if (didReportLevelUpRef.current) return;
+    didReportLevelUpRef.current = true;
+    if (!onPlayerLevelUpGlobalLog) return;
+    void onPlayerLevelUpGlobalLog(levelAfterVictorySafe).catch(() => {
+      // Si falla el log global de level up no debe bloquear el flujo del combate.
+    });
+  }, [isLevelUpModalOpen, levelAfterVictorySafe, onPlayerLevelUpGlobalLog]);
+  useEffect(() => {
+    if (didPersistCombatStatsRef.current) return;
+    const didLose = playerCurrentHp <= 0;
+    const didWin = hasAnyEnemy && !hasAliveEnemies && playerCurrentHp > 0;
+    if (!didLose && !didWin) return;
+    const enemiesDefeatedCount = displayEnemies.reduce(
+      (sum, enemy) => sum + (enemy.hp <= 0 ? 1 : 0),
+      0,
+    );
+    didPersistCombatStatsRef.current = true;
+    if (!onCombatFinishedStats) return;
+    void onCombatFinishedStats({
+      didWin,
+      enemiesDefeated: enemiesDefeatedCount,
+      bossesDefeated: isBoss ? 1 : 0,
+      totalDamageDealt: combatStatsRef.current.totalDamageDealt,
+      highestHitDealt: combatStatsRef.current.highestHitDealt,
+      totalDamageTaken: combatStatsRef.current.totalDamageTaken,
+      totalHealing: combatStatsRef.current.totalHealing,
+      highestHitReceived: combatStatsRef.current.highestHitReceived,
+      finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
+      finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+    }).catch(() => {
+      // Si falla el guardado de stats no se bloquea la resolución visual del combate.
+    });
+  }, [displayEnemies, hasAliveEnemies, hasAnyEnemy, isBoss, onCombatFinishedStats, playerCurrentHp]);
   useEffect(() => {
     setDisplayPlayerMana(Math.min(Math.max(0, playerMana), Math.max(0, playerManaMax)));
   }, [playerMana, playerManaMax]);
@@ -1474,7 +1604,11 @@ export function CombatEncounterShell({
     const amount = consumableAmount(item.effect);
     if (objective === "self") {
       if (stat === "hp") {
-        setPlayerCurrentHp((prev) => Math.min(playerHpMax, Math.max(0, prev + amount)));
+        setPlayerCurrentHp((prev) => {
+          const next = Math.min(playerHpMax, Math.max(0, prev + amount));
+          recordPlayerHealing(next - prev);
+          return next;
+        });
       } else if (stat === "mana" || stat === "mp") {
         setDisplayPlayerMana((prev) => Math.min(playerManaMax, Math.max(0, prev + amount)));
       }
@@ -1648,6 +1782,7 @@ export function CombatEncounterShell({
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, target.hp);
       const updatedHp = target.hp - damageDone;
+      recordPlayerDamageDealt(damageDone);
 
       setDisplayEnemies((prev) =>
         prev.map((enemy) =>
@@ -1682,6 +1817,7 @@ export function CombatEncounterShell({
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, enemy.hp);
       const hpNext = enemy.hp - damageDone;
+      recordPlayerDamageDealt(damageDone);
       if (enemy.id === selectedEnemyId && hpNext <= 0) clearedSelection = true;
       const text =
         descTemplate != null
@@ -1762,6 +1898,7 @@ export function CombatEncounterShell({
     const mitigated = mitigateDamageByDefense(rawDamage, target.armor);
     const updatedHp = Math.max(0, target.hp - mitigated);
     const damageDone = target.hp - updatedHp;
+    recordPlayerDamageDealt(damageDone);
     setDisplayEnemies((prev) =>
       prev.map((enemy) => (enemy.id === target.id ? { ...enemy, hp: updatedHp } : enemy)),
     );
@@ -1784,6 +1921,23 @@ export function CombatEncounterShell({
 
   function hideAttackHint() {
     setAttackHint((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+  }
+
+  function handleEscapeClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (!onEscapePersistState) return;
+    event.preventDefault();
+    if (isEscaping) return;
+    setIsEscaping(true);
+    void onEscapePersistState({
+      finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
+      finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+    })
+      .catch(() => {
+        // Si falla el guardado no bloquea escape.
+      })
+      .finally(() => {
+        router.push(escapeHref);
+      });
   }
 
   function pickAvailableEnemySkill(enemy: CombatEncounterEnemyView): EnemySkillDecision | null {
@@ -1853,6 +2007,7 @@ export function CombatEncounterShell({
     }
     const defenseStat = playerDefenseStatVsIncoming(incomingSubtype, playerArmor, playerMr);
     const damage = mitigateDamageByDefense(rawDamage, defenseStat);
+    recordPlayerDamageTaken(damage);
     const nextPlayerHp = Math.max(0, playerCurrentHp - damage);
     setPlayerCurrentHp(nextPlayerHp);
     if (skill) {
@@ -1965,9 +2120,10 @@ export function CombatEncounterShell({
 
             <Link
               href={escapeHref}
+              onClick={handleEscapeClick}
               className="shrink-0 rounded-full border border-red-700/60 bg-red-900/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-200/90 transition hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50 sm:px-3"
             >
-              Escapar
+              {isEscaping ? "Escapando..." : "Escapar"}
             </Link>
           </div>
         </header>
@@ -2708,38 +2864,96 @@ export function CombatEncounterShell({
           className="fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-4"
           role="presentation"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="combat-defeat-title"
-            className="pointer-events-auto w-full max-w-xl"
-          >
+          {!isDefeatPenaltyOpen ? (
             <div
-              className={`${menuFont.className} relative overflow-hidden rounded-xl border border-red-400/80 bg-gradient-to-b from-red-700/95 via-red-900/95 to-red-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.65),0_0_24px_rgba(239,68,68,0.22),inset_0_1px_0_rgba(254,226,226,0.25)]`}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-defeat-title"
+              className="pointer-events-auto w-full max-w-xl"
             >
-              <span
-                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(254,226,226,0.2),transparent_58%)]"
-                aria-hidden
-              />
-              <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
-              <p
-                id="combat-defeat-title"
-                className="relative text-3xl font-black uppercase tracking-[0.2em] text-red-50 drop-shadow-[0_0_12px_rgba(254,202,202,0.55)] sm:text-4xl"
+              <div
+                className={`${menuFont.className} relative overflow-hidden rounded-xl border border-red-400/80 bg-gradient-to-b from-red-700/95 via-red-900/95 to-red-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.65),0_0_24px_rgba(239,68,68,0.22),inset_0_1px_0_rgba(254,226,226,0.25)]`}
               >
-                DERROTA
-              </p>
-              <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-red-100/90">
-              Momento de recobrar fuerzas
-              </p>
-              <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+                <span
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(254,226,226,0.2),transparent_58%)]"
+                  aria-hidden
+                />
+                <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+                <p
+                  id="combat-defeat-title"
+                  className="relative text-3xl font-black uppercase tracking-[0.2em] text-red-50 drop-shadow-[0_0_12px_rgba(254,202,202,0.55)] sm:text-4xl"
+                >
+                  DERROTA
+                </p>
+                <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-red-100/90">
+                  Momento de recobrar fuerzas
+                </p>
+                <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDefeatPenaltyOpen(true)}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+              >
+                Continuar
+              </button>
             </div>
-            <Link
-              href="/"
-              className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+          ) : (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-defeat-loss-title"
+              className="pointer-events-auto w-full max-w-xl"
             >
-              Volver al Campamento
-            </Link>
-          </div>
+              <div
+                className={`${menuFont.className} rounded-xl border border-red-500/80 bg-[#2a120f]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.6)] sm:p-6`}
+              >
+                <p
+                  id="combat-defeat-loss-title"
+                  className="text-center text-base font-black uppercase tracking-[0.16em] text-red-100"
+                >
+                  Lograste salir corriendo, pero te olvidaste esto:
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {defeatLostItems.map((lost) => (
+                    <div
+                      key={`${lost.inventoryId}-${lost.name}`}
+                      className="rounded-md border border-red-600/70 bg-red-950/35 p-2 text-center"
+                    >
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-red-500/60 bg-red-950/45">
+                        {lost.iconPath ? (
+                          <Image
+                            src={lost.iconPath}
+                            alt={lost.name}
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 object-contain"
+                          />
+                        ) : (
+                          <span className="text-[10px] font-black text-red-100">?</span>
+                        )}
+                      </div>
+                      <p className="mt-1 truncate text-[10px] font-semibold uppercase text-red-100/95">
+                        {lost.name}
+                      </p>
+                      <p className="text-xs font-black text-red-200">x{lost.quantityLost}</p>
+                    </div>
+                  ))}
+                  {defeatLostItems.length === 0 ? (
+                    <p className="col-span-2 text-center text-xs font-semibold text-red-100/80">
+                      No había ítems válidos para perder.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <Link
+                href="/"
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+              >
+                Volver al Campamento
+              </Link>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -2930,9 +3144,6 @@ export function CombatEncounterShell({
                     ) : null}
                   </div>
                 </div>
-                <p className="mt-3 text-center text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80">
-                  Enemigos derrotados: {initialEnemies.length}
-                </p>
               </div>
               <Link
                 href={escapeHref}
@@ -2942,6 +3153,37 @@ export function CombatEncounterShell({
               </Link>
             </div>
           )}
+          {isLevelUpModalOpen ? (
+            <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/70 p-4">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="combat-levelup-title"
+                className="pointer-events-auto w-full max-w-md"
+              >
+                <div
+                  className={`${menuFont.className} rounded-xl border border-violet-400/85 bg-gradient-to-b from-violet-700/95 via-violet-900/95 to-violet-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.6),0_0_24px_rgba(139,92,246,0.28),inset_0_1px_0_rgba(237,233,254,0.25)]`}
+                >
+                  <p
+                    id="combat-levelup-title"
+                    className="text-1xl font-black uppercase tracking-[0.18em] text-violet-50 sm:text-2xl"
+                  >
+                    Has subido a nivel <span className="text-amber-300">{levelAfterVictorySafe}</span>
+                  </p>
+                  <p className="mt-3 text-xs font-semibold text-violet-100/90">
+                    Podés asignar tus puntos de característica en la página de perfil de tu personaje
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsLevelUpModalOpen(false)}
+                    className="mx-auto mt-5 block w-full max-w-xs rounded-md border border-violet-300/80 bg-violet-800/80 px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-violet-50 transition hover:bg-violet-700/90"
+                  >
+                    Continuar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

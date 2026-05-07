@@ -72,6 +72,7 @@ type CharacterAbilityView = {
   description: string;
   manaCost: number;
   cooldownTurns: number;
+  unlockLevel: number;
   target: string;
   effect: Record<string, unknown>;
 };
@@ -233,14 +234,15 @@ export default async function CharacterProfilePage() {
     .select("id, item_id, weapon_instance_id, equipment_instance_id, quantity")
     .eq("profile_id", user.id)
     .gt("quantity", 0)
-    .order("id", { ascending: true })
-    .limit(inventorySlots.length);
+    .order("id", { ascending: true });
   const { data: equippedRows } = await supabase
     .from("user_equipment")
     .select("slot, inventory_id")
     .eq("profile_id", user.id);
   const equippedInventoryIds = new Set((equippedRows ?? []).map((row) => row.inventory_id));
-  const visibleInventoryRows = (inventoryRows ?? []).filter((row) => !equippedInventoryIds.has(row.id));
+  const visibleInventoryRows = (inventoryRows ?? [])
+    .filter((row) => !equippedInventoryIds.has(row.id))
+    .slice(0, inventorySlots.length);
   const weaponInstanceIds = (inventoryRows ?? [])
     .map((row) => row.weapon_instance_id)
     .filter((value): value is number => typeof value === "number");
@@ -561,6 +563,8 @@ export default async function CharacterProfilePage() {
     },
   ];
 
+  const characterLevel = Math.max(1, Math.trunc(Number(character?.level ?? 1)));
+
   const { data: rawAbilityRows } = await supabase
     .from("user_character_skills")
     .select(
@@ -573,6 +577,7 @@ export default async function CharacterProfilePage() {
         description,
         mana_cost,
         cooldown_turns,
+        unlock_level,
         target,
         effect_json,
         is_active
@@ -580,6 +585,7 @@ export default async function CharacterProfilePage() {
     `,
     )
     .eq("profile_id", user.id)
+    .lte("player_skills.unlock_level", characterLevel)
     .order("id", { ascending: true });
 
   const abilities: CharacterAbilityView[] = ((rawAbilityRows ?? []) as Array<Record<string, unknown>>)
@@ -609,6 +615,8 @@ export default async function CharacterProfilePage() {
             : "Sin descripción.";
       const manaCost =
         typeof skill.mana_cost === "number" ? Math.max(0, Math.trunc(skill.mana_cost)) : 0;
+      const unlockLevel =
+        typeof skill.unlock_level === "number" ? Math.max(0, Math.trunc(skill.unlock_level)) : 0;
       
         const cooldownTurns =
         typeof skill.cooldown_turns === "number"
@@ -629,11 +637,13 @@ export default async function CharacterProfilePage() {
         description,
         manaCost,
         cooldownTurns,
+        unlockLevel,
         target,
         effect,
       };
     })
-    .filter((entry): entry is CharacterAbilityView => entry !== null);
+    .filter((entry): entry is CharacterAbilityView => entry !== null)
+    .sort((a, b) => a.unlockLevel - b.unlockLevel || a.name.localeCompare(b.name, "es"));
 
   return (
     <div
