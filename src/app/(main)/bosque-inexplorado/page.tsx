@@ -4,7 +4,17 @@ import { HIDDEN_FOREST_ZONE_CODE } from "@/lib/game-zones";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-export default async function BosqueInexploradoPage() {
+type BosqueInexploradoPageProps = {
+  searchParams?: Promise<{ hotspot?: string }>;
+};
+
+export default async function BosqueInexploradoPage({ searchParams }: BosqueInexploradoPageProps) {
+  const resolvedSearch = searchParams ? await searchParams : {};
+  const hotspotQuery =
+    typeof resolvedSearch?.hotspot === "string" && resolvedSearch.hotspot.trim().length > 0
+      ? resolvedSearch.hotspot.trim()
+      : null;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -53,6 +63,7 @@ export default async function BosqueInexploradoPage() {
         <HiddenForestMap
           currentCombatStep={currentCombatStep}
           zoneCode={HIDDEN_FOREST_ZONE_CODE}
+          initialHotspotId={hotspotQuery}
         />
       </main>
     </div>

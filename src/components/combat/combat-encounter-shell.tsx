@@ -16,6 +16,8 @@ const ACTION_DELAY_MS = 1000;
 const FIRST_ACTION_DELAY_MS = 3000;
 /** Igual que tutorial: deja terminar la animación de barra HP antes del modal de derrota. */
 const DEFEAT_MODAL_DELAY_MS = 300;
+/** Espera breve tras eliminar al último enemigo antes de abrir el modal de victoria. */
+const VICTORY_MODAL_DELAY_MS = 1000;
 
 /** Misma altura que la caja scroll del Combat Log en cada breakpoint (mobile vs sm). */
 const ACTIONS_PANEL_BODY_MOBILE =
@@ -474,6 +476,7 @@ function getPlayerSkillSubtypeStyles(subtype: PlayerSkillEffectSubtype): PlayerS
 /** Datos del enemigo para UI + lógica de combate en cliente (HP visible en panel por enemigo). */
 export type CombatEncounterEnemyView = {
   id: string;
+  templateId: string | null;
   spawnIndex: number;
   name: string;
   portraitSrc: string | null;
@@ -500,12 +503,94 @@ export type CombatEncounterEnemyView = {
   aiProfile: string | null;
 };
 
+export type CombatVictoryLootItem = {
+  lootKey: string;
+  itemId: string;
+  name: string;
+  iconPath: string | null;
+  quantity: number;
+  description: string | null;
+  quoteText: string | null;
+  sellValue: number;
+  itemTypeId: number | null;
+  itemTypeCode: string | null;
+  rarityColor: string | null;
+  weaponInstance?: {
+    rarity: string | null;
+    rarityColor: string | null;
+    attackDamageMin: number | null;
+    attackDamageMax: number | null;
+    magicDamageMin: number | null;
+    magicDamageMax: number | null;
+    statKey1: string | null;
+    valueFlat1: number | null;
+    valuePct1: number | null;
+    statKey2: string | null;
+    valueFlat2: number | null;
+    valuePct2: number | null;
+    statKey3: string | null;
+    valueFlat3: number | null;
+    valuePct3: number | null;
+  } | null;
+  equipmentInstance?: {
+    rarity: string | null;
+    rarityColor: string | null;
+    statKey1: string | null;
+    valueFlat1: number | null;
+    valuePct1: number | null;
+    statKey2: string | null;
+    valueFlat2: number | null;
+    valuePct2: number | null;
+    statKey3: string | null;
+    valueFlat3: number | null;
+    valuePct3: number | null;
+  } | null;
+};
+
+function capitalizeFirst(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function formatWeaponStatLine(
+  statKey: string | null | undefined,
+  valueFlat: number | null | undefined,
+  valuePct: number | null | undefined,
+): string | null {
+  const key = statKey?.trim();
+  if (!key) return null;
+  if (valueFlat != null && Number.isFinite(Number(valueFlat))) {
+    return `+ ${valueFlat} ${key}`;
+  }
+  if (valuePct != null && Number.isFinite(Number(valuePct))) {
+    return `+ ${valuePct}% ${key}`;
+  }
+  return null;
+}
+
+function weaponDamageRange(
+  min: number | null | undefined,
+  max: number | null | undefined,
+): string {
+  const a = min != null && Number.isFinite(Number(min)) ? Number(min) : 0;
+  const b = max != null && Number.isFinite(Number(max)) ? Number(max) : 0;
+  return `${a} - ${b}`;
+}
+
 export type CombatPlayerConsumableView = {
   inventoryId: number;
   itemId: string;
   name: string;
   description: string | null;
+  effect: Record<string, unknown> | null;
   quantity: number;
+};
+
+export type CombatConsumeResult = {
+  ok: boolean;
+  remainingQuantity?: number;
+  error?: string;
 };
 
 export type CombatEncounterDebugPayload = {
@@ -530,6 +615,7 @@ export type CombatEncounterDebugPayload = {
     ai_profile: string | null;
     enemyTemplate: Record<string, unknown> | null;
   }>;
+  lootDebug?: Record<string, unknown>;
 };
 
 export type CombatEncounterShellProps = {
@@ -564,6 +650,14 @@ export type CombatEncounterShellProps = {
   playerSkills?: CombatPlayerSkillView[];
   /** Consumibles visibles en combate (`user_inventory` + `items`, item_type_id=consumable). */
   playerConsumables?: CombatPlayerConsumableView[];
+  /** Loot ya rolado al iniciar el combate (`enemy_drop_tables.combat_encounter_id` = `combat_encounters.code`). */
+  victoryLootItems?: CombatVictoryLootItem[];
+  /** Oro calculado desde los drops rolados (no desde enemy_templates.gold_rewards). */
+  victoryGoldFromLoot?: number;
+  /** Acción servidor para consumir 1 unidad en inventario. */
+  onConsumeConsumable?: (inventoryId: number) => Promise<CombatConsumeResult>;
+  /** Registra en el log global cuando el PJ cae en combate. */
+  onPlayerDefeatedGlobalLog?: () => Promise<void>;
   /** Destino para "Escapar" (normalmente el mapa de la zona origen). */
   escapeHref?: string;
 };
@@ -828,6 +922,10 @@ export function CombatEncounterShell({
   playerMr = 0,
   playerSkills = [],
   playerConsumables = [],
+  victoryLootItems = [],
+  victoryGoldFromLoot = 0,
+  onConsumeConsumable,
+  onPlayerDefeatedGlobalLog,
   escapeHref = "/",
 }: CombatEncounterShellProps) {
   const backgroundResolved = backgroundSrc?.trim() || BG_INTRO_FOREST;
@@ -837,6 +935,12 @@ export function CombatEncounterShell({
   useEffect(() => {
     playerCombatSkillsRef.current = playerCombatSkills;
   }, [playerCombatSkills]);
+  const [combatConsumables, setCombatConsumables] = useState<CombatPlayerConsumableView[]>([
+    ...playerConsumables,
+  ]);
+  useEffect(() => {
+    setCombatConsumables([...playerConsumables]);
+  }, [playerConsumables]);
 
   const initialEnemies = useMemo(
     () => enemies.slice(0, MAX_ENEMIES_ON_FIELD),
@@ -872,6 +976,8 @@ export function CombatEncounterShell({
   const advanceTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialActionDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const defeatModalDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const victoryModalDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didReportDefeatRef = useRef(false);
   const [attackHint, setAttackHint] = useState<{
     visible: boolean;
     x: number;
@@ -884,7 +990,16 @@ export function CombatEncounterShell({
     pinned: boolean;
     skillId: string | null;
   }>({ open: false, x: 0, y: 0, pinned: false, skillId: null });
+  const [consumableInfoTooltip, setConsumableInfoTooltip] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    pinned: boolean;
+    inventoryId: number | null;
+  }>({ open: false, x: 0, y: 0, pinned: false, inventoryId: null });
   const [isDefeatOverlayVisible, setIsDefeatOverlayVisible] = useState(false);
+  const [isVictoryOverlayVisible, setIsVictoryOverlayVisible] = useState(false);
+  const [isVictoryLootOpen, setIsVictoryLootOpen] = useState(false);
 
   const [turn, setTurn] = useState(1);
 
@@ -926,9 +1041,16 @@ export function CombatEncounterShell({
 
   useEffect(() => {
     setIsDefeatOverlayVisible(false);
+    setIsVictoryOverlayVisible(false);
+    setIsVictoryLootOpen(false);
+    didReportDefeatRef.current = false;
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
       defeatModalDelayRef.current = null;
+    }
+    if (victoryModalDelayRef.current) {
+      clearTimeout(victoryModalDelayRef.current);
+      victoryModalDelayRef.current = null;
     }
   }, [encounterCode]);
 
@@ -954,6 +1076,47 @@ export function CombatEncounterShell({
       }
     };
   }, [playerCurrentHp]);
+  useEffect(() => {
+    if (playerCurrentHp > 0) return;
+    if (didReportDefeatRef.current) return;
+    didReportDefeatRef.current = true;
+    if (!onPlayerDefeatedGlobalLog) return;
+    void onPlayerDefeatedGlobalLog().catch(() => {
+      // Si falla el log global no debe bloquear el flujo de combate.
+    });
+  }, [playerCurrentHp, onPlayerDefeatedGlobalLog]);
+  const hasAnyEnemy = displayEnemies.length > 0;
+  const hasAliveEnemies = displayEnemies.some((enemy) => enemy.hp > 0);
+  const victoryTotalXp = useMemo(
+    () => initialEnemies.reduce((sum, enemy) => sum + Math.max(0, Math.trunc(enemy.xpReward)), 0),
+    [initialEnemies],
+  );
+  const victoryTotalGold = Math.max(0, Math.trunc(victoryGoldFromLoot));
+  useEffect(() => {
+    if (!hasAnyEnemy || hasAliveEnemies || playerCurrentHp <= 0) {
+      setIsVictoryOverlayVisible(false);
+      setIsVictoryLootOpen(false);
+      if (victoryModalDelayRef.current) {
+        clearTimeout(victoryModalDelayRef.current);
+        victoryModalDelayRef.current = null;
+      }
+      return;
+    }
+    if (isVictoryOverlayVisible) return;
+    if (victoryModalDelayRef.current) return;
+
+    victoryModalDelayRef.current = setTimeout(() => {
+      setIsVictoryOverlayVisible(true);
+      victoryModalDelayRef.current = null;
+    }, VICTORY_MODAL_DELAY_MS);
+
+    return () => {
+      if (victoryModalDelayRef.current) {
+        clearTimeout(victoryModalDelayRef.current);
+        victoryModalDelayRef.current = null;
+      }
+    };
+  }, [hasAnyEnemy, hasAliveEnemies, playerCurrentHp, isVictoryOverlayVisible]);
   useEffect(() => {
     setDisplayPlayerMana(Math.min(Math.max(0, playerMana), Math.max(0, playerManaMax)));
   }, [playerMana, playerManaMax]);
@@ -1035,6 +1198,30 @@ export function CombatEncounterShell({
   const effectiveTurnIndex =
     turnOrder.length === 0 ? 0 : Math.min(currentTurnIndex, turnOrder.length - 1);
   const currentActor = turnOrder[effectiveTurnIndex] ?? null;
+  const runtimeInitiativeDebug = useMemo(
+    () => ({
+      playerSpeed: Math.max(0, Math.trunc(playerSpeed)),
+      enemies: displayEnemies.map((enemy) => ({
+        id: enemy.id,
+        name: enemy.name,
+        speed: Math.max(0, Math.trunc(enemy.speed)),
+        hp: enemy.hp,
+        alive: enemy.hp > 0,
+      })),
+      turnOrder: turnOrder.map((actor, idx) => ({
+        idx,
+        actorId: actor.id,
+        actorType: actor.type,
+        speed: actor.speed,
+        isCurrent: idx === effectiveTurnIndex,
+      })),
+      currentTurnIndex: effectiveTurnIndex,
+      currentActorId: currentActor?.id ?? null,
+      currentActorType: currentActor?.type ?? null,
+      turn,
+    }),
+    [playerSpeed, displayEnemies, turnOrder, effectiveTurnIndex, currentActor, turn],
+  );
   useEffect(() => {
     if (turnOrder.length === 0) return;
     const previous = previousTurnIndexRef.current;
@@ -1063,6 +1250,10 @@ export function CombatEncounterShell({
       if (defeatModalDelayRef.current) {
         clearTimeout(defeatModalDelayRef.current);
         defeatModalDelayRef.current = null;
+      }
+      if (victoryModalDelayRef.current) {
+        clearTimeout(victoryModalDelayRef.current);
+        victoryModalDelayRef.current = null;
       }
     },
     [],
@@ -1166,6 +1357,167 @@ export function CombatEncounterShell({
     );
   }
 
+  function consumableObjective(effect: Record<string, unknown> | null): "self" | "enemy" {
+    const raw =
+      typeof effect?.objetive === "string"
+        ? effect.objetive.trim().toLowerCase()
+        : typeof effect?.objective === "string"
+          ? effect.objective.trim().toLowerCase()
+          : "";
+    return raw === "enemy" ? "enemy" : "self";
+  }
+
+  function consumableTarget(effect: Record<string, unknown> | null): "single" | "area" {
+    const raw = typeof effect?.target === "string" ? effect.target.trim().toLowerCase() : "";
+    return raw === "area" ? "area" : "single";
+  }
+
+  function consumableStat(effect: Record<string, unknown> | null): string {
+    return typeof effect?.stat === "string" ? effect.stat.trim().toLowerCase() : "";
+  }
+
+  function consumableAmount(effect: Record<string, unknown> | null): number {
+    const min = coerceEffectNumber(effect?.["amount-min"], 0);
+    const max = coerceEffectNumber(effect?.["amount-max"], min);
+    return Math.max(0, randomIntInclusive(min, max));
+  }
+
+  function consumableLogText(
+    item: CombatPlayerConsumableView,
+    amountApplied: number,
+    enemyName?: string | null,
+  ): string {
+    const fromEffect = item.effect?.text;
+    if (typeof fromEffect === "string" && fromEffect.trim().length > 0) {
+      let text = fromEffect.trim().replaceAll("{daño}", String(Math.max(0, Math.trunc(amountApplied))));
+      if (enemyName && enemyName.trim().length > 0) {
+        text = text.replaceAll("{enemigo}", enemyName.trim());
+      }
+      return text;
+    }
+    return `Usaste ${item.name}.`;
+  }
+
+  function canUseConsumable(item: CombatPlayerConsumableView): boolean {
+    if (isPlayerActionsLocked) return false;
+    if (item.quantity <= 0) return false;
+    if (!item.effect) return false;
+    const objective = consumableObjective(item.effect);
+    if (objective !== "enemy") return true;
+    const target = consumableTarget(item.effect);
+    if (target === "area") return displayEnemies.some((enemy) => enemy.hp > 0);
+    return selectedEnemy != null && selectedEnemy.hp > 0;
+  }
+
+  function applyEffectToEnemy(
+    enemy: CombatEncounterEnemyView,
+    stat: string,
+    amount: number,
+  ): CombatEncounterEnemyView {
+    if (stat === "hp") return { ...enemy, hp: Math.max(0, enemy.hp - amount) };
+    if (stat === "mana" || stat === "mp") return { ...enemy, mana: Math.max(0, enemy.mana - amount) };
+    if (stat === "armor") return { ...enemy, armor: Math.max(0, enemy.armor - amount) };
+    if (stat === "mr") return { ...enemy, mr: Math.max(0, enemy.mr - amount) };
+    if (stat === "speed") return { ...enemy, speed: Math.max(0, enemy.speed - amount) };
+    return enemy;
+  }
+
+  async function handleConsumableUse(item: CombatPlayerConsumableView) {
+    if (!canUseConsumable(item)) return;
+
+    // Gasto optimista para evitar doble click mientras responde el server action.
+    setCombatConsumables((prev) =>
+      prev
+        .map((entry) =>
+          entry.inventoryId === item.inventoryId
+            ? { ...entry, quantity: Math.max(0, entry.quantity - 1) }
+            : entry,
+        )
+        .filter((entry) => entry.quantity > 0),
+    );
+
+    if (onConsumeConsumable) {
+      const result = await onConsumeConsumable(item.inventoryId);
+      if (!result.ok) {
+        setCombatConsumables((prev) => {
+          const existing = prev.find((entry) => entry.inventoryId === item.inventoryId);
+          if (existing) {
+            return prev.map((entry) =>
+              entry.inventoryId === item.inventoryId
+                ? { ...entry, quantity: existing.quantity + 1 }
+                : entry,
+            );
+          }
+          return [...prev, item];
+        });
+        appendCombatLog(result.error?.trim() || "No se pudo consumir el objeto.", "danger");
+        return;
+      }
+      if (typeof result.remainingQuantity === "number") {
+        const qty = Math.max(0, Math.trunc(result.remainingQuantity));
+        setCombatConsumables((prev) => {
+          const exists = prev.some((entry) => entry.inventoryId === item.inventoryId);
+          if (qty <= 0) {
+            return prev.filter((entry) => entry.inventoryId !== item.inventoryId);
+          }
+          if (!exists) return [...prev, { ...item, quantity: qty }];
+          return prev.map((entry) =>
+            entry.inventoryId === item.inventoryId ? { ...entry, quantity: qty } : entry,
+          );
+        });
+      }
+    }
+
+    const objective = consumableObjective(item.effect);
+    const target = consumableTarget(item.effect);
+    const stat = consumableStat(item.effect);
+    const amount = consumableAmount(item.effect);
+    if (objective === "self") {
+      if (stat === "hp") {
+        setPlayerCurrentHp((prev) => Math.min(playerHpMax, Math.max(0, prev + amount)));
+      } else if (stat === "mana" || stat === "mp") {
+        setDisplayPlayerMana((prev) => Math.min(playerManaMax, Math.max(0, prev + amount)));
+      }
+      appendCombatLog(consumableLogText(item, amount), "default", amount);
+      setActionMenu("main");
+      scheduleAdvanceTurn();
+      return;
+    }
+
+    if (target === "single") {
+      const enemy = selectedEnemy;
+      if (!enemy || enemy.hp <= 0) {
+        appendCombatLog("Seleccioná un enemigo para usar este consumible.", "default");
+        return;
+      }
+      let targetDied = false;
+      setDisplayEnemies((prev) =>
+        prev.map((entry) => {
+          if (entry.id !== enemy.id) return entry;
+          const next = applyEffectToEnemy(entry, stat, amount);
+          targetDied = entry.hp > 0 && next.hp <= 0;
+          return next;
+        }),
+      );
+      appendCombatLog(consumableLogText(item, amount, enemy.name), "default", amount);
+      if (targetDied) {
+        appendCombatLog(`Has matado a ${enemy.name}.`, "success");
+        setSelectedEnemyId(null);
+      }
+      setActionMenu("main");
+      scheduleAdvanceTurn();
+      return;
+    }
+
+    setDisplayEnemies((prev) =>
+      prev.map((entry) => (entry.hp > 0 ? applyEffectToEnemy(entry, stat, amount) : entry)),
+    );
+    appendCombatLog(consumableLogText(item, amount), "default", amount);
+
+    setActionMenu("main");
+    scheduleAdvanceTurn();
+  }
+
   const isPlayerActionsLocked = !isPlayerTurn || isTurnTransitioning || playerCurrentHp <= 0;
 
   function openSkillInfoTooltip(skillId: string, x: number, y: number, pinned: boolean) {
@@ -1194,6 +1546,36 @@ export function CombatEncounterShell({
             y: Math.min(y + 12, window.innerHeight - 170),
             pinned: true,
             skillId,
+          },
+    );
+  }
+
+  function openConsumableInfoTooltip(inventoryId: number, x: number, y: number, pinned: boolean) {
+    setConsumableInfoTooltip({
+      open: true,
+      x: Math.min(x + 12, window.innerWidth - 360),
+      y: Math.min(y + 12, window.innerHeight - 170),
+      pinned,
+      inventoryId,
+    });
+  }
+
+  function hideConsumableInfoTooltip() {
+    setConsumableInfoTooltip((prev) =>
+      prev.pinned ? prev : { open: false, x: 0, y: 0, pinned: false, inventoryId: null },
+    );
+  }
+
+  function toggleConsumableInfoTooltipPinned(inventoryId: number, x: number, y: number) {
+    setConsumableInfoTooltip((prev) =>
+      prev.open && prev.pinned && prev.inventoryId === inventoryId
+        ? { open: false, x: 0, y: 0, pinned: false, inventoryId: null }
+        : {
+            open: true,
+            x: Math.min(x + 12, window.innerWidth - 360),
+            y: Math.min(y + 12, window.innerHeight - 170),
+            pinned: true,
+            inventoryId,
           },
     );
   }
@@ -1331,6 +1713,10 @@ export function CombatEncounterShell({
     skillInfoTooltip.skillId === null
       ? undefined
       : playerCombatSkills.find((s) => s.userCharacterSkillId === skillInfoTooltip.skillId);
+  const consumableTooltipEntry =
+    consumableInfoTooltip.inventoryId == null
+      ? undefined
+      : combatConsumables.find((c) => c.inventoryId === consumableInfoTooltip.inventoryId);
 
   const skillTooltipStyles =
     skillTooltipEntry != null
@@ -1524,7 +1910,16 @@ export function CombatEncounterShell({
               Debug combate (?debug=1)
             </summary>
             <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-emerald-100/90">
-              {JSON.stringify(combatDebug, null, 2)}
+              {JSON.stringify(
+                {
+                  server: combatDebug,
+                  runtime: {
+                    initiative: runtimeInitiativeDebug,
+                  },
+                },
+                null,
+                2,
+              )}
             </pre>
           </details>
         ) : null}
@@ -1754,7 +2149,7 @@ export function CombatEncounterShell({
                       className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
                         isPlayerActionsLocked
                           ? "cursor-not-allowed border-slate-600/70 bg-slate-800/40 text-slate-300 opacity-55"
-                          : "cursor-pointer border-violet-600/70 bg-violet-900/45 text-violet-100 hover:bg-violet-800/65"
+                          : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
                       }`}
                     >
                       Inventario
@@ -1841,7 +2236,7 @@ export function CombatEncounterShell({
                     </div>
                     </div>
                   )
-                ) : playerConsumables.length === 0 ? (
+                ) : combatConsumables.length === 0 ? (
                   <p
                     className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-[11px] text-amber-200/75`}
                   >
@@ -1850,20 +2245,47 @@ export function CombatEncounterShell({
                 ) : (
                   <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
                   <div className="grid gap-1">
-                    {playerConsumables.map((item) => (
-                      <div key={item.inventoryId} className="flex items-center gap-1.5">
+                    {combatConsumables.map((item) => {
+                      const usable = canUseConsumable(item);
+                      return (
+                        <div key={item.inventoryId} className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={!usable}
+                            onClick={() => void handleConsumableUse(item)}
+                            className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug ${
+                              !usable
+                                ? "cursor-not-allowed border-yellow-700/65 bg-yellow-950/35 text-yellow-100/90 opacity-70"
+                                : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                            }`}
+                          >
+                            {item.name}
+                          </button>
                         <button
                           type="button"
-                          disabled
-                          className="w-full cursor-not-allowed rounded-md border border-violet-700/65 bg-violet-950/35 px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug text-violet-100/90 opacity-90"
+                          onMouseEnter={(e) =>
+                            openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                          }
+                          onMouseMove={(e) =>
+                            openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                          }
+                          onMouseLeave={hideConsumableInfoTooltip}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleConsumableInfoTooltipPinned(item.inventoryId, e.clientX, e.clientY);
+                          }}
+                          className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-yellow-700/70 bg-yellow-950/55 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-900/70"
+                          aria-label={`Información de ${item.name}`}
                         >
-                          {item.name}
+                          ?
                         </button>
-                        <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-violet-700/65 bg-violet-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-violet-100`}>
-                          x{item.quantity}
-                        </span>
-                      </div>
-                    ))}
+                          <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-yellow-700/65 bg-yellow-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-yellow-100`}>
+                            x{item.quantity}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                   </div>
                 )}
@@ -2008,7 +2430,7 @@ export function CombatEncounterShell({
                   className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
                     isPlayerActionsLocked
                       ? "cursor-not-allowed border-slate-500/70 bg-slate-700/45 text-slate-300 opacity-55"
-                      : "cursor-pointer border-violet-600/70 bg-violet-900/45 text-violet-100 hover:bg-violet-800/65"
+                      : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
                   }`}
                 >
                   Inventario
@@ -2081,7 +2503,7 @@ export function CombatEncounterShell({
                 </div>
                 </div>
               )
-            ) : playerConsumables.length === 0 ? (
+            ) : combatConsumables.length === 0 ? (
               <p
                 className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-sm text-amber-200/75`}
               >
@@ -2090,20 +2512,47 @@ export function CombatEncounterShell({
             ) : (
               <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
               <div className="grid gap-1 sm:gap-1.5">
-                {playerConsumables.map((item) => (
-                  <div key={item.inventoryId} className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full cursor-not-allowed rounded-md border border-violet-700/65 bg-violet-950/35 px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug text-violet-100/90 opacity-90 sm:px-2 sm:py-1 sm:text-xs"
-                    >
-                      {item.name}
-                    </button>
-                    <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-violet-700/65 bg-violet-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-violet-100 sm:text-[11px]`}>
-                      x{item.quantity}
-                    </span>
-                  </div>
-                ))}
+                {combatConsumables.map((item) => {
+                  const usable = canUseConsumable(item);
+                  return (
+                    <div key={item.inventoryId} className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={!usable}
+                        onClick={() => void handleConsumableUse(item)}
+                        className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug sm:px-2 sm:py-1 sm:text-xs ${
+                          !usable
+                            ? "cursor-not-allowed border-yellow-700/65 bg-yellow-950/35 text-yellow-100/90 opacity-70"
+                            : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                        }`}
+                      >
+                        {item.name}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseEnter={(e) =>
+                          openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                        }
+                        onMouseMove={(e) =>
+                          openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                        }
+                        onMouseLeave={hideConsumableInfoTooltip}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleConsumableInfoTooltipPinned(item.inventoryId, e.clientX, e.clientY);
+                        }}
+                        className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-yellow-700/70 bg-yellow-950/55 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-900/70"
+                        aria-label={`Información de ${item.name}`}
+                      >
+                        ?
+                      </button>
+                      <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-yellow-700/65 bg-yellow-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-yellow-100 sm:text-[11px]`}>
+                        x{item.quantity}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               </div>
             )}
@@ -2216,6 +2665,30 @@ export function CombatEncounterShell({
           </p>
         </div>
       ) : null}
+      {consumableInfoTooltip.open && consumableTooltipEntry ? (
+        <div
+          className={`${helpCardFont.className} fixed z-[62] max-w-sm rounded-lg border border-yellow-700/80 bg-[#1b1408]/96 px-3 py-2 pr-8 text-sm leading-relaxed text-yellow-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
+          style={{ left: consumableInfoTooltip.x, top: consumableInfoTooltip.y }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setConsumableInfoTooltip({ open: false, x: 0, y: 0, pinned: false, inventoryId: null })
+            }
+            className="absolute right-1 top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-yellow-600/85 bg-yellow-900/70 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-800/80"
+            aria-label="Cerrar tooltip de consumible"
+          >
+            X
+          </button>
+          <p className={`${menuFont.className} text-sm font-semibold leading-snug text-yellow-100`}>
+            {consumableTooltipEntry.name}
+          </p>
+          <div className="my-1 h-px w-full bg-gradient-to-r from-transparent via-yellow-500/45 to-transparent" aria-hidden />
+          <p className="text-xs text-yellow-100/95">
+            {consumableTooltipEntry.description?.trim() || "Sin descripción."}
+          </p>
+        </div>
+      ) : null}
       {attackHint.visible ? (
         <div
           className="pointer-events-none fixed z-[999] max-w-[240px] rounded-md border border-amber-700/80 bg-[#1a100c]/95 px-2 py-1 text-[11px] font-semibold text-amber-100 shadow-[0_8px_20px_rgba(0,0,0,0.45)]"
@@ -2261,12 +2734,214 @@ export function CombatEncounterShell({
               <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
             </div>
             <Link
-              href={escapeHref}
+              href="/"
               className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
             >
-              Volver al campamento
+              Volver al Campamento
             </Link>
           </div>
+        </div>
+      ) : null}
+
+      {playerCurrentHp > 0 && isVictoryOverlayVisible ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-4"
+          role="presentation"
+        >
+          {!isVictoryLootOpen ? (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-victory-title"
+              className="pointer-events-auto w-full max-w-xl"
+            >
+              <div
+                className={`${menuFont.className} relative overflow-hidden rounded-xl border border-emerald-400/85 bg-gradient-to-b from-emerald-700/95 via-emerald-850/95 to-emerald-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.6),0_0_24px_rgba(16,185,129,0.28),inset_0_1px_0_rgba(209,250,229,0.35)]`}
+              >
+                <span
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(209,250,229,0.28),transparent_58%)]"
+                  aria-hidden
+                />
+                <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
+                <p
+                  id="combat-victory-title"
+                  className="relative text-3xl font-black uppercase tracking-[0.2em] text-emerald-50 drop-shadow-[0_0_12px_rgba(167,243,208,0.6)] sm:text-4xl"
+                >
+                  VICTORIA
+                </p>
+                <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/90">
+                  El enemigo ha sido derrotado
+                </p>
+                <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVictoryLootOpen(true)}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-emerald-600/90 bg-emerald-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-emerald-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-emerald-700/95 sm:mt-6`}
+              >
+                Continuar
+              </button>
+            </div>
+          ) : (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-rewards-title"
+              className="pointer-events-auto w-full max-w-xl"
+            >
+              <div
+                className={`${menuFont.className} rounded-xl border border-amber-700/70 bg-[#1c120e]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.55)] sm:p-6`}
+              >
+                <p
+                  id="combat-rewards-title"
+                  className="mb-5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/95"
+                >
+                  Recompensas del combate
+                </p>
+                <div className="mt-3 rounded-lg border border-amber-700/55 bg-black/20 p-3">
+                  <div className="mx-auto mt-2 flex max-w-full flex-wrap items-start justify-center gap-2 gap-y-3">
+                    <div className="w-full max-w-[7rem] rounded-md border border-violet-600/60 bg-violet-900/20 p-2 text-center">
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-violet-500/70 bg-violet-950/40">
+                        <Image
+                          src="/img/resources/iconos/icon_xp.png"
+                          alt="Experiencia"
+                          width={32}
+                          height={32}
+                          className="h-8 w-8 object-contain"
+                        />
+                      </div>
+                      <p className="mt-1 truncate text-[10px] font-semibold uppercase text-emerald-100/90">
+                        Experiencia
+                      </p>
+                      <p className="text-xs font-black text-emerald-100">+{victoryTotalXp}</p>
+                    </div>
+                    {victoryLootItems.map((loot) => {
+                      const rarityBorderStyle =
+                        typeof loot.rarityColor === "string" && loot.rarityColor.trim().length > 0
+                          ? { borderColor: loot.rarityColor.trim() }
+                          : undefined;
+                      return (
+                      <div
+                        key={loot.lootKey}
+                        className="group relative w-full max-w-[7rem] rounded-md border border-amber-700/55 bg-amber-900/20 p-2 text-center"
+                        style={rarityBorderStyle}
+                      >
+                        <div
+                          className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-amber-600/60 bg-amber-950/40"
+                          style={rarityBorderStyle}
+                        >
+                          {loot.iconPath ? (
+                            <Image
+                              src={loot.iconPath}
+                              alt={loot.name}
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 object-contain"
+                            />
+                          ) : (
+                            <span className="text-[10px] font-black text-amber-100">?</span>
+                          )}
+                        </div>
+                        <p className="mt-1 truncate text-[10px] font-semibold uppercase text-amber-100/90" title={loot.name}>
+                          {loot.name}
+                        </p>
+                        <p className="text-xs font-black text-amber-100">x{loot.quantity}</p>
+                        <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-amber-700/75 bg-[#1c120e]/95 px-3 py-2 text-left text-sm text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)] group-hover:block">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`${menuFont.className} text-sm font-bold leading-tight text-amber-200`}>
+                              {loot.name}
+                            </p>
+                            {loot.itemTypeId !== 2 ? (
+                              <div className="flex items-center gap-1 text-xs font-semibold text-amber-200">
+                                <Image
+                                  src="/img/resources/iconos/icon_gold.png"
+                                  alt="Oro"
+                                  width={12}
+                                  height={12}
+                                  className="h-3 w-3 object-contain"
+                                />
+                                <span>{loot.sellValue}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-[10px] uppercase text-amber-200/80">
+                            {capitalizeFirst(loot.itemTypeCode ?? "item")}
+                          </p>
+                          {loot.description ? (
+                            <p className={`${helpCardFont.className} mt-1 text-[11px] italic leading-relaxed text-amber-50/90`}>
+                              {loot.description}
+                            </p>
+                          ) : null}
+                          {loot.quoteText ? (
+                            <p
+                              className={`${helpCardFont.className} mt-1 text-[10px] italic leading-relaxed text-amber-200/85`}
+                              style={{ fontStyle: "italic" }}
+                            >
+                              - <em>"{loot.quoteText}"</em>
+                            </p>
+                          ) : null}
+                          {(() => {
+                            const roll = loot.weaponInstance ?? loot.equipmentInstance ?? null;
+                            if (!roll) return null;
+                            const showDamage = Boolean(loot.weaponInstance);
+                            const statLines = [
+                              formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
+                              formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
+                              formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                            ].filter(Boolean);
+                            return (
+                              <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
+                                {roll.rarity ? (
+                                  <p className="font-semibold" style={{ color: roll.rarityColor ?? undefined }}>
+                                    {roll.rarity}
+                                  </p>
+                                ) : null}
+                                {showDamage ? (
+                                  <>
+                                    <p>
+                                      {weaponDamageRange(
+                                        loot.weaponInstance?.attackDamageMin,
+                                        loot.weaponInstance?.attackDamageMax,
+                                      )}{" "}
+                                      Daño
+                                    </p>
+                                    <p>
+                                      {weaponDamageRange(
+                                        loot.weaponInstance?.magicDamageMin,
+                                        loot.weaponInstance?.magicDamageMax,
+                                      )}{" "}
+                                      Daño Mágico
+                                    </p>
+                                  </>
+                                ) : null}
+                                {statLines.map((line, idx) => (
+                                  <p key={`${line}-${idx}`}>{line}</p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )})}
+                    {victoryLootItems.length === 0 ? (
+                      <p className="w-full text-center text-xs font-semibold text-amber-100/80">
+                        No obtuviste ítems en este combate.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="mt-3 text-center text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80">
+                  Enemigos derrotados: {initialEnemies.length}
+                </p>
+              </div>
+              <Link
+                href={escapeHref}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-amber-600/90 bg-amber-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-amber-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-amber-700/95 sm:mt-6`}
+              >
+                Volver al mapa
+              </Link>
+            </div>
+          )}
         </div>
       ) : null}
     </div>

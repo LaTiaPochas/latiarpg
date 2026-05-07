@@ -21,6 +21,7 @@ import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/componen
 type InventoryItem = {
   id: number;
   name: string;
+  itemTypeCode?: string | null;
   description: string;
   quoteText: string | null;
   iconPath: string;
@@ -99,6 +100,12 @@ const abilitiesFont = Montserrat({
   subsets: ["latin"],
   weight: ["500", "600", "700"],
 });
+
+function capitalizeFirst(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
 const itemTooltipFont = Libre_Baskerville({
   subsets: ["latin"],
   weight: ["400", "700"],
@@ -1084,9 +1091,28 @@ export function InventoryGrid({
               </>
             ) : (
               <>
-                <p className={`${abilitiesFont.className} text-xs font-bold uppercase tracking-wider text-amber-300`}>
-                  {activeItem.name}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <p className={`${abilitiesFont.className} text-xs font-bold uppercase tracking-wider text-amber-300`}>
+                    {activeItem.name}
+                  </p>
+                  {activeItem.itemTypeId !== 2 ? (
+                    <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-200">
+                      <Image
+                        src="/img/resources/iconos/icon_gold.png"
+                        alt="Oro"
+                        width={14}
+                        height={14}
+                        className="h-3.5 w-3.5 object-contain"
+                      />
+                      <span>{activeItem.sellValue}</span>
+                    </div>
+                  ) : null}
+                </div>
+                {activeItem.itemTypeCode && (activeItem.itemTypeId === 2 || activeItem.itemTypeId === 3) ? (
+                  <p className={`${abilitiesFont.className} mt-0.5 text-[11px] font-semibold text-amber-300/85`}>
+                    {capitalizeFirst(activeItem.itemTypeCode)}
+                  </p>
+                ) : null}
                 <p className={`${itemTooltipFont.className} mt-2 italic leading-relaxed text-amber-50/90`}>
                   {activeItem.description}
                 </p>

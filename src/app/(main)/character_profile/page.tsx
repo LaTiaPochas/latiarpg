@@ -92,6 +92,23 @@ type ItemClassRequirementRow = {
     | null;
 };
 
+type ItemTypeJoinRow = {
+  code: string | null;
+};
+
+type InventoryItemRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  quote_text: string | null;
+  icon_path: string | null;
+  equip_slot: string | null;
+  sell_value: number | null;
+  item_type_id: number | null;
+  rarity_color: string | null;
+  item_types: ItemTypeJoinRow | ItemTypeJoinRow[] | null;
+};
+
 function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null): WeaponInstanceTooltip | null {
   if (!row) return null;
   return {
@@ -168,7 +185,7 @@ export default async function CharacterProfilePage() {
   const { data: character, error: characterError } = await supabase
     .from("user_character")
     .select(
-      "character_name, level, experience_current, str, dex, int, wis, speed_total, hp_total, hp_actual, mana_total, mana_actual, armor_total, mr_total, attack_damage_total, magic_damage_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, stat_points_remaining",
+      "character_name, level, experience_current, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod, speed_total, hp_total, hp_actual, mana_total, mana_actual, armor_total, mr_total, attack_damage_total, magic_damage_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, stat_points_remaining",
     )
     .eq("profile_id", user.id)
     .maybeSingle();
@@ -272,10 +289,14 @@ export default async function CharacterProfilePage() {
     inventoryItemIds.length > 0
       ? await supabase
           .from("items")
-          .select("id, name, description, quote_text, icon_path, equip_slot, sell_value, item_type_id, rarity_color")
+          .select(
+            "id, name, description, quote_text, icon_path, equip_slot, sell_value, item_type_id, rarity_color, item_types(code)",
+          )
           .in("id", inventoryItemIds)
       : { data: [] };
-  const inventoryItemMap = new Map((inventoryItems ?? []).map((item) => [item.id, item]));
+  const inventoryItemMap = new Map(
+    ((inventoryItems ?? []) as InventoryItemRow[]).map((item) => [item.id, item]),
+  );
   const { data: itemClassRequirements } =
     inventoryItemIds.length > 0
       ? await supabase
@@ -337,13 +358,12 @@ export default async function CharacterProfilePage() {
       (row.weapon_instance_id
         ? weaponInstanceMap.get(row.weapon_instance_id)?.rarity_color ?? null
         : null) ??
-      (row.equipment_instance_id
-        ? equipmentInstanceMap.get(row.equipment_instance_id)?.rarity_color ?? null
-        : null) ??
+        (row.equipment_instance_id
+          ? equipmentInstanceMap.get(row.equipment_instance_id)?.rarity_color ?? null
+          : null) ??
       (typeof item.rarity_color === "string" && item.rarity_color.trim().length > 0
         ? item.rarity_color.trim()
         : null);
-
     const weaponInstance = row.weapon_instance_id
       ? mapWeaponInstanceForTooltip(weaponInstanceMap.get(row.weapon_instance_id))
       : null;
@@ -355,6 +375,11 @@ export default async function CharacterProfilePage() {
     return {
       slotNumber,
       item: {
+        itemTypeCode: (() => {
+          const typeJoin = Array.isArray(item.item_types) ? (item.item_types[0] ?? null) : item.item_types;
+          const raw = typeJoin?.code;
+          return typeof raw === "string" && raw.trim().length > 0 ? raw.trim().toLowerCase() : null;
+        })(),
         id: row.id,
         name: item.name,
         description: item.description ?? "Sin descripción.",
@@ -390,15 +415,15 @@ export default async function CharacterProfilePage() {
       const item = resolvedItemId ? inventoryItemMap.get(resolvedItemId) : null;
       if (!item) return null;
       const rarityColor =
-        (row.weapon_instance_id
-          ? weaponInstanceMap.get(row.weapon_instance_id)?.rarity_color ?? null
-          : null) ??
-        (row.equipment_instance_id
-          ? equipmentInstanceMap.get(row.equipment_instance_id)?.rarity_color ?? null
-          : null) ??
-        (typeof item.rarity_color === "string" && item.rarity_color.trim().length > 0
-          ? item.rarity_color.trim()
-          : null);
+      (row.weapon_instance_id
+        ? weaponInstanceMap.get(row.weapon_instance_id)?.rarity_color ?? null
+        : null) ??
+      (row.equipment_instance_id
+        ? equipmentInstanceMap.get(row.equipment_instance_id)?.rarity_color ?? null
+        : null) ??
+      (typeof item.rarity_color === "string" && item.rarity_color.trim().length > 0
+        ? item.rarity_color.trim()
+        : null);
       const weaponInstanceEquipped = row.weapon_instance_id
         ? mapWeaponInstanceForTooltip(weaponInstanceMap.get(row.weapon_instance_id))
         : null;
@@ -410,6 +435,11 @@ export default async function CharacterProfilePage() {
       return {
         slot: equippedRow.slot,
         item: {
+          itemTypeCode: (() => {
+            const typeJoin = Array.isArray(item.item_types) ? (item.item_types[0] ?? null) : item.item_types;
+            const raw = typeJoin?.code;
+            return typeof raw === "string" && raw.trim().length > 0 ? raw.trim().toLowerCase() : null;
+          })(),
           id: row.id,
           name: item.name,
           description: item.description ?? "Sin descripción.",
@@ -477,11 +507,20 @@ export default async function CharacterProfilePage() {
     xpRange,
     avatarSrc,
   };
+  /** Bonos de equipo van a `*_mod`; la UI debe mostrar base + mod (como ya hace `speed_total` / `armor_total`). */
+  const strEffective =
+    Math.trunc(Number(character?.str ?? 0)) + Math.trunc(Number(character?.str_mod ?? 0));
+  const dexEffective =
+    Math.trunc(Number(character?.dex ?? 0)) + Math.trunc(Number(character?.dex_mod ?? 0));
+  const intEffective =
+    Math.trunc(Number(character?.int ?? 0)) + Math.trunc(Number(character?.int_mod ?? 0));
+  const wisEffective =
+    Math.trunc(Number(character?.wis ?? 0)) + Math.trunc(Number(character?.wis_mod ?? 0));
   const stats: Array<{ label: "STR" | "DEX" | "INT" | "WIS"; value: number }> = [
-    { label: "STR", value: character?.str ?? 0 },
-    { label: "DEX", value: character?.dex ?? 0 },
-    { label: "INT", value: character?.int ?? 0 },
-    { label: "WIS", value: character?.wis ?? 0 },
+    { label: "STR", value: strEffective },
+    { label: "DEX", value: dexEffective },
+    { label: "INT", value: intEffective },
+    { label: "WIS", value: wisEffective },
   ];
   const weaponMin = character?.weapon_damage_min ?? 0;
   const weaponMax = character?.weapon_damage_max ?? 0;
@@ -611,7 +650,7 @@ export default async function CharacterProfilePage() {
               <h2 className="text-lg font-semibold tracking-wide text-amber-300">ESTADISTICAS</h2>
               <div className="border-t border-amber-900/70" />
               <StatsPanel
-                key={`${character?.stat_points_remaining ?? 0}-${character?.str ?? 0}-${character?.dex ?? 0}-${character?.int ?? 0}-${character?.wis ?? 0}`}
+                key={`${character?.stat_points_remaining ?? 0}-${strEffective}-${dexEffective}-${intEffective}-${wisEffective}`}
                 stats={stats}
                 statPointsRemaining={character?.stat_points_remaining ?? 0}
                 onConfirm={confirmStatAllocation}
@@ -698,17 +737,17 @@ export default async function CharacterProfilePage() {
           currentClassName={className}
           currentLevel={level}
           currentStats={{
-            str: character?.str ?? 0,
-            dex: character?.dex ?? 0,
-            int: character?.int ?? 0,
-            wis: character?.wis ?? 0,
+            str: strEffective,
+            dex: dexEffective,
+            int: intEffective,
+            wis: wisEffective,
           }}
           abilities={abilities}
           abilityStats={{
-            str: character?.str ?? 0,
-            dex: character?.dex ?? 0,
-            int: character?.int ?? 0,
-            wis: character?.wis ?? 0,
+            str: strEffective,
+            dex: dexEffective,
+            int: intEffective,
+            wis: wisEffective,
           }}
         />
       </main>

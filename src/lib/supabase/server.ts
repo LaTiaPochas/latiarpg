@@ -1,5 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseAdminClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+
+/** Solo servidor; para leer tablas “maestras” (loot templates) que RLS puede ocultar al usuario. */
+export function createServiceRoleClient(): SupabaseClient | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url?.trim() || !key?.trim()) return null;
+  return createSupabaseAdminClient(url.trim(), key.trim(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export async function createClient() {
   const cookieStore = await cookies();
