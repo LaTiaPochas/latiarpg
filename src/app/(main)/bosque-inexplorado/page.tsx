@@ -57,7 +57,7 @@ export default async function BosqueInexploradoPage({ searchParams }: BosqueInex
             <span className="text-base leading-none" aria-hidden>
               ←
             </span>
-            Volver al campamento
+            Campamento
           </Link>
         </div>
         <HiddenForestMap

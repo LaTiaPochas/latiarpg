@@ -31,6 +31,8 @@ type EncounterEnemyRow = {
   ai_profile: string | null;
   sprite_offset_x: number | null;
   sprite_offset_y: number | null;
+  mobile_offset_x: number | null;
+  mobile_offset_y: number | null;
   sprite_scale: number | null;
   sprite_z_index: number | null;
   enemy_templates: EnemyTemplateRow | EnemyTemplateRow[] | null;
@@ -639,6 +641,24 @@ function mapRowToEnemyView(
         t.pos_y,
       0,
     ),
+    mobileSpriteOffsetX: spriteOffsetNum(
+      row.mobile_offset_x ??
+        row.sprite_offset_x ??
+        t.sprite_offset_x ??
+        t.combat_sprite_offset_x ??
+        t.offset_x ??
+        t.pos_x,
+      0,
+    ),
+    mobileSpriteOffsetY: spriteOffsetNum(
+      row.mobile_offset_y ??
+        row.sprite_offset_y ??
+        t.sprite_offset_y ??
+        t.combat_sprite_offset_y ??
+        t.offset_y ??
+        t.pos_y,
+      0,
+    ),
     spriteScale: spriteScaleNum(
       row.sprite_scale ?? t.sprite_scale ?? t.combat_sprite_scale ?? t.scale,
       1,
@@ -809,6 +829,8 @@ export default async function CombatEncounterPage({
       ai_profile,
       sprite_offset_x,
       sprite_offset_y,
+      mobile_offset_x,
+      mobile_offset_y,
       sprite_scale,
       sprite_z_index,
       enemy_templates (
@@ -832,6 +854,8 @@ export default async function CombatEncounterPage({
       ai_profile,
       sprite_offset_x,
       sprite_offset_y,
+      mobile_offset_x,
+      mobile_offset_y,
       sprite_scale,
       sprite_z_index,
       enemy_templates (
@@ -856,6 +880,8 @@ export default async function CombatEncounterPage({
       ai_profile,
       sprite_offset_x,
       sprite_offset_y,
+      mobile_offset_x,
+      mobile_offset_y,
       sprite_scale,
       sprite_z_index,
       enemy_templates (
@@ -1182,6 +1208,24 @@ export default async function CombatEncounterPage({
             ? rarityPoolEquip
             : null) ??
             (allEquipForItem.length > 0 ? allEquipForItem : []),
+        );
+      }
+    } else {
+      // Fallback: si `drop_group` no viene seteado, igual intentar randomizar por pool.
+      // Prioriza weapon cuando el equip_slot del item es weapon; caso contrario usa equipment.
+      if (equipSlotNorm === "weapon" && allWeaponForItem.length > 0) {
+        selectedWeaponFromPool = pickRandom(
+          (itemRarity && rarityPoolWeapon.length > 0
+            ? rarityPoolWeapon
+            : null) ??
+            allWeaponForItem,
+        );
+      } else if (allEquipForItem.length > 0) {
+        selectedEquipmentFromPool = pickRandom(
+          (itemRarity && rarityPoolEquip.length > 0
+            ? rarityPoolEquip
+            : null) ??
+            allEquipForItem,
         );
       }
     }

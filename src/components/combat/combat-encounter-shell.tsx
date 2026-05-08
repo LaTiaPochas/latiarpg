@@ -485,6 +485,9 @@ export type CombatEncounterEnemyView = {
   /** Ajustes visuales opcionales del sprite en el escenario. */
   spriteOffsetX: number;
   spriteOffsetY: number;
+  /** Offsets exclusivos para mobile (`combat_encounter_enemies.mobile_offset_x/y`). */
+  mobileSpriteOffsetX: number;
+  mobileSpriteOffsetY: number;
   spriteScale: number;
   spriteZIndex: number;
   xpReward: number;
@@ -802,7 +805,7 @@ function PlayerStatusModal({
 }) {
   return (
     <div
-      className={`${menuFont.className} w-[min(100%,11.5rem)] shrink-0 rounded-xl border border-amber-600/50 bg-[#1a100c]/92 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:w-52 sm:p-2.5`}
+      className={`${menuFont.className} w-[min(100%,11.5rem)] shrink-0 rounded-xl border border-amber-600/50 bg-[#1a100c]/92 mx-1 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:w-52 sm:p-2.5`}
       role="group"
       aria-label={`Estado de ${displayName}`}
     >
@@ -869,7 +872,7 @@ function EnemyStatusModal({
       type="button"
       onClick={onSelect}
       disabled={isDefeated}
-      className={`${menuFont.className} w-[min(100%,11.5rem)] shrink-0 rounded-xl border bg-[#1a100c]/92 p-2 text-left shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm transition sm:w-52 sm:p-2.5 ${
+      className={`${menuFont.className} min-w-0 flex-1 basis-0 rounded-xl border bg-[#1a100c]/92 p-1.5 text-left shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm transition sm:w-52 sm:flex-none sm:basis-auto sm:p-2.5 ${
         isDefeated
           ? "cursor-not-allowed border-slate-700/70 opacity-55"
           : isSelected
@@ -880,8 +883,8 @@ function EnemyStatusModal({
       aria-label={`Estado de ${enemy.name}`}
       aria-pressed={isSelected}
     >
-      <div className="flex items-center gap-2.5">
-        <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-amber-800/55 bg-black/45 sm:h-[3.25rem] sm:w-[3.25rem]">
+      <div className="flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:gap-2.5">
+        <div className="relative hidden h-9 w-9 shrink-0 overflow-hidden rounded-lg border border-amber-800/55 bg-black/45 sm:block sm:h-[3.25rem] sm:w-[3.25rem]">
           {enemy.portraitSrc ? (
             <EncounterRasterMedia
               src={enemy.portraitSrc}
@@ -896,8 +899,8 @@ function EnemyStatusModal({
             </span>
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] font-semibold leading-tight text-amber-100 sm:text-xs">
+        <div className="min-w-0 w-full flex-1 sm:w-auto">
+          <p className="truncate text-center text-[10px] font-semibold leading-tight text-amber-100 sm:text-left sm:text-xs">
             {enemy.name}
           </p>
           <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-black/50 sm:h-2.5">
@@ -1008,6 +1011,7 @@ export function CombatEncounterShell({
   const [isActionsPanelOpen, setIsActionsPanelOpen] = useState(false);
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
   const [isEscaping, setIsEscaping] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory">("main");
   const [isTurnTransitioning, setIsTurnTransitioning] = useState(true);
   const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
@@ -1037,6 +1041,10 @@ export function CombatEncounterShell({
     pinned: boolean;
     inventoryId: number | null;
   }>({ open: false, x: 0, y: 0, pinned: false, inventoryId: null });
+  const [victoryLootTooltip, setVictoryLootTooltip] = useState<{
+    open: boolean;
+    lootKey: string | null;
+  }>({ open: false, lootKey: null });
   const [isDefeatOverlayVisible, setIsDefeatOverlayVisible] = useState(false);
   const [isDefeatPenaltyOpen, setIsDefeatPenaltyOpen] = useState(false);
   const [isVictoryOverlayVisible, setIsVictoryOverlayVisible] = useState(false);
@@ -1078,6 +1086,7 @@ export function CombatEncounterShell({
   useEffect(() => {
     setCombatLog(initialLog);
   }, [initialLog]);
+
   const [playerCurrentHp, setPlayerCurrentHp] = useState(playerHp);
   const [displayPlayerMana, setDisplayPlayerMana] = useState(playerMana);
   const [enemySkillNextAvailableTurn, setEnemySkillNextAvailableTurn] = useState<
@@ -1092,10 +1101,19 @@ export function CombatEncounterShell({
   }, [playerHp, playerHpMax]);
 
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 639.98px)");
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
     setIsDefeatOverlayVisible(false);
     setIsDefeatPenaltyOpen(false);
     setIsVictoryOverlayVisible(false);
     setIsVictoryLootOpen(false);
+    setVictoryLootTooltip({ open: false, lootKey: null });
     setIsLevelUpModalOpen(false);
     didOpenLevelUpModalRef.current = false;
     didReportLevelUpRef.current = false;
@@ -2130,8 +2148,8 @@ export function CombatEncounterShell({
 
         <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] sm:mt-2 sm:p-6">
           {/* HUD: enemigos arriba a la derecha, PJ abajo a la izquierda (sobre el escenario) */}
-          <div className="pointer-events-none absolute inset-0 z-[8] flex flex-col justify-between p-1 sm:p-2">
-            <div className="pointer-events-auto flex flex-wrap justify-end gap-2">
+          <div className="pointer-events-none absolute inset-0 z-[8] flex flex-col justify-between gap-1 px-0 pb-1 pt-1 sm:gap-2 sm:p-2">
+            <div className="pointer-events-auto flex min-h-0 min-w-0 w-full flex-row items-stretch gap-1.5 self-start px-1 sm:w-auto sm:flex-wrap sm:justify-end sm:gap-2 sm:self-auto sm:px-0">
               {displayEnemies.length > 0
                 ? displayEnemies.map((enemy) => (
                     <EnemyStatusModal
@@ -2159,14 +2177,16 @@ export function CombatEncounterShell({
           </div>
 
           <div className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-row items-end justify-between">
-            <div className="intro-character-slide-in pointer-events-none flex w-[42%] translate-y-3 items-end justify-start sm:translate-y-0">
-              <Image
-                src={playerSpriteSrc}
-                alt={`${playerDisplayName} en combate`}
-                width={620}
-                height={930}
-                className="h-[min(32vh,200px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)] sm:h-[min(52vh,360px)]"
-              />
+            <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start py-10">
+              <div className="-translate-y-8 sm:-translate-y-11">
+                <Image
+                  src={playerSpriteSrc}
+                  alt={`${playerDisplayName} en combate`}
+                  width={620}
+                  height={930}
+                  className="h-[min(32vh,200px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)] sm:h-[min(52vh,300px)]"
+                />
+              </div>
             </div>
 
             <div className="intro-character-slide-in-right pointer-events-none flex w-[42%] flex-col items-end justify-end gap-1 self-start sm:gap-2 sm:self-auto">
@@ -2182,7 +2202,11 @@ export function CombatEncounterShell({
                     {enemy.hp > 0 ? (
                       <div
                         style={{
-                          transform: `translate(${enemy.spriteOffsetX}px, ${enemy.spriteOffsetY}px) scale(${enemy.spriteScale})`,
+                          transform: `translate(${
+                            isMobileViewport ? enemy.mobileSpriteOffsetX : enemy.spriteOffsetX
+                          }px, ${
+                            isMobileViewport ? enemy.mobileSpriteOffsetY : enemy.spriteOffsetY
+                          }px) scale(${enemy.spriteScale})`,
                           transformOrigin: "bottom right",
                         }}
                       >
@@ -2237,7 +2261,7 @@ export function CombatEncounterShell({
 
             {isActionsPanelOpen && (
               <div
-                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
+                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
               >
                 <button
                   type="button"
@@ -2265,7 +2289,7 @@ export function CombatEncounterShell({
                   )}
                 </div>
 
-                <div className={ACTIONS_PANEL_BODY_MOBILE}>
+                <div className={actionMenu === "main" ? "mt-2" : ACTIONS_PANEL_BODY_MOBILE}>
                 {actionMenu === "main" ? (
                   <div className="grid grid-cols-2 gap-1.5">
                     <div
@@ -2450,76 +2474,78 @@ export function CombatEncounterShell({
             )}
           </div>
 
-          <div className="relative">
-            {!isCombatLogPanelOpen && (
-              <button
-                type="button"
-                onClick={() =>
-                  setIsCombatLogPanelOpen((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setIsActionsPanelOpen(false);
-                      setActionMenu("main");
-                    }
-                    return next;
-                  })
-                }
-                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                aria-expanded={isCombatLogPanelOpen}
-              >
-                <div className="min-w-0 text-left">
-                  <p>Combat Log</p>
-                  <p
-                    className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
-                  >
-                    {combatLog.length > 0 ? (
-                      <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
-                    ) : (
-                      ""
-                    )}
-                  </p>
-                </div>
-                <span className="ml-2 shrink-0" aria-hidden>
-                  ▲
-                </span>
-              </button>
-            )}
-
-            {isCombatLogPanelOpen && (
-              <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+          {!isActionsPanelOpen ? (
+            <div className="relative">
+              {!isCombatLogPanelOpen && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsCombatLogPanelOpen(false);
-                  }}
-                  className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
-                  aria-label="Colapsar combat log"
+                  onClick={() =>
+                    setIsCombatLogPanelOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsActionsPanelOpen(false);
+                        setActionMenu("main");
+                      }
+                      return next;
+                    })
+                  }
+                  className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                  aria-expanded={isCombatLogPanelOpen}
                 >
-                  <span>Combat Log</span>
-                  <span aria-hidden>▼</span>
-                </button>
-                <div
-                  ref={combatLogMobileRef}
-                  className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
-                >
-                  {combatLog.map((entry) => (
+                  <div className="min-w-0 text-left">
+                    <p>Combat Log</p>
                     <p
-                      key={entry.id}
-                      className={`rounded-md bg-black/25 px-2 py-1 ${
-                        entry.tone === "success"
-                          ? "text-emerald-300"
-                          : entry.tone === "danger"
-                            ? "text-red-300"
-                            : ""
-                      }`}
+                      className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
                     >
-                      <CombatLogLineBody entry={entry} />
+                      {combatLog.length > 0 ? (
+                        <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
+                      ) : (
+                        ""
+                      )}
                     </p>
-                  ))}
+                  </div>
+                  <span className="ml-2 shrink-0" aria-hidden>
+                    ▲
+                  </span>
+                </button>
+              )}
+
+              {isCombatLogPanelOpen && (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCombatLogPanelOpen(false);
+                    }}
+                    className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
+                    aria-label="Colapsar combat log"
+                  >
+                    <span>Combat Log</span>
+                    <span aria-hidden>▼</span>
+                  </button>
+                  <div
+                    ref={combatLogMobileRef}
+                    className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
+                  >
+                    {combatLog.map((entry) => (
+                      <p
+                        key={entry.id}
+                        className={`rounded-md bg-black/25 px-2 py-1 ${
+                          entry.tone === "success"
+                            ? "text-emerald-300"
+                            : entry.tone === "danger"
+                              ? "text-red-300"
+                              : ""
+                        }`}
+                      >
+                        <CombatLogLineBody entry={entry} />
+                      </p>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
         </section>
 
         <section className="mt-4 hidden min-h-0 flex-none grid-cols-[0.9fr_1.5fr] gap-3 pb-1 sm:grid">
@@ -3040,9 +3066,20 @@ export function CombatEncounterShell({
                         className="group relative w-full max-w-[7rem] rounded-md border border-amber-700/55 bg-amber-900/20 p-2 text-center"
                         style={rarityBorderStyle}
                       >
-                        <div
-                          className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-amber-600/60 bg-amber-950/40"
+                        <button
+                          type="button"
+                          className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-amber-600/60 bg-amber-950/40 transition hover:bg-amber-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                           style={rarityBorderStyle}
+                          aria-label={`Ver detalles de ${loot.name}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setVictoryLootTooltip((prev) =>
+                              prev.open && prev.lootKey === loot.lootKey
+                                ? { open: false, lootKey: null }
+                                : { open: true, lootKey: loot.lootKey },
+                            );
+                          }}
                         >
                           {loot.iconPath ? (
                             <Image
@@ -3055,12 +3092,12 @@ export function CombatEncounterShell({
                           ) : (
                             <span className="text-[10px] font-black text-amber-100">?</span>
                           )}
-                        </div>
+                        </button>
                         <p className="mt-1 truncate text-[10px] font-semibold uppercase text-amber-100/90" title={loot.name}>
                           {loot.name}
                         </p>
                         <p className="text-xs font-black text-amber-100">x{loot.quantity}</p>
-                        <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-amber-700/75 bg-[#1c120e]/95 px-3 py-2 text-left text-sm text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)] group-hover:block">
+                        <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-amber-700/75 bg-[#1c120e]/95 px-3 py-2 text-left text-sm text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)] sm:group-hover:block">
                           <div className="flex items-start justify-between gap-2">
                             <p className={`${menuFont.className} text-sm font-bold leading-tight text-amber-200`}>
                               {loot.name}
@@ -3144,6 +3181,120 @@ export function CombatEncounterShell({
                     ) : null}
                   </div>
                 </div>
+
+                {victoryLootTooltip.open ? (
+                  <>
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-[210] cursor-default bg-transparent"
+                      aria-label="Cerrar tooltip de loot"
+                      onClick={() => setVictoryLootTooltip({ open: false, lootKey: null })}
+                    />
+                    {(() => {
+                      const entry =
+                        victoryLootTooltip.lootKey == null
+                          ? null
+                          : victoryLootItems.find((l) => l.lootKey === victoryLootTooltip.lootKey) ?? null;
+                      if (!entry) return null;
+                      const rarityBorderStyle =
+                        typeof entry.rarityColor === "string" && entry.rarityColor.trim().length > 0
+                          ? { borderColor: entry.rarityColor.trim() }
+                          : undefined;
+                      return (
+                        <div
+                          className="fixed left-1/2 top-24 z-[220] w-[min(92vw,26rem)] -translate-x-1/2 rounded-lg border border-amber-700/75 bg-[#1c120e]/95 px-3 py-2 text-left text-sm text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.65)]"
+                          style={rarityBorderStyle}
+                          role="dialog"
+                          aria-modal="true"
+                          aria-label={`Detalles de ${entry.name}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/80 bg-amber-950/60 text-[10px] font-black text-amber-100 transition hover:bg-amber-900/75"
+                            aria-label="Cerrar"
+                            onClick={() => setVictoryLootTooltip({ open: false, lootKey: null })}
+                          >
+                            X
+                          </button>
+                          <div className="flex items-start justify-between gap-2 pr-7">
+                            <p className={`${menuFont.className} text-sm font-bold leading-tight text-amber-200`}>
+                              {entry.name}
+                            </p>
+                            {entry.itemTypeId !== 2 ? (
+                              <div className="flex items-center gap-1 text-xs font-semibold text-amber-200">
+                                <Image
+                                  src="/img/resources/iconos/icon_gold.png"
+                                  alt="Oro"
+                                  width={12}
+                                  height={12}
+                                  className="h-3 w-3 object-contain"
+                                />
+                                <span>{entry.sellValue}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-[10px] uppercase text-amber-200/80">
+                            {capitalizeFirst(entry.itemTypeCode ?? "item")}
+                          </p>
+                          {entry.description ? (
+                            <p className={`${helpCardFont.className} mt-1 text-[11px] italic leading-relaxed text-amber-50/90`}>
+                              {entry.description}
+                            </p>
+                          ) : null}
+                          {entry.quoteText ? (
+                            <p
+                              className={`${helpCardFont.className} mt-1 text-[10px] italic leading-relaxed text-amber-200/85`}
+                              style={{ fontStyle: "italic" }}
+                            >
+                              - <em>"{entry.quoteText}"</em>
+                            </p>
+                          ) : null}
+                          {(() => {
+                            const roll = entry.weaponInstance ?? entry.equipmentInstance ?? null;
+                            if (!roll) return null;
+                            const showDamage = Boolean(entry.weaponInstance);
+                            const statLines = [
+                              formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
+                              formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
+                              formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                            ].filter(Boolean);
+                            return (
+                              <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
+                                {roll.rarity ? (
+                                  <p className="font-semibold" style={{ color: roll.rarityColor ?? undefined }}>
+                                    {roll.rarity}
+                                  </p>
+                                ) : null}
+                                {showDamage ? (
+                                  <>
+                                    <p>
+                                      {weaponDamageRange(
+                                        entry.weaponInstance?.attackDamageMin,
+                                        entry.weaponInstance?.attackDamageMax,
+                                      )}{" "}
+                                      Daño
+                                    </p>
+                                    <p>
+                                      {weaponDamageRange(
+                                        entry.weaponInstance?.magicDamageMin,
+                                        entry.weaponInstance?.magicDamageMax,
+                                      )}{" "}
+                                      Daño Mágico
+                                    </p>
+                                  </>
+                                ) : null}
+                                {statLines.map((line, idx) => (
+                                  <p key={`${line}-${idx}`}>{line}</p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : null}
               </div>
               <Link
                 href={escapeHref}

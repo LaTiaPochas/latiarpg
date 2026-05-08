@@ -15,7 +15,7 @@ const PJ_FEDE_RPG_FIGHT_STICK =
   "/img/resources/characters/pj_fede_rpg_fight_stick.png";
 const ICON_XP = "/img/resources/iconos/icon_xp.png";
 const ICON_GOLD = "/img/resources/items/item_madera.png";
-const ICON_WOODEN_STICK = "/img/resources/items/item_wooden_stick.png";
+const ICON_WOODEN_STICK = "/img/resources/items/weapon_wooden_stick.png";
 
 const MAX_PLAYER_HP = 100;
 const MAX_PLAYER_MANA = 20;
@@ -1110,10 +1110,10 @@ export default function BatallaTutorialPage() {
                   <p className="mb-5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/95">
                     Has Conseguido:
                   </p>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 justify-items-center gap-3 sm:grid-cols-3 sm:gap-4">
                     <div className="text-center">
-                      <div className="mx-auto w-[8.5rem]">
-                        <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
+                      <div className="mx-auto w-[7rem] sm:w-[8.5rem]">
+                        <div className="relative flex h-[7rem] w-[7rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)] sm:h-[8.5rem] sm:w-[8.5rem]">
                           <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
                             <Image
                               src={ICON_XP}
@@ -1131,8 +1131,8 @@ export default function BatallaTutorialPage() {
                     </div>
 
                     <div className="text-center">
-                      <div className="mx-auto w-[8.5rem]">
-                        <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
+                      <div className="mx-auto w-[7rem] sm:w-[8.5rem]">
+                        <div className="relative flex h-[7rem] w-[7rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)] sm:h-[8.5rem] sm:w-[8.5rem]">
                           <button
                             type="button"
                             onMouseEnter={(e) =>
@@ -1169,8 +1169,8 @@ export default function BatallaTutorialPage() {
                     </div>
 
                     <div className="text-center">
-                      <div className="mx-auto w-[8.5rem]">
-                        <div className="relative flex h-[8.5rem] w-[8.5rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)]">
+                      <div className="mx-auto w-[7rem] sm:w-[8.5rem]">
+                        <div className="relative flex h-[7rem] w-[7rem] items-center justify-center rounded-2xl border-2 border-[#5f6d85] bg-gradient-to-b from-[#8fa1bd] via-[#5d6f8d] to-[#3e4e68] p-[6px] shadow-[inset_0_1px_0_rgba(218,230,255,0.35),inset_0_-1px_0_rgba(16,26,45,0.55),0_10px_18px_rgba(0,0,0,0.35)] sm:h-[8.5rem] sm:w-[8.5rem]">
                           <button
                             type="button"
                             onMouseEnter={(e) =>

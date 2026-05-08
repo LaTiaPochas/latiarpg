@@ -108,7 +108,25 @@ type InventoryItemRow = {
   item_type_id: number | null;
   rarity_color: string | null;
   item_types: ItemTypeJoinRow | ItemTypeJoinRow[] | null;
+  json_consumable_effect?: unknown;
 };
+
+function rawConsumableEffectFromItem(raw: unknown): Record<string, unknown> | null {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      value = JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
 
 function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null): WeaponInstanceTooltip | null {
   if (!row) return null;
@@ -292,7 +310,7 @@ export default async function CharacterProfilePage() {
       ? await supabase
           .from("items")
           .select(
-            "id, name, description, quote_text, icon_path, equip_slot, sell_value, item_type_id, rarity_color, item_types(code)",
+            "id, name, description, quote_text, icon_path, equip_slot, sell_value, item_type_id, rarity_color, json_consumable_effect, item_types(code)",
           )
           .in("id", inventoryItemIds)
       : { data: [] };
@@ -401,6 +419,7 @@ export default async function CharacterProfilePage() {
         equippedSlot: null,
         weaponInstance: weaponInstance ?? undefined,
         equipmentInstance: equipmentInstance ?? undefined,
+        consumableEffect: rawConsumableEffectFromItem(item.json_consumable_effect),
       },
     };
   });
@@ -461,6 +480,7 @@ export default async function CharacterProfilePage() {
           equippedSlot: equippedRow.slot,
           weaponInstance: weaponInstanceEquipped ?? undefined,
           equipmentInstance: equipmentInstanceEquipped ?? undefined,
+          consumableEffect: rawConsumableEffectFromItem(item.json_consumable_effect),
         },
       };
     })
