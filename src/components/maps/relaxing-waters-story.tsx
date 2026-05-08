@@ -89,7 +89,7 @@ export function RelaxingWatersStory({
       const nextGold =
         typeof result.goldAmount === "number" && Number.isFinite(result.goldAmount)
           ? Math.max(0, Math.trunc(result.goldAmount))
-          : Math.max(0, goldAmount - 1);
+          : Math.max(0, goldAmount - 2);
       setGoldAmount(nextGold);
       setPayFeedback("Te sentís renovado. Vida y mana recuperados por completo.");
     } finally {
@@ -167,15 +167,15 @@ export function RelaxingWatersStory({
             <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
-                disabled={goldAmount < 1 || isPaying || isCharacterAlreadyFull}
+                disabled={goldAmount < 2 || isPaying || isCharacterAlreadyFull}
                 onClick={() => void handlePayToHeal()}
                 className={`rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
-                  goldAmount < 1 || isPaying || isCharacterAlreadyFull
+                  goldAmount < 2 || isPaying || isCharacterAlreadyFull
                     ? "cursor-not-allowed border-amber-700/40 bg-amber-950/40 text-amber-200/60"
                     : "cursor-pointer border-amber-500/80 bg-amber-700/85 text-amber-50 hover:bg-amber-600/90"
                 }`}
               >
-                {isPaying ? "Procesando..." : "Pagar 1 Oro"}
+                {isPaying ? "Procesando..." : "Pagar 2 Oro"}
               </button>
               <Link
                 href="/"

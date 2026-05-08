@@ -51,6 +51,36 @@ const CAMP_RETURN_DIALOGUES: CampDialogueOption[] = [
     speaker: "Delu",
     text: "¿Si hago un pozo por acá cuando tardaran en encontrarme?",
   },
+  {
+    faceSrc: "/img/resources/caracters_faces/pj_silva_rpg_face.png",
+    speaker: "Silva",
+    text: "GAAAAAAAAH. ¿No se pueden poner las peleas en x1.5? *tos* *tos*",
+  },
+  {
+    faceSrc: "/img/resources/other_faces/neutral_events.png",
+    speaker: "World Events",
+    text: "“It's a dangerous business going out your door. You step onto the road, and if you don't keep your feet, there's no knowing where you might be swept off to.”",
+  },
+  {
+    faceSrc: "/img/resources/other_faces/neutral_events.png",
+    speaker: "World Events",
+    text: "“Not all those who wander are lost.”",
+  },
+  {
+    faceSrc: "/img/resources/other_faces/neutral_events.png",
+    speaker: "World Events",
+    text: "“You've taken your first step into a larger world.”",
+  },
+  {
+    faceSrc: "/img/resources/other_faces/neutral_events.png",
+    speaker: "World Events",
+    text: "“Roads? Where we're going, we don't need roads.”",
+  },
+  {
+    faceSrc: "/img/resources/other_faces/neutral_events.png",
+    speaker: "World Events",
+    text: "“We are not in Kansas anymore.”",
+  },
 ];
 
 export default async function Home({ searchParams }: HomePageProps) {
@@ -90,6 +120,25 @@ export default async function Home({ searchParams }: HomePageProps) {
     .select("id, happened_at, event_html")
     .order("happened_at", { ascending: false })
     .limit(100);
+  const { data: garrisonMilestone } = await supabase
+    .from("global_milestones")
+    .select("id, title, is_completed")
+    .eq("id", 1)
+    .maybeSingle();
+  const initialZoneMapSrc =
+    garrisonMilestone?.is_completed === true &&
+    typeof garrisonMilestone.title === "string" &&
+    ["campamento construido", "campamento_construido"].includes(
+      garrisonMilestone.title.trim().toLowerCase(),
+    )
+      ? "/img/resources/maps/map_initialzone_garrison.png"
+      : "/img/resources/maps/map_initialzone_campfire.png";
+  const isCampBuilt =
+    garrisonMilestone?.is_completed === true &&
+    typeof garrisonMilestone.title === "string" &&
+    ["campamento construido", "campamento_construido"].includes(
+      garrisonMilestone.title.trim().toLowerCase(),
+    );
 
   return (
     <div
@@ -131,7 +180,12 @@ export default async function Home({ searchParams }: HomePageProps) {
             </p>
           </div>
         </div>
-        <ZoneMapModalRouter zoneId={activeZoneId} restrictToCamp={showFirstCampDialogue} />
+        <ZoneMapModalRouter
+          zoneId={activeZoneId}
+          restrictToCamp={showFirstCampDialogue}
+          mapSrc={initialZoneMapSrc}
+          isCampBuilt={isCampBuilt}
+        />
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-300 lg:text-sm">
             Journal de La Tia

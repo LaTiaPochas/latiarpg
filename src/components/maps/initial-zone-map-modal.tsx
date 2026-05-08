@@ -12,7 +12,7 @@ type Hotspot = {
   description: string;
 };
 
-const MAP_SRC = "/img/resources/maps/map_initialzone_campfire.png";
+const DEFAULT_MAP_SRC = "/img/resources/maps/map_initialzone_campfire.png";
 
 const HOTSPOTS: Hotspot[] = [
   {
@@ -47,11 +47,28 @@ const HOTSPOTS: Hotspot[] = [
 
 type InitialZoneMapModalProps = {
   restrictToCamp?: boolean;
+  mapSrc?: string;
+  isCampBuilt?: boolean;
 };
 
-export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapModalProps) {
+export function InitialZoneMapModal({
+  restrictToCamp = false,
+  mapSrc = DEFAULT_MAP_SRC,
+  isCampBuilt = false,
+}: InitialZoneMapModalProps) {
   const router = useRouter();
-  const [selectedHotspotId, setSelectedHotspotId] = useState<string>(HOTSPOTS[0].id);
+  const availableHotspots = useMemo<Hotspot[]>(() => {
+    if (!isCampBuilt) return HOTSPOTS;
+    const builtCampHotspot: Hotspot = {
+      id: "garrison",
+      label: "Base de La Tia",
+      xPercent: 50,
+      yPercent: 54,
+      description: "El campamento fue reforzado y ahora funciona como base de operaciones central.",
+    };
+    return [builtCampHotspot, ...HOTSPOTS.filter((spot) => spot.id !== "campfire")];
+  }, [isCampBuilt]);
+  const [selectedHotspotId, setSelectedHotspotId] = useState<string>(availableHotspots[0].id);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapNaturalSize, setMapNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [mapFrame, setMapFrame] = useState<{ left: number; top: number; width: number; height: number } | null>(
@@ -59,9 +76,13 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
   );
 
   const selectedHotspot = useMemo(
-    () => HOTSPOTS.find((spot) => spot.id === selectedHotspotId) ?? HOTSPOTS[0],
-    [selectedHotspotId],
+    () => availableHotspots.find((spot) => spot.id === selectedHotspotId) ?? availableHotspots[0],
+    [selectedHotspotId, availableHotspots],
   );
+  useEffect(() => {
+    if (availableHotspots.some((spot) => spot.id === selectedHotspotId)) return;
+    setSelectedHotspotId(availableHotspots[0].id);
+  }, [availableHotspots, selectedHotspotId]);
   const mapAspectRatio = mapNaturalSize
     ? `${mapNaturalSize.width} / ${mapNaturalSize.height}`
     : "16 / 9";
@@ -126,10 +147,6 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
           animation: map-ping 1.8s ease-out infinite;
         }
       `}</style>
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-300">Mapa de la zona</h2>
-      </div>
-
       <div
         ref={mapContainerRef}
         className="relative mt-2 w-full overflow-hidden rounded-md border border-amber-900/70 bg-black/30 aspect-[var(--map-aspect-ratio)] lg:aspect-auto lg:h-[647px]"
@@ -141,7 +158,7 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
       >
         <div className="absolute inset-0">
           <Image
-            src={MAP_SRC}
+            src={mapSrc}
             alt="Mapa zona inicial campamento"
             fill
             sizes="(max-width: 1024px) 100vw, 1024px"
@@ -155,9 +172,10 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
               });
             }}
           />
-          {HOTSPOTS.map((hotspot) => {
+          {availableHotspots.map((hotspot) => {
             const isSelected = hotspot.id === selectedHotspot.id;
-            const isLocked = restrictToCamp && hotspot.id !== "campfire";
+            const isCampNode = hotspot.id === "campfire" || hotspot.id === "garrison";
+            const isLocked = restrictToCamp && !isCampNode;
             const hotspotLeft = mapFrame
               ? mapFrame.left + mapFrame.width * (hotspot.xPercent / 100)
               : 0;
@@ -224,6 +242,10 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
                 router.push("/campsite");
                 return;
               }
+              if (selectedHotspot.id === "garrison") {
+                router.push("/garrison");
+                return;
+              }
               if (selectedHotspot.id === "wood-forest") {
                 router.push("/bosque-inexplorado");
                 return;
@@ -239,7 +261,7 @@ export function InitialZoneMapModal({ restrictToCamp = false }: InitialZoneMapMo
             Ir alla
           </button>
         </div>
-        {restrictToCamp && selectedHotspot.id !== "campfire" ? (
+        {restrictToCamp && selectedHotspot.id !== "campfire" && selectedHotspot.id !== "garrison" ? (
           <p className="mt-1 text-xs text-amber-300/90">Disponible despues de entrar al campamento por primera vez.</p>
         ) : null}
       </div>

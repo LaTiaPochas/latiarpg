@@ -1,4 +1,5 @@
 import { CampsiteStory } from "@/components/campsite/campsite-story";
+import { GarrisonCompleteDialogue } from "@/components/campsite/garrison-complete-dialogue";
 import { MilestoneCompletePanel } from "@/components/campsite/milestone-complete-panel";
 import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
 import { createClient } from "@/lib/supabase/server";
@@ -113,7 +114,7 @@ export default async function CampsitePage() {
 
   const { data: milestones } = await supabase
     .from("user_milestones")
-    .select("first_time_camp_entered")
+    .select("first_time_camp_entered, garrison_dialog_completed")
     .eq("user_id", user.id)
     .maybeSingle();
   const { data: campMilestone } = await supabase
@@ -145,6 +146,11 @@ export default async function CampsitePage() {
     milestones?.first_time_camp_entered === false;
   const campMilestoneRecord = (campMilestone ?? {}) as Record<string, unknown>;
   const isMilestoneCompleted = campMilestoneRecord.is_completed === true;
+  const shouldShowGarrisonDialogue =
+    isMilestoneCompleted && milestones?.garrison_dialog_completed === false;
+  if (isMilestoneCompleted && !shouldShowGarrisonDialogue) {
+    redirect("/");
+  }
   const milestoneCompletedAt =
     typeof campMilestoneRecord.completed_at === "string"
       ? campMilestoneRecord.completed_at
@@ -299,11 +305,39 @@ export default async function CampsitePage() {
     if (shouldMarkCompleted && !alreadyCompleted) {
       await supabaseClient.from("global_world_event_log").insert({
         member_name: "world",
-        event_html: "¡Objetivo completado: Campamento Construido!",
+        event_html:
+          '<span style="color:#22c55e;font-weight:700;">¡Objetivo completado: Campamento Construido!</span>',
       });
     }
 
     redirect("/campsite");
+  }
+
+  async function completeGarrisonDialogue() {
+    "use server";
+
+    const supabaseClient = await createClient();
+    const {
+      data: { user: currentUser },
+    } = await supabaseClient.auth.getUser();
+
+    if (!currentUser) {
+      redirect("/login");
+    }
+
+    const { data: updatedRows } = await supabaseClient
+      .from("user_milestones")
+      .update({ garrison_dialog_completed: true })
+      .eq("user_id", currentUser.id)
+      .select("user_id");
+    if (!updatedRows || updatedRows.length === 0) {
+      await supabaseClient.from("user_milestones").insert({
+        user_id: currentUser.id,
+        garrison_dialog_completed: true,
+      });
+    }
+
+    redirect("/garrison");
   }
 
   if (isFirstTimeCampEntryPending) {
@@ -314,6 +348,10 @@ export default async function CampsitePage() {
         onViewContributions={completeFirstCampEntry}
       />
     );
+  }
+
+  if (shouldShowGarrisonDialogue) {
+    return <GarrisonCompleteDialogue onGoToGarrison={completeGarrisonDialogue} />;
   }
 
   return (

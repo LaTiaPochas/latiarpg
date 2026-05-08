@@ -141,6 +141,7 @@ export default async function RelaxingWatersPage() {
 
   async function payGoldToHeal() {
     "use server";
+    const HEAL_COST_GOLD = 2;
 
     const supabaseAction = await createClient();
     const {
@@ -167,11 +168,11 @@ export default async function RelaxingWatersPage() {
           : 0;
       totalGold += qty;
     }
-    if (totalGold < 1) {
+    if (totalGold < HEAL_COST_GOLD) {
       return { ok: false, error: "No tenés suficiente oro.", goldAmount: totalGold };
     }
 
-    let pendingDiscount = 1;
+    let pendingDiscount = HEAL_COST_GOLD;
     for (const row of goldRows ?? []) {
       if (pendingDiscount <= 0) break;
       const rowQty =
@@ -209,7 +210,7 @@ export default async function RelaxingWatersPage() {
         .eq("profile_id", actionUser.id);
     }
 
-    const remainingGold = Math.max(0, totalGold - 1);
+    const remainingGold = Math.max(0, totalGold - HEAL_COST_GOLD);
     return { ok: true, goldAmount: remainingGold };
   }
 
