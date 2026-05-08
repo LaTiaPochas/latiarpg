@@ -4,7 +4,17 @@ import { HIDDEN_FOREST_ZONE_CODE } from "@/lib/game-zones";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-export default async function BosqueInexploradoPage() {
+type BosqueInexploradoPageProps = {
+  searchParams?: Promise<{ hotspot?: string }>;
+};
+
+export default async function BosqueInexploradoPage({ searchParams }: BosqueInexploradoPageProps) {
+  const resolvedSearch = searchParams ? await searchParams : {};
+  const hotspotQuery =
+    typeof resolvedSearch?.hotspot === "string" && resolvedSearch.hotspot.trim().length > 0
+      ? resolvedSearch.hotspot.trim()
+      : null;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -18,7 +28,7 @@ export default async function BosqueInexploradoPage() {
     .from("user_combat_progress")
     .select("combat_step")
     .eq("user_id", user.id)
-    .eq("zone_id", "hidden_forest_1")
+    .eq("zone_id", HIDDEN_FOREST_ZONE_CODE)
     .order("combat_step", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -47,12 +57,13 @@ export default async function BosqueInexploradoPage() {
             <span className="text-base leading-none" aria-hidden>
               ←
             </span>
-            Volver al campamento
+            Campamento
           </Link>
         </div>
         <HiddenForestMap
           currentCombatStep={currentCombatStep}
           zoneCode={HIDDEN_FOREST_ZONE_CODE}
+          initialHotspotId={hotspotQuery}
         />
       </main>
     </div>

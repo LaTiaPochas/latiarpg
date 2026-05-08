@@ -306,3 +306,293 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
 
   revalidatePath("/character_profile");
 }
+
+export async function discardInventoryItem(inventoryId: number) {
+  const safeInventoryId = Math.max(0, Math.trunc(Number(inventoryId)));
+  if (safeInventoryId <= 0) {
+    throw new Error("Ítem inválido.");
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Usuario no autenticado.");
+  }
+
+  const { data: inventoryRow, error: readError } = await supabase
+    .from("user_inventory")
+    .select("id, profile_id")
+    .eq("id", safeInventoryId)
+    .maybeSingle();
+
+  if (readError || !inventoryRow) {
+    throw new Error("No se encontró el ítem en inventario.");
+  }
+  if (inventoryRow.profile_id !== user.id) {
+    throw new Error("No podés descartar un ítem que no te pertenece.");
+  }
+
+  const { error: deleteError } = await supabase
+    .from("user_inventory")
+    .delete()
+    .eq("id", safeInventoryId)
+    .eq("profile_id", user.id);
+  if (deleteError) {
+    throw new Error("No se pudo descartar el ítem.");
+  }
+
+  revalidatePath("/character_profile");
+}
+
+export async function discardInventoryItems(rawInventoryIds: number[]) {
+  const uniqueIds = Array.from(
+    new Set(
+      rawInventoryIds.map((id) => Math.max(0, Math.trunc(Number(id)))).filter((id) => id > 0),
+    ),
+  );
+  if (uniqueIds.length === 0) {
+    throw new Error("No hay ítems válidos para descartar.");
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Usuario no autenticado.");
+  }
+
+  const { data: ownedRows, error: readError } = await supabase
+    .from("user_inventory")
+    .select("id")
+    .eq("profile_id", user.id)
+    .in("id", uniqueIds);
+
+  if (readError || !ownedRows?.length || ownedRows.length !== uniqueIds.length) {
+    throw new Error("No se encontraron todos los ítems en tu inventario.");
+  }
+
+  const { data: equippedRows } = await supabase
+    .from("user_equipment")
+    .select("inventory_id")
+    .eq("profile_id", user.id)
+    .in("inventory_id", uniqueIds);
+
+  if (equippedRows?.some((row) => row.inventory_id != null)) {
+    throw new Error("No podés descartar ítems equipados.");
+  }
+
+  const { error: deleteError } = await supabase
+    .from("user_inventory")
+    .delete()
+    .eq("profile_id", user.id)
+    .in("id", uniqueIds);
+
+  if (deleteError) {
+    throw new Error("No se pudo descartar los ítems.");
+  }
+
+  revalidatePath("/character_profile");
+}
+
+/** Columnas de `user_character` permitidas para `inventory-stat` / `inventory_stat` en el JSON (evita SQL injection vía PostgREST). */
+const INVENTORY_CONSUME_CHARACTER_COLUMNS = new Set([
+  "hp_actual",
+  "mana_actual",
+  "str",
+  "dex",
+  "int",
+  "wis",
+  "experience_current",
+  "speed_total",
+  "armor_total",
+  "mr_total",
+]);
+
+function parseItemsConsumableEffect(raw: unknown): Record<string, unknown> | null {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      value = JSON.parse(trimmed) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function inventoryConsumeFlag(effect: Record<string, unknown>): boolean {
+  const v = effect.inventory;
+  return v === true || v === "true" || v === 1 || v === "1";
+}
+
+function inventoryConsumeDelta(effect: Record<string, unknown>): number {
+  const keys = ["amount-max", "amount_max", "amount-min", "amount_min", "amount"] as const;
+  for (const k of keys) {
+    const n = Math.trunc(Number(effect[k] ?? 0));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+export async function consumeInventoryItem(inventoryId: number) {
+  const safeInventoryId = Math.max(0, Math.trunc(Number(inventoryId)));
+  if (safeInventoryId <= 0) {
+    throw new Error("Ítem inválido.");
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Usuario no autenticado.");
+  }
+
+  const { data: inventoryRow, error: inventoryError } = await supabase
+    .from("user_inventory")
+    .select("id, profile_id, item_id, weapon_instance_id, equipment_instance_id, quantity")
+    .eq("id", safeInventoryId)
+    .maybeSingle();
+
+  if (inventoryError || !inventoryRow) {
+    throw new Error("No se pudo leer el objeto del inventario.");
+  }
+  if (inventoryRow.profile_id !== user.id) {
+    throw new Error("No podés usar un objeto que no te pertenece.");
+  }
+
+  const quantity = Math.max(0, Math.trunc(Number(inventoryRow.quantity ?? 0)));
+  if (quantity <= 0) {
+    throw new Error("No quedan unidades en el stack.");
+  }
+
+  let itemId: string | null = inventoryRow.item_id ?? null;
+  if (!itemId && inventoryRow.weapon_instance_id) {
+    const { data: weaponInstance, error: weaponInstanceError } = await supabase
+      .from("weapon_instance")
+      .select("item_id")
+      .eq("id", inventoryRow.weapon_instance_id)
+      .maybeSingle();
+    if (weaponInstanceError || !weaponInstance) {
+      throw new Error("No se pudo leer la instancia del arma.");
+    }
+    itemId = weaponInstance.item_id;
+  }
+  if (!itemId && inventoryRow.equipment_instance_id) {
+    const { data: equipmentInstance, error: equipmentInstanceError } = await supabase
+      .from("equipment_instances")
+      .select("item_id")
+      .eq("id", inventoryRow.equipment_instance_id)
+      .maybeSingle();
+    if (equipmentInstanceError || !equipmentInstance) {
+      throw new Error("No se pudo leer la instancia del equipamiento.");
+    }
+    itemId = equipmentInstance.item_id;
+  }
+  if (!itemId) {
+    throw new Error("El objeto no tiene una referencia de item válida.");
+  }
+
+  const { data: itemData, error: itemReadError } = await supabase
+    .from("items")
+    .select("json_consumable_effect")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (itemReadError || !itemData) {
+    throw new Error("No se pudo leer la información del objeto.");
+  }
+
+  const effect = parseItemsConsumableEffect(itemData.json_consumable_effect);
+  if (!effect) {
+    throw new Error("Este objeto no se puede consumir.");
+  }
+  if (!inventoryConsumeFlag(effect)) {
+    throw new Error("Este objeto no se puede consumir desde el inventario.");
+  }
+
+  const statRaw =
+    effect["inventory-stat"] ?? effect.inventory_stat ?? effect.inventoryStat;
+  const statKey =
+    typeof statRaw === "string" ? statRaw.trim().toLowerCase() : "";
+  if (!statKey || !INVENTORY_CONSUME_CHARACTER_COLUMNS.has(statKey)) {
+    throw new Error("Efecto de consumible inválido.");
+  }
+
+  const delta = inventoryConsumeDelta(effect);
+  if (delta <= 0) {
+    throw new Error("Cantidad de efecto inválida.");
+  }
+
+  const { data: characterRow, error: characterError } = await supabase
+    .from("user_character")
+    .select(
+      "hp_actual, mana_actual, hp_total, mana_total, str, dex, int, wis, experience_current, speed_total, armor_total, mr_total",
+    )
+    .eq("profile_id", user.id)
+    .maybeSingle();
+
+  if (characterError || !characterRow) {
+    throw new Error("No se pudo leer el personaje.");
+  }
+
+  const num = (value: unknown): number => {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    return 0;
+  };
+
+  const currentVal = num((characterRow as Record<string, unknown>)[statKey]);
+  let nextVal = currentVal + delta;
+
+  if (statKey === "hp_actual") {
+    const maxHp = Math.max(0, num((characterRow as Record<string, unknown>).hp_total));
+    nextVal = Math.min(Math.max(0, nextVal), maxHp);
+  } else if (statKey === "mana_actual") {
+    const maxMana = Math.max(0, num((characterRow as Record<string, unknown>).mana_total));
+    nextVal = Math.min(Math.max(0, nextVal), maxMana);
+  } else {
+    nextVal = Math.max(0, nextVal);
+  }
+
+  const { error: characterUpdateError } = await supabase
+    .from("user_character")
+    .update({ [statKey]: nextVal })
+    .eq("profile_id", user.id);
+
+  if (characterUpdateError) {
+    throw new Error("No se pudo aplicar el efecto del consumible.");
+  }
+
+  if (quantity <= 1) {
+    const { error: deleteInvError } = await supabase
+      .from("user_inventory")
+      .delete()
+      .eq("id", safeInventoryId)
+      .eq("profile_id", user.id);
+    if (deleteInvError) {
+      throw new Error("No se pudo actualizar el inventario.");
+    }
+  } else {
+    const { error: invQtyError } = await supabase
+      .from("user_inventory")
+      .update({ quantity: quantity - 1 })
+      .eq("id", safeInventoryId)
+      .eq("profile_id", user.id);
+    if (invQtyError) {
+      throw new Error("No se pudo actualizar el inventario.");
+    }
+  }
+
+  revalidatePath("/character_profile");
+}

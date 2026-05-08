@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
+import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
@@ -16,6 +17,8 @@ const ACTION_DELAY_MS = 1000;
 const FIRST_ACTION_DELAY_MS = 3000;
 /** Igual que tutorial: deja terminar la animación de barra HP antes del modal de derrota. */
 const DEFEAT_MODAL_DELAY_MS = 300;
+/** Espera breve tras eliminar al último enemigo antes de abrir el modal de victoria. */
+const VICTORY_MODAL_DELAY_MS = 1000;
 
 /** Misma altura que la caja scroll del Combat Log en cada breakpoint (mobile vs sm). */
 const ACTIONS_PANEL_BODY_MOBILE =
@@ -474,6 +477,7 @@ function getPlayerSkillSubtypeStyles(subtype: PlayerSkillEffectSubtype): PlayerS
 /** Datos del enemigo para UI + lógica de combate en cliente (HP visible en panel por enemigo). */
 export type CombatEncounterEnemyView = {
   id: string;
+  templateId: string | null;
   spawnIndex: number;
   name: string;
   portraitSrc: string | null;
@@ -481,6 +485,9 @@ export type CombatEncounterEnemyView = {
   /** Ajustes visuales opcionales del sprite en el escenario. */
   spriteOffsetX: number;
   spriteOffsetY: number;
+  /** Offsets exclusivos para mobile (`combat_encounter_enemies.mobile_offset_x/y`). */
+  mobileSpriteOffsetX: number;
+  mobileSpriteOffsetY: number;
   spriteScale: number;
   spriteZIndex: number;
   xpReward: number;
@@ -500,12 +507,113 @@ export type CombatEncounterEnemyView = {
   aiProfile: string | null;
 };
 
+export type CombatVictoryLootItem = {
+  lootKey: string;
+  itemId: string;
+  name: string;
+  iconPath: string | null;
+  quantity: number;
+  description: string | null;
+  quoteText: string | null;
+  sellValue: number;
+  itemTypeId: number | null;
+  itemTypeCode: string | null;
+  rarityColor: string | null;
+  weaponInstance?: {
+    rarity: string | null;
+    rarityColor: string | null;
+    attackDamageMin: number | null;
+    attackDamageMax: number | null;
+    magicDamageMin: number | null;
+    magicDamageMax: number | null;
+    statKey1: string | null;
+    valueFlat1: number | null;
+    valuePct1: number | null;
+    statKey2: string | null;
+    valueFlat2: number | null;
+    valuePct2: number | null;
+    statKey3: string | null;
+    valueFlat3: number | null;
+    valuePct3: number | null;
+  } | null;
+  equipmentInstance?: {
+    rarity: string | null;
+    rarityColor: string | null;
+    statKey1: string | null;
+    valueFlat1: number | null;
+    valuePct1: number | null;
+    statKey2: string | null;
+    valueFlat2: number | null;
+    valuePct2: number | null;
+    statKey3: string | null;
+    valueFlat3: number | null;
+    valuePct3: number | null;
+  } | null;
+};
+export type CombatDefeatLostItem = {
+  inventoryId: number;
+  name: string;
+  iconPath: string | null;
+  quantityLost: number;
+};
+
+function capitalizeFirst(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function formatWeaponStatLine(
+  statKey: string | null | undefined,
+  valueFlat: number | null | undefined,
+  valuePct: number | null | undefined,
+): string | null {
+  const key = statKey?.trim();
+  if (!key) return null;
+  if (valueFlat != null && Number.isFinite(Number(valueFlat))) {
+    return `+ ${valueFlat} ${key}`;
+  }
+  if (valuePct != null && Number.isFinite(Number(valuePct))) {
+    return `+ ${valuePct}% ${key}`;
+  }
+  return null;
+}
+
+function weaponDamageRange(
+  min: number | null | undefined,
+  max: number | null | undefined,
+): string {
+  const a = min != null && Number.isFinite(Number(min)) ? Number(min) : 0;
+  const b = max != null && Number.isFinite(Number(max)) ? Number(max) : 0;
+  return `${a} - ${b}`;
+}
+
 export type CombatPlayerConsumableView = {
   inventoryId: number;
   itemId: string;
   name: string;
   description: string | null;
+  effect: Record<string, unknown> | null;
   quantity: number;
+};
+
+export type CombatConsumeResult = {
+  ok: boolean;
+  remainingQuantity?: number;
+  error?: string;
+};
+
+export type CombatEncounterStatsPayload = {
+  didWin: boolean;
+  enemiesDefeated: number;
+  bossesDefeated: number;
+  totalDamageDealt: number;
+  highestHitDealt: number;
+  totalDamageTaken: number;
+  totalHealing: number;
+  highestHitReceived: number;
+  finalHp: number;
+  finalMana: number;
 };
 
 export type CombatEncounterDebugPayload = {
@@ -530,6 +638,7 @@ export type CombatEncounterDebugPayload = {
     ai_profile: string | null;
     enemyTemplate: Record<string, unknown> | null;
   }>;
+  lootDebug?: Record<string, unknown>;
 };
 
 export type CombatEncounterShellProps = {
@@ -560,10 +669,29 @@ export type CombatEncounterShellProps = {
   playerStatWis?: number;
   playerArmor?: number;
   playerMr?: number;
+  playerExperienceToNext?: number;
+  playerLevelCurrent?: number;
+  playerLevelAfterVictory?: number;
   /** Skills aprendidos del PJ (`user_character_skills` + `player_skills`). */
   playerSkills?: CombatPlayerSkillView[];
   /** Consumibles visibles en combate (`user_inventory` + `items`, item_type_id=consumable). */
   playerConsumables?: CombatPlayerConsumableView[];
+  /** Loot ya rolado al iniciar el combate (`enemy_drop_tables.combat_encounter_id` = `combat_encounters.code`). */
+  victoryLootItems?: CombatVictoryLootItem[];
+  /** Items que se perderán al ser derrotado (penalidad de combate). */
+  defeatLostItems?: CombatDefeatLostItem[];
+  /** Oro calculado desde los drops rolados (no desde enemy_templates.gold_rewards). */
+  victoryGoldFromLoot?: number;
+  /** Acción servidor para consumir 1 unidad en inventario. */
+  onConsumeConsumable?: (inventoryId: number) => Promise<CombatConsumeResult>;
+  /** Persiste estado actual (HP/Mana) cuando el usuario escapa. */
+  onEscapePersistState?: (payload: { finalHp: number; finalMana: number }) => Promise<void>;
+  /** Registra en el log global cuando el PJ cae en combate. */
+  onPlayerDefeatedGlobalLog?: () => Promise<void>;
+  /** Registra en el log global cuando el PJ sube de nivel. */
+  onPlayerLevelUpGlobalLog?: (newLevel: number) => Promise<void>;
+  /** Persiste estadísticas acumuladas del combate al finalizar (victoria/derrota). */
+  onCombatFinishedStats?: (payload: CombatEncounterStatsPayload) => Promise<void>;
   /** Destino para "Escapar" (normalmente el mapa de la zona origen). */
   escapeHref?: string;
 };
@@ -677,7 +805,7 @@ function PlayerStatusModal({
 }) {
   return (
     <div
-      className={`${menuFont.className} w-[min(100%,11.5rem)] shrink-0 rounded-xl border border-amber-600/50 bg-[#1a100c]/92 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:w-52 sm:p-2.5`}
+      className={`${menuFont.className} w-[min(100%,11.5rem)] shrink-0 rounded-xl border border-amber-600/50 bg-[#1a100c]/92 mx-1 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:w-52 sm:p-2.5`}
       role="group"
       aria-label={`Estado de ${displayName}`}
     >
@@ -744,7 +872,7 @@ function EnemyStatusModal({
       type="button"
       onClick={onSelect}
       disabled={isDefeated}
-      className={`${menuFont.className} w-[min(100%,11.5rem)] shrink-0 rounded-xl border bg-[#1a100c]/92 p-2 text-left shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm transition sm:w-52 sm:p-2.5 ${
+      className={`${menuFont.className} min-w-0 flex-1 basis-0 rounded-xl border bg-[#1a100c]/92 p-1.5 text-left shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm transition sm:w-52 sm:flex-none sm:basis-auto sm:p-2.5 ${
         isDefeated
           ? "cursor-not-allowed border-slate-700/70 opacity-55"
           : isSelected
@@ -755,8 +883,8 @@ function EnemyStatusModal({
       aria-label={`Estado de ${enemy.name}`}
       aria-pressed={isSelected}
     >
-      <div className="flex items-center gap-2.5">
-        <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-amber-800/55 bg-black/45 sm:h-[3.25rem] sm:w-[3.25rem]">
+      <div className="flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:gap-2.5">
+        <div className="relative hidden h-9 w-9 shrink-0 overflow-hidden rounded-lg border border-amber-800/55 bg-black/45 sm:block sm:h-[3.25rem] sm:w-[3.25rem]">
           {enemy.portraitSrc ? (
             <EncounterRasterMedia
               src={enemy.portraitSrc}
@@ -771,8 +899,8 @@ function EnemyStatusModal({
             </span>
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] font-semibold leading-tight text-amber-100 sm:text-xs">
+        <div className="min-w-0 w-full flex-1 sm:w-auto">
+          <p className="truncate text-center text-[10px] font-semibold leading-tight text-amber-100 sm:text-left sm:text-xs">
             {enemy.name}
           </p>
           <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-black/50 sm:h-2.5">
@@ -826,10 +954,22 @@ export function CombatEncounterShell({
   playerStatWis = 0,
   playerArmor = 0,
   playerMr = 0,
+  playerExperienceToNext = 0,
+  playerLevelCurrent = 1,
+  playerLevelAfterVictory = 1,
   playerSkills = [],
   playerConsumables = [],
+  victoryLootItems = [],
+  defeatLostItems = [],
+  victoryGoldFromLoot = 0,
+  onConsumeConsumable,
+  onEscapePersistState,
+  onPlayerDefeatedGlobalLog,
+  onPlayerLevelUpGlobalLog,
+  onCombatFinishedStats,
   escapeHref = "/",
 }: CombatEncounterShellProps) {
+  const router = useRouter();
   const backgroundResolved = backgroundSrc?.trim() || BG_INTRO_FOREST;
   /** Copia en memoria del combate para uso al activar habilidades del PJ. */
   const playerCombatSkills = useMemo(() => [...playerSkills], [playerSkills]);
@@ -837,6 +977,12 @@ export function CombatEncounterShell({
   useEffect(() => {
     playerCombatSkillsRef.current = playerCombatSkills;
   }, [playerCombatSkills]);
+  const [combatConsumables, setCombatConsumables] = useState<CombatPlayerConsumableView[]>([
+    ...playerConsumables,
+  ]);
+  useEffect(() => {
+    setCombatConsumables([...playerConsumables]);
+  }, [playerConsumables]);
 
   const initialEnemies = useMemo(
     () => enemies.slice(0, MAX_ENEMIES_ON_FIELD),
@@ -864,6 +1010,8 @@ export function CombatEncounterShell({
 
   const [isActionsPanelOpen, setIsActionsPanelOpen] = useState(false);
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
+  const [isEscaping, setIsEscaping] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory">("main");
   const [isTurnTransitioning, setIsTurnTransitioning] = useState(true);
   const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
@@ -872,6 +1020,8 @@ export function CombatEncounterShell({
   const advanceTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialActionDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const defeatModalDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const victoryModalDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didReportDefeatRef = useRef(false);
   const [attackHint, setAttackHint] = useState<{
     visible: boolean;
     x: number;
@@ -884,7 +1034,32 @@ export function CombatEncounterShell({
     pinned: boolean;
     skillId: string | null;
   }>({ open: false, x: 0, y: 0, pinned: false, skillId: null });
+  const [consumableInfoTooltip, setConsumableInfoTooltip] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    pinned: boolean;
+    inventoryId: number | null;
+  }>({ open: false, x: 0, y: 0, pinned: false, inventoryId: null });
+  const [victoryLootTooltip, setVictoryLootTooltip] = useState<{
+    open: boolean;
+    lootKey: string | null;
+  }>({ open: false, lootKey: null });
   const [isDefeatOverlayVisible, setIsDefeatOverlayVisible] = useState(false);
+  const [isDefeatPenaltyOpen, setIsDefeatPenaltyOpen] = useState(false);
+  const [isVictoryOverlayVisible, setIsVictoryOverlayVisible] = useState(false);
+  const [isVictoryLootOpen, setIsVictoryLootOpen] = useState(false);
+  const [isLevelUpModalOpen, setIsLevelUpModalOpen] = useState(false);
+  const didOpenLevelUpModalRef = useRef(false);
+  const didReportLevelUpRef = useRef(false);
+  const combatStatsRef = useRef({
+    totalDamageDealt: 0,
+    highestHitDealt: 0,
+    totalDamageTaken: 0,
+    totalHealing: 0,
+    highestHitReceived: 0,
+  });
+  const didPersistCombatStatsRef = useRef(false);
 
   const [turn, setTurn] = useState(1);
 
@@ -911,6 +1086,7 @@ export function CombatEncounterShell({
   useEffect(() => {
     setCombatLog(initialLog);
   }, [initialLog]);
+
   const [playerCurrentHp, setPlayerCurrentHp] = useState(playerHp);
   const [displayPlayerMana, setDisplayPlayerMana] = useState(playerMana);
   const [enemySkillNextAvailableTurn, setEnemySkillNextAvailableTurn] = useState<
@@ -925,16 +1101,45 @@ export function CombatEncounterShell({
   }, [playerHp, playerHpMax]);
 
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 639.98px)");
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
     setIsDefeatOverlayVisible(false);
+    setIsDefeatPenaltyOpen(false);
+    setIsVictoryOverlayVisible(false);
+    setIsVictoryLootOpen(false);
+    setVictoryLootTooltip({ open: false, lootKey: null });
+    setIsLevelUpModalOpen(false);
+    didOpenLevelUpModalRef.current = false;
+    didReportLevelUpRef.current = false;
+    didReportDefeatRef.current = false;
+    didPersistCombatStatsRef.current = false;
+    combatStatsRef.current = {
+      totalDamageDealt: 0,
+      highestHitDealt: 0,
+      totalDamageTaken: 0,
+      totalHealing: 0,
+      highestHitReceived: 0,
+    };
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
       defeatModalDelayRef.current = null;
+    }
+    if (victoryModalDelayRef.current) {
+      clearTimeout(victoryModalDelayRef.current);
+      victoryModalDelayRef.current = null;
     }
   }, [encounterCode]);
 
   useEffect(() => {
     if (playerCurrentHp > 0) {
       setIsDefeatOverlayVisible(false);
+      setIsDefeatPenaltyOpen(false);
       if (defeatModalDelayRef.current) {
         clearTimeout(defeatModalDelayRef.current);
         defeatModalDelayRef.current = null;
@@ -954,6 +1159,112 @@ export function CombatEncounterShell({
       }
     };
   }, [playerCurrentHp]);
+  useEffect(() => {
+    if (playerCurrentHp > 0) return;
+    if (didReportDefeatRef.current) return;
+    didReportDefeatRef.current = true;
+    if (!onPlayerDefeatedGlobalLog) return;
+    void onPlayerDefeatedGlobalLog().catch(() => {
+      // Si falla el log global no debe bloquear el flujo de combate.
+    });
+  }, [playerCurrentHp, onPlayerDefeatedGlobalLog]);
+  const hasAnyEnemy = displayEnemies.length > 0;
+  const hasAliveEnemies = displayEnemies.some((enemy) => enemy.hp > 0);
+  const recordPlayerDamageDealt = (amount: number) => {
+    const safe = Math.max(0, Math.trunc(amount));
+    if (safe <= 0) return;
+    combatStatsRef.current.totalDamageDealt += safe;
+    combatStatsRef.current.highestHitDealt = Math.max(combatStatsRef.current.highestHitDealt, safe);
+  };
+  const recordPlayerDamageTaken = (amount: number) => {
+    const safe = Math.max(0, Math.trunc(amount));
+    if (safe <= 0) return;
+    combatStatsRef.current.totalDamageTaken += safe;
+    combatStatsRef.current.highestHitReceived = Math.max(combatStatsRef.current.highestHitReceived, safe);
+  };
+  const recordPlayerHealing = (amount: number) => {
+    const safe = Math.max(0, Math.trunc(amount));
+    if (safe <= 0) return;
+    combatStatsRef.current.totalHealing += safe;
+  };
+  const victoryTotalXp = useMemo(
+    () => initialEnemies.reduce((sum, enemy) => sum + Math.max(0, Math.trunc(enemy.xpReward)), 0),
+    [initialEnemies],
+  );
+  const playerExperienceToNextSafe = Math.max(0, Math.trunc(playerExperienceToNext));
+  const shouldTriggerLevelUpModal =
+    playerExperienceToNextSafe > 0 && victoryTotalXp >= playerExperienceToNextSafe;
+  const levelAfterVictorySafe = Math.max(
+    Math.max(1, Math.trunc(playerLevelCurrent)),
+    Math.max(1, Math.trunc(playerLevelAfterVictory)),
+  );
+  const victoryTotalGold = Math.max(0, Math.trunc(victoryGoldFromLoot));
+  useEffect(() => {
+    if (!hasAnyEnemy || hasAliveEnemies || playerCurrentHp <= 0) {
+      setIsVictoryOverlayVisible(false);
+      setIsVictoryLootOpen(false);
+      if (victoryModalDelayRef.current) {
+        clearTimeout(victoryModalDelayRef.current);
+        victoryModalDelayRef.current = null;
+      }
+      return;
+    }
+    if (isVictoryOverlayVisible) return;
+    if (victoryModalDelayRef.current) return;
+
+    victoryModalDelayRef.current = setTimeout(() => {
+      setIsVictoryOverlayVisible(true);
+      victoryModalDelayRef.current = null;
+    }, VICTORY_MODAL_DELAY_MS);
+
+    return () => {
+      if (victoryModalDelayRef.current) {
+        clearTimeout(victoryModalDelayRef.current);
+        victoryModalDelayRef.current = null;
+      }
+    };
+  }, [hasAnyEnemy, hasAliveEnemies, playerCurrentHp, isVictoryOverlayVisible]);
+  useEffect(() => {
+    if (!isVictoryOverlayVisible || !isVictoryLootOpen || !shouldTriggerLevelUpModal) return;
+    if (didOpenLevelUpModalRef.current) return;
+    didOpenLevelUpModalRef.current = true;
+    setIsLevelUpModalOpen(true);
+  }, [isVictoryOverlayVisible, isVictoryLootOpen, shouldTriggerLevelUpModal]);
+  useEffect(() => {
+    if (!isLevelUpModalOpen) return;
+    if (didReportLevelUpRef.current) return;
+    didReportLevelUpRef.current = true;
+    if (!onPlayerLevelUpGlobalLog) return;
+    void onPlayerLevelUpGlobalLog(levelAfterVictorySafe).catch(() => {
+      // Si falla el log global de level up no debe bloquear el flujo del combate.
+    });
+  }, [isLevelUpModalOpen, levelAfterVictorySafe, onPlayerLevelUpGlobalLog]);
+  useEffect(() => {
+    if (didPersistCombatStatsRef.current) return;
+    const didLose = playerCurrentHp <= 0;
+    const didWin = hasAnyEnemy && !hasAliveEnemies && playerCurrentHp > 0;
+    if (!didLose && !didWin) return;
+    const enemiesDefeatedCount = displayEnemies.reduce(
+      (sum, enemy) => sum + (enemy.hp <= 0 ? 1 : 0),
+      0,
+    );
+    didPersistCombatStatsRef.current = true;
+    if (!onCombatFinishedStats) return;
+    void onCombatFinishedStats({
+      didWin,
+      enemiesDefeated: enemiesDefeatedCount,
+      bossesDefeated: isBoss ? 1 : 0,
+      totalDamageDealt: combatStatsRef.current.totalDamageDealt,
+      highestHitDealt: combatStatsRef.current.highestHitDealt,
+      totalDamageTaken: combatStatsRef.current.totalDamageTaken,
+      totalHealing: combatStatsRef.current.totalHealing,
+      highestHitReceived: combatStatsRef.current.highestHitReceived,
+      finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
+      finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+    }).catch(() => {
+      // Si falla el guardado de stats no se bloquea la resolución visual del combate.
+    });
+  }, [displayEnemies, hasAliveEnemies, hasAnyEnemy, isBoss, onCombatFinishedStats, playerCurrentHp]);
   useEffect(() => {
     setDisplayPlayerMana(Math.min(Math.max(0, playerMana), Math.max(0, playerManaMax)));
   }, [playerMana, playerManaMax]);
@@ -1035,6 +1346,30 @@ export function CombatEncounterShell({
   const effectiveTurnIndex =
     turnOrder.length === 0 ? 0 : Math.min(currentTurnIndex, turnOrder.length - 1);
   const currentActor = turnOrder[effectiveTurnIndex] ?? null;
+  const runtimeInitiativeDebug = useMemo(
+    () => ({
+      playerSpeed: Math.max(0, Math.trunc(playerSpeed)),
+      enemies: displayEnemies.map((enemy) => ({
+        id: enemy.id,
+        name: enemy.name,
+        speed: Math.max(0, Math.trunc(enemy.speed)),
+        hp: enemy.hp,
+        alive: enemy.hp > 0,
+      })),
+      turnOrder: turnOrder.map((actor, idx) => ({
+        idx,
+        actorId: actor.id,
+        actorType: actor.type,
+        speed: actor.speed,
+        isCurrent: idx === effectiveTurnIndex,
+      })),
+      currentTurnIndex: effectiveTurnIndex,
+      currentActorId: currentActor?.id ?? null,
+      currentActorType: currentActor?.type ?? null,
+      turn,
+    }),
+    [playerSpeed, displayEnemies, turnOrder, effectiveTurnIndex, currentActor, turn],
+  );
   useEffect(() => {
     if (turnOrder.length === 0) return;
     const previous = previousTurnIndexRef.current;
@@ -1063,6 +1398,10 @@ export function CombatEncounterShell({
       if (defeatModalDelayRef.current) {
         clearTimeout(defeatModalDelayRef.current);
         defeatModalDelayRef.current = null;
+      }
+      if (victoryModalDelayRef.current) {
+        clearTimeout(victoryModalDelayRef.current);
+        victoryModalDelayRef.current = null;
       }
     },
     [],
@@ -1166,6 +1505,171 @@ export function CombatEncounterShell({
     );
   }
 
+  function consumableObjective(effect: Record<string, unknown> | null): "self" | "enemy" {
+    const raw =
+      typeof effect?.objetive === "string"
+        ? effect.objetive.trim().toLowerCase()
+        : typeof effect?.objective === "string"
+          ? effect.objective.trim().toLowerCase()
+          : "";
+    return raw === "enemy" ? "enemy" : "self";
+  }
+
+  function consumableTarget(effect: Record<string, unknown> | null): "single" | "area" {
+    const raw = typeof effect?.target === "string" ? effect.target.trim().toLowerCase() : "";
+    return raw === "area" ? "area" : "single";
+  }
+
+  function consumableStat(effect: Record<string, unknown> | null): string {
+    return typeof effect?.stat === "string" ? effect.stat.trim().toLowerCase() : "";
+  }
+
+  function consumableAmount(effect: Record<string, unknown> | null): number {
+    const min = coerceEffectNumber(effect?.["amount-min"], 0);
+    const max = coerceEffectNumber(effect?.["amount-max"], min);
+    return Math.max(0, randomIntInclusive(min, max));
+  }
+
+  function consumableLogText(
+    item: CombatPlayerConsumableView,
+    amountApplied: number,
+    enemyName?: string | null,
+  ): string {
+    const fromEffect = item.effect?.text;
+    if (typeof fromEffect === "string" && fromEffect.trim().length > 0) {
+      let text = fromEffect.trim().replaceAll("{daño}", String(Math.max(0, Math.trunc(amountApplied))));
+      if (enemyName && enemyName.trim().length > 0) {
+        text = text.replaceAll("{enemigo}", enemyName.trim());
+      }
+      return text;
+    }
+    return `Usaste ${item.name}.`;
+  }
+
+  function canUseConsumable(item: CombatPlayerConsumableView): boolean {
+    if (isPlayerActionsLocked) return false;
+    if (item.quantity <= 0) return false;
+    if (!item.effect) return false;
+    const objective = consumableObjective(item.effect);
+    if (objective !== "enemy") return true;
+    const target = consumableTarget(item.effect);
+    if (target === "area") return displayEnemies.some((enemy) => enemy.hp > 0);
+    return selectedEnemy != null && selectedEnemy.hp > 0;
+  }
+
+  function applyEffectToEnemy(
+    enemy: CombatEncounterEnemyView,
+    stat: string,
+    amount: number,
+  ): CombatEncounterEnemyView {
+    if (stat === "hp") return { ...enemy, hp: Math.max(0, enemy.hp - amount) };
+    if (stat === "mana" || stat === "mp") return { ...enemy, mana: Math.max(0, enemy.mana - amount) };
+    if (stat === "armor") return { ...enemy, armor: Math.max(0, enemy.armor - amount) };
+    if (stat === "mr") return { ...enemy, mr: Math.max(0, enemy.mr - amount) };
+    if (stat === "speed") return { ...enemy, speed: Math.max(0, enemy.speed - amount) };
+    return enemy;
+  }
+
+  async function handleConsumableUse(item: CombatPlayerConsumableView) {
+    if (!canUseConsumable(item)) return;
+
+    // Gasto optimista para evitar doble click mientras responde el server action.
+    setCombatConsumables((prev) =>
+      prev
+        .map((entry) =>
+          entry.inventoryId === item.inventoryId
+            ? { ...entry, quantity: Math.max(0, entry.quantity - 1) }
+            : entry,
+        )
+        .filter((entry) => entry.quantity > 0),
+    );
+
+    if (onConsumeConsumable) {
+      const result = await onConsumeConsumable(item.inventoryId);
+      if (!result.ok) {
+        setCombatConsumables((prev) => {
+          const existing = prev.find((entry) => entry.inventoryId === item.inventoryId);
+          if (existing) {
+            return prev.map((entry) =>
+              entry.inventoryId === item.inventoryId
+                ? { ...entry, quantity: existing.quantity + 1 }
+                : entry,
+            );
+          }
+          return [...prev, item];
+        });
+        appendCombatLog(result.error?.trim() || "No se pudo consumir el objeto.", "danger");
+        return;
+      }
+      if (typeof result.remainingQuantity === "number") {
+        const qty = Math.max(0, Math.trunc(result.remainingQuantity));
+        setCombatConsumables((prev) => {
+          const exists = prev.some((entry) => entry.inventoryId === item.inventoryId);
+          if (qty <= 0) {
+            return prev.filter((entry) => entry.inventoryId !== item.inventoryId);
+          }
+          if (!exists) return [...prev, { ...item, quantity: qty }];
+          return prev.map((entry) =>
+            entry.inventoryId === item.inventoryId ? { ...entry, quantity: qty } : entry,
+          );
+        });
+      }
+    }
+
+    const objective = consumableObjective(item.effect);
+    const target = consumableTarget(item.effect);
+    const stat = consumableStat(item.effect);
+    const amount = consumableAmount(item.effect);
+    if (objective === "self") {
+      if (stat === "hp") {
+        setPlayerCurrentHp((prev) => {
+          const next = Math.min(playerHpMax, Math.max(0, prev + amount));
+          recordPlayerHealing(next - prev);
+          return next;
+        });
+      } else if (stat === "mana" || stat === "mp") {
+        setDisplayPlayerMana((prev) => Math.min(playerManaMax, Math.max(0, prev + amount)));
+      }
+      appendCombatLog(consumableLogText(item, amount), "default", amount);
+      setActionMenu("main");
+      scheduleAdvanceTurn();
+      return;
+    }
+
+    if (target === "single") {
+      const enemy = selectedEnemy;
+      if (!enemy || enemy.hp <= 0) {
+        appendCombatLog("Seleccioná un enemigo para usar este consumible.", "default");
+        return;
+      }
+      let targetDied = false;
+      setDisplayEnemies((prev) =>
+        prev.map((entry) => {
+          if (entry.id !== enemy.id) return entry;
+          const next = applyEffectToEnemy(entry, stat, amount);
+          targetDied = entry.hp > 0 && next.hp <= 0;
+          return next;
+        }),
+      );
+      appendCombatLog(consumableLogText(item, amount, enemy.name), "default", amount);
+      if (targetDied) {
+        appendCombatLog(`Has matado a ${enemy.name}.`, "success");
+        setSelectedEnemyId(null);
+      }
+      setActionMenu("main");
+      scheduleAdvanceTurn();
+      return;
+    }
+
+    setDisplayEnemies((prev) =>
+      prev.map((entry) => (entry.hp > 0 ? applyEffectToEnemy(entry, stat, amount) : entry)),
+    );
+    appendCombatLog(consumableLogText(item, amount), "default", amount);
+
+    setActionMenu("main");
+    scheduleAdvanceTurn();
+  }
+
   const isPlayerActionsLocked = !isPlayerTurn || isTurnTransitioning || playerCurrentHp <= 0;
 
   function openSkillInfoTooltip(skillId: string, x: number, y: number, pinned: boolean) {
@@ -1194,6 +1698,36 @@ export function CombatEncounterShell({
             y: Math.min(y + 12, window.innerHeight - 170),
             pinned: true,
             skillId,
+          },
+    );
+  }
+
+  function openConsumableInfoTooltip(inventoryId: number, x: number, y: number, pinned: boolean) {
+    setConsumableInfoTooltip({
+      open: true,
+      x: Math.min(x + 12, window.innerWidth - 360),
+      y: Math.min(y + 12, window.innerHeight - 170),
+      pinned,
+      inventoryId,
+    });
+  }
+
+  function hideConsumableInfoTooltip() {
+    setConsumableInfoTooltip((prev) =>
+      prev.pinned ? prev : { open: false, x: 0, y: 0, pinned: false, inventoryId: null },
+    );
+  }
+
+  function toggleConsumableInfoTooltipPinned(inventoryId: number, x: number, y: number) {
+    setConsumableInfoTooltip((prev) =>
+      prev.open && prev.pinned && prev.inventoryId === inventoryId
+        ? { open: false, x: 0, y: 0, pinned: false, inventoryId: null }
+        : {
+            open: true,
+            x: Math.min(x + 12, window.innerWidth - 360),
+            y: Math.min(y + 12, window.innerHeight - 170),
+            pinned: true,
+            inventoryId,
           },
     );
   }
@@ -1266,6 +1800,7 @@ export function CombatEncounterShell({
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, target.hp);
       const updatedHp = target.hp - damageDone;
+      recordPlayerDamageDealt(damageDone);
 
       setDisplayEnemies((prev) =>
         prev.map((enemy) =>
@@ -1300,6 +1835,7 @@ export function CombatEncounterShell({
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, enemy.hp);
       const hpNext = enemy.hp - damageDone;
+      recordPlayerDamageDealt(damageDone);
       if (enemy.id === selectedEnemyId && hpNext <= 0) clearedSelection = true;
       const text =
         descTemplate != null
@@ -1331,6 +1867,10 @@ export function CombatEncounterShell({
     skillInfoTooltip.skillId === null
       ? undefined
       : playerCombatSkills.find((s) => s.userCharacterSkillId === skillInfoTooltip.skillId);
+  const consumableTooltipEntry =
+    consumableInfoTooltip.inventoryId == null
+      ? undefined
+      : combatConsumables.find((c) => c.inventoryId === consumableInfoTooltip.inventoryId);
 
   const skillTooltipStyles =
     skillTooltipEntry != null
@@ -1376,6 +1916,7 @@ export function CombatEncounterShell({
     const mitigated = mitigateDamageByDefense(rawDamage, target.armor);
     const updatedHp = Math.max(0, target.hp - mitigated);
     const damageDone = target.hp - updatedHp;
+    recordPlayerDamageDealt(damageDone);
     setDisplayEnemies((prev) =>
       prev.map((enemy) => (enemy.id === target.id ? { ...enemy, hp: updatedHp } : enemy)),
     );
@@ -1398,6 +1939,23 @@ export function CombatEncounterShell({
 
   function hideAttackHint() {
     setAttackHint((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+  }
+
+  function handleEscapeClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (!onEscapePersistState) return;
+    event.preventDefault();
+    if (isEscaping) return;
+    setIsEscaping(true);
+    void onEscapePersistState({
+      finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
+      finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+    })
+      .catch(() => {
+        // Si falla el guardado no bloquea escape.
+      })
+      .finally(() => {
+        router.push(escapeHref);
+      });
   }
 
   function pickAvailableEnemySkill(enemy: CombatEncounterEnemyView): EnemySkillDecision | null {
@@ -1467,6 +2025,7 @@ export function CombatEncounterShell({
     }
     const defenseStat = playerDefenseStatVsIncoming(incomingSubtype, playerArmor, playerMr);
     const damage = mitigateDamageByDefense(rawDamage, defenseStat);
+    recordPlayerDamageTaken(damage);
     const nextPlayerHp = Math.max(0, playerCurrentHp - damage);
     setPlayerCurrentHp(nextPlayerHp);
     if (skill) {
@@ -1524,7 +2083,16 @@ export function CombatEncounterShell({
               Debug combate (?debug=1)
             </summary>
             <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-emerald-100/90">
-              {JSON.stringify(combatDebug, null, 2)}
+              {JSON.stringify(
+                {
+                  server: combatDebug,
+                  runtime: {
+                    initiative: runtimeInitiativeDebug,
+                  },
+                },
+                null,
+                2,
+              )}
             </pre>
           </details>
         ) : null}
@@ -1570,17 +2138,18 @@ export function CombatEncounterShell({
 
             <Link
               href={escapeHref}
+              onClick={handleEscapeClick}
               className="shrink-0 rounded-full border border-red-700/60 bg-red-900/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-200/90 transition hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50 sm:px-3"
             >
-              Escapar
+              {isEscaping ? "Escapando..." : "Escapar"}
             </Link>
           </div>
         </header>
 
         <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] sm:mt-2 sm:p-6">
           {/* HUD: enemigos arriba a la derecha, PJ abajo a la izquierda (sobre el escenario) */}
-          <div className="pointer-events-none absolute inset-0 z-[8] flex flex-col justify-between p-1 sm:p-2">
-            <div className="pointer-events-auto flex flex-wrap justify-end gap-2">
+          <div className="pointer-events-none absolute inset-0 z-[8] flex flex-col justify-between gap-1 px-0 pb-1 pt-1 sm:gap-2 sm:p-2">
+            <div className="pointer-events-auto flex min-h-0 min-w-0 w-full flex-row items-stretch gap-1.5 self-start px-1 sm:w-auto sm:flex-wrap sm:justify-end sm:gap-2 sm:self-auto sm:px-0">
               {displayEnemies.length > 0
                 ? displayEnemies.map((enemy) => (
                     <EnemyStatusModal
@@ -1608,14 +2177,16 @@ export function CombatEncounterShell({
           </div>
 
           <div className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-row items-end justify-between">
-            <div className="intro-character-slide-in pointer-events-none flex w-[42%] translate-y-3 items-end justify-start sm:translate-y-0">
-              <Image
-                src={playerSpriteSrc}
-                alt={`${playerDisplayName} en combate`}
-                width={620}
-                height={930}
-                className="h-[min(32vh,200px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)] sm:h-[min(52vh,360px)]"
-              />
+            <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start py-10">
+              <div className="-translate-y-8 sm:-translate-y-11">
+                <Image
+                  src={playerSpriteSrc}
+                  alt={`${playerDisplayName} en combate`}
+                  width={620}
+                  height={930}
+                  className="h-[min(32vh,200px)] w-auto object-contain drop-shadow-[0_10px_24px_rgba(0,0,0,0.6)] sm:h-[min(52vh,300px)]"
+                />
+              </div>
             </div>
 
             <div className="intro-character-slide-in-right pointer-events-none flex w-[42%] flex-col items-end justify-end gap-1 self-start sm:gap-2 sm:self-auto">
@@ -1631,7 +2202,11 @@ export function CombatEncounterShell({
                     {enemy.hp > 0 ? (
                       <div
                         style={{
-                          transform: `translate(${enemy.spriteOffsetX}px, ${enemy.spriteOffsetY}px) scale(${enemy.spriteScale})`,
+                          transform: `translate(${
+                            isMobileViewport ? enemy.mobileSpriteOffsetX : enemy.spriteOffsetX
+                          }px, ${
+                            isMobileViewport ? enemy.mobileSpriteOffsetY : enemy.spriteOffsetY
+                          }px) scale(${enemy.spriteScale})`,
                           transformOrigin: "bottom right",
                         }}
                       >
@@ -1686,7 +2261,7 @@ export function CombatEncounterShell({
 
             {isActionsPanelOpen && (
               <div
-                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
+                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
               >
                 <button
                   type="button"
@@ -1714,7 +2289,7 @@ export function CombatEncounterShell({
                   )}
                 </div>
 
-                <div className={ACTIONS_PANEL_BODY_MOBILE}>
+                <div className={actionMenu === "main" ? "mt-2" : ACTIONS_PANEL_BODY_MOBILE}>
                 {actionMenu === "main" ? (
                   <div className="grid grid-cols-2 gap-1.5">
                     <div
@@ -1754,7 +2329,7 @@ export function CombatEncounterShell({
                       className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
                         isPlayerActionsLocked
                           ? "cursor-not-allowed border-slate-600/70 bg-slate-800/40 text-slate-300 opacity-55"
-                          : "cursor-pointer border-violet-600/70 bg-violet-900/45 text-violet-100 hover:bg-violet-800/65"
+                          : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
                       }`}
                     >
                       Inventario
@@ -1841,7 +2416,7 @@ export function CombatEncounterShell({
                     </div>
                     </div>
                   )
-                ) : playerConsumables.length === 0 ? (
+                ) : combatConsumables.length === 0 ? (
                   <p
                     className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-[11px] text-amber-200/75`}
                   >
@@ -1850,20 +2425,47 @@ export function CombatEncounterShell({
                 ) : (
                   <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
                   <div className="grid gap-1">
-                    {playerConsumables.map((item) => (
-                      <div key={item.inventoryId} className="flex items-center gap-1.5">
+                    {combatConsumables.map((item) => {
+                      const usable = canUseConsumable(item);
+                      return (
+                        <div key={item.inventoryId} className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={!usable}
+                            onClick={() => void handleConsumableUse(item)}
+                            className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug ${
+                              !usable
+                                ? "cursor-not-allowed border-yellow-700/65 bg-yellow-950/35 text-yellow-100/90 opacity-70"
+                                : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                            }`}
+                          >
+                            {item.name}
+                          </button>
                         <button
                           type="button"
-                          disabled
-                          className="w-full cursor-not-allowed rounded-md border border-violet-700/65 bg-violet-950/35 px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug text-violet-100/90 opacity-90"
+                          onMouseEnter={(e) =>
+                            openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                          }
+                          onMouseMove={(e) =>
+                            openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                          }
+                          onMouseLeave={hideConsumableInfoTooltip}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleConsumableInfoTooltipPinned(item.inventoryId, e.clientX, e.clientY);
+                          }}
+                          className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-yellow-700/70 bg-yellow-950/55 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-900/70"
+                          aria-label={`Información de ${item.name}`}
                         >
-                          {item.name}
+                          ?
                         </button>
-                        <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-violet-700/65 bg-violet-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-violet-100`}>
-                          x{item.quantity}
-                        </span>
-                      </div>
-                    ))}
+                          <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-yellow-700/65 bg-yellow-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-yellow-100`}>
+                            x{item.quantity}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                   </div>
                 )}
@@ -1872,76 +2474,78 @@ export function CombatEncounterShell({
             )}
           </div>
 
-          <div className="relative">
-            {!isCombatLogPanelOpen && (
-              <button
-                type="button"
-                onClick={() =>
-                  setIsCombatLogPanelOpen((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setIsActionsPanelOpen(false);
-                      setActionMenu("main");
-                    }
-                    return next;
-                  })
-                }
-                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                aria-expanded={isCombatLogPanelOpen}
-              >
-                <div className="min-w-0 text-left">
-                  <p>Combat Log</p>
-                  <p
-                    className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
-                  >
-                    {combatLog.length > 0 ? (
-                      <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
-                    ) : (
-                      ""
-                    )}
-                  </p>
-                </div>
-                <span className="ml-2 shrink-0" aria-hidden>
-                  ▲
-                </span>
-              </button>
-            )}
-
-            {isCombatLogPanelOpen && (
-              <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+          {!isActionsPanelOpen ? (
+            <div className="relative">
+              {!isCombatLogPanelOpen && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsCombatLogPanelOpen(false);
-                  }}
-                  className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
-                  aria-label="Colapsar combat log"
+                  onClick={() =>
+                    setIsCombatLogPanelOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsActionsPanelOpen(false);
+                        setActionMenu("main");
+                      }
+                      return next;
+                    })
+                  }
+                  className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                  aria-expanded={isCombatLogPanelOpen}
                 >
-                  <span>Combat Log</span>
-                  <span aria-hidden>▼</span>
-                </button>
-                <div
-                  ref={combatLogMobileRef}
-                  className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
-                >
-                  {combatLog.map((entry) => (
+                  <div className="min-w-0 text-left">
+                    <p>Combat Log</p>
                     <p
-                      key={entry.id}
-                      className={`rounded-md bg-black/25 px-2 py-1 ${
-                        entry.tone === "success"
-                          ? "text-emerald-300"
-                          : entry.tone === "danger"
-                            ? "text-red-300"
-                            : ""
-                      }`}
+                      className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
                     >
-                      <CombatLogLineBody entry={entry} />
+                      {combatLog.length > 0 ? (
+                        <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
+                      ) : (
+                        ""
+                      )}
                     </p>
-                  ))}
+                  </div>
+                  <span className="ml-2 shrink-0" aria-hidden>
+                    ▲
+                  </span>
+                </button>
+              )}
+
+              {isCombatLogPanelOpen && (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCombatLogPanelOpen(false);
+                    }}
+                    className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
+                    aria-label="Colapsar combat log"
+                  >
+                    <span>Combat Log</span>
+                    <span aria-hidden>▼</span>
+                  </button>
+                  <div
+                    ref={combatLogMobileRef}
+                    className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
+                  >
+                    {combatLog.map((entry) => (
+                      <p
+                        key={entry.id}
+                        className={`rounded-md bg-black/25 px-2 py-1 ${
+                          entry.tone === "success"
+                            ? "text-emerald-300"
+                            : entry.tone === "danger"
+                              ? "text-red-300"
+                              : ""
+                        }`}
+                      >
+                        <CombatLogLineBody entry={entry} />
+                      </p>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
         </section>
 
         <section className="mt-4 hidden min-h-0 flex-none grid-cols-[0.9fr_1.5fr] gap-3 pb-1 sm:grid">
@@ -2008,7 +2612,7 @@ export function CombatEncounterShell({
                   className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
                     isPlayerActionsLocked
                       ? "cursor-not-allowed border-slate-500/70 bg-slate-700/45 text-slate-300 opacity-55"
-                      : "cursor-pointer border-violet-600/70 bg-violet-900/45 text-violet-100 hover:bg-violet-800/65"
+                      : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
                   }`}
                 >
                   Inventario
@@ -2081,7 +2685,7 @@ export function CombatEncounterShell({
                 </div>
                 </div>
               )
-            ) : playerConsumables.length === 0 ? (
+            ) : combatConsumables.length === 0 ? (
               <p
                 className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-sm text-amber-200/75`}
               >
@@ -2090,20 +2694,47 @@ export function CombatEncounterShell({
             ) : (
               <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
               <div className="grid gap-1 sm:gap-1.5">
-                {playerConsumables.map((item) => (
-                  <div key={item.inventoryId} className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full cursor-not-allowed rounded-md border border-violet-700/65 bg-violet-950/35 px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug text-violet-100/90 opacity-90 sm:px-2 sm:py-1 sm:text-xs"
-                    >
-                      {item.name}
-                    </button>
-                    <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-violet-700/65 bg-violet-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-violet-100 sm:text-[11px]`}>
-                      x{item.quantity}
-                    </span>
-                  </div>
-                ))}
+                {combatConsumables.map((item) => {
+                  const usable = canUseConsumable(item);
+                  return (
+                    <div key={item.inventoryId} className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={!usable}
+                        onClick={() => void handleConsumableUse(item)}
+                        className={`w-full rounded-md border px-1.5 py-0.5 text-left text-[11px] font-semibold leading-snug sm:px-2 sm:py-1 sm:text-xs ${
+                          !usable
+                            ? "cursor-not-allowed border-yellow-700/65 bg-yellow-950/35 text-yellow-100/90 opacity-70"
+                            : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                        }`}
+                      >
+                        {item.name}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseEnter={(e) =>
+                          openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                        }
+                        onMouseMove={(e) =>
+                          openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                        }
+                        onMouseLeave={hideConsumableInfoTooltip}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleConsumableInfoTooltipPinned(item.inventoryId, e.clientX, e.clientY);
+                        }}
+                        className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-yellow-700/70 bg-yellow-950/55 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-900/70"
+                        aria-label={`Información de ${item.name}`}
+                      >
+                        ?
+                      </button>
+                      <span className={`${SKILL_COST_BADGE_BOX} rounded-md border border-yellow-700/65 bg-yellow-950/55 px-1 py-0.5 text-[10px] font-bold leading-none text-yellow-100 sm:text-[11px]`}>
+                        x{item.quantity}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               </div>
             )}
@@ -2216,6 +2847,30 @@ export function CombatEncounterShell({
           </p>
         </div>
       ) : null}
+      {consumableInfoTooltip.open && consumableTooltipEntry ? (
+        <div
+          className={`${helpCardFont.className} fixed z-[62] max-w-sm rounded-lg border border-yellow-700/80 bg-[#1b1408]/96 px-3 py-2 pr-8 text-sm leading-relaxed text-yellow-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
+          style={{ left: consumableInfoTooltip.x, top: consumableInfoTooltip.y }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setConsumableInfoTooltip({ open: false, x: 0, y: 0, pinned: false, inventoryId: null })
+            }
+            className="absolute right-1 top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-yellow-600/85 bg-yellow-900/70 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-800/80"
+            aria-label="Cerrar tooltip de consumible"
+          >
+            X
+          </button>
+          <p className={`${menuFont.className} text-sm font-semibold leading-snug text-yellow-100`}>
+            {consumableTooltipEntry.name}
+          </p>
+          <div className="my-1 h-px w-full bg-gradient-to-r from-transparent via-yellow-500/45 to-transparent" aria-hidden />
+          <p className="text-xs text-yellow-100/95">
+            {consumableTooltipEntry.description?.trim() || "Sin descripción."}
+          </p>
+        </div>
+      ) : null}
       {attackHint.visible ? (
         <div
           className="pointer-events-none fixed z-[999] max-w-[240px] rounded-md border border-amber-700/80 bg-[#1a100c]/95 px-2 py-1 text-[11px] font-semibold text-amber-100 shadow-[0_8px_20px_rgba(0,0,0,0.45)]"
@@ -2235,38 +2890,451 @@ export function CombatEncounterShell({
           className="fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-4"
           role="presentation"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="combat-defeat-title"
-            className="pointer-events-auto w-full max-w-xl"
-          >
+          {!isDefeatPenaltyOpen ? (
             <div
-              className={`${menuFont.className} relative overflow-hidden rounded-xl border border-red-400/80 bg-gradient-to-b from-red-700/95 via-red-900/95 to-red-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.65),0_0_24px_rgba(239,68,68,0.22),inset_0_1px_0_rgba(254,226,226,0.25)]`}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-defeat-title"
+              className="pointer-events-auto w-full max-w-xl"
             >
-              <span
-                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(254,226,226,0.2),transparent_58%)]"
-                aria-hidden
-              />
-              <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
-              <p
-                id="combat-defeat-title"
-                className="relative text-3xl font-black uppercase tracking-[0.2em] text-red-50 drop-shadow-[0_0_12px_rgba(254,202,202,0.55)] sm:text-4xl"
+              <div
+                className={`${menuFont.className} relative overflow-hidden rounded-xl border border-red-400/80 bg-gradient-to-b from-red-700/95 via-red-900/95 to-red-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.65),0_0_24px_rgba(239,68,68,0.22),inset_0_1px_0_rgba(254,226,226,0.25)]`}
               >
-                DERROTA
-              </p>
-              <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-red-100/90">
-              Momento de recobrar fuerzas
-              </p>
-              <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+                <span
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(254,226,226,0.2),transparent_58%)]"
+                  aria-hidden
+                />
+                <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+                <p
+                  id="combat-defeat-title"
+                  className="relative text-3xl font-black uppercase tracking-[0.2em] text-red-50 drop-shadow-[0_0_12px_rgba(254,202,202,0.55)] sm:text-4xl"
+                >
+                  DERROTA
+                </p>
+                <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-red-100/90">
+                  Momento de recobrar fuerzas
+                </p>
+                <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDefeatPenaltyOpen(true)}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+              >
+                Continuar
+              </button>
             </div>
-            <Link
-              href={escapeHref}
-              className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+          ) : (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-defeat-loss-title"
+              className="pointer-events-auto w-full max-w-xl"
             >
-              Volver al campamento
-            </Link>
-          </div>
+              <div
+                className={`${menuFont.className} rounded-xl border border-red-500/80 bg-[#2a120f]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.6)] sm:p-6`}
+              >
+                <p
+                  id="combat-defeat-loss-title"
+                  className="text-center text-base font-black uppercase tracking-[0.16em] text-red-100"
+                >
+                  Lograste salir corriendo, pero te olvidaste esto:
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {defeatLostItems.map((lost) => (
+                    <div
+                      key={`${lost.inventoryId}-${lost.name}`}
+                      className="rounded-md border border-red-600/70 bg-red-950/35 p-2 text-center"
+                    >
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-red-500/60 bg-red-950/45">
+                        {lost.iconPath ? (
+                          <Image
+                            src={lost.iconPath}
+                            alt={lost.name}
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 object-contain"
+                          />
+                        ) : (
+                          <span className="text-[10px] font-black text-red-100">?</span>
+                        )}
+                      </div>
+                      <p className="mt-1 truncate text-[10px] font-semibold uppercase text-red-100/95">
+                        {lost.name}
+                      </p>
+                      <p className="text-xs font-black text-red-200">x{lost.quantityLost}</p>
+                    </div>
+                  ))}
+                  {defeatLostItems.length === 0 ? (
+                    <p className="col-span-2 text-center text-xs font-semibold text-red-100/80">
+                      No había ítems válidos para perder.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <Link
+                href="/"
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+              >
+                Volver al Campamento
+              </Link>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {playerCurrentHp > 0 && isVictoryOverlayVisible ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-4"
+          role="presentation"
+        >
+          {!isVictoryLootOpen ? (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-victory-title"
+              className="pointer-events-auto w-full max-w-xl"
+            >
+              <div
+                className={`${menuFont.className} relative overflow-hidden rounded-xl border border-emerald-400/85 bg-gradient-to-b from-emerald-700/95 via-emerald-850/95 to-emerald-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.6),0_0_24px_rgba(16,185,129,0.28),inset_0_1px_0_rgba(209,250,229,0.35)]`}
+              >
+                <span
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(209,250,229,0.28),transparent_58%)]"
+                  aria-hidden
+                />
+                <div className="relative mx-auto mb-2 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
+                <p
+                  id="combat-victory-title"
+                  className="relative text-3xl font-black uppercase tracking-[0.2em] text-emerald-50 drop-shadow-[0_0_12px_rgba(167,243,208,0.6)] sm:text-4xl"
+                >
+                  VICTORIA
+                </p>
+                <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/90">
+                  El enemigo ha sido derrotado
+                </p>
+                <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVictoryLootOpen(true)}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-emerald-600/90 bg-emerald-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-emerald-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-emerald-700/95 sm:mt-6`}
+              >
+                Continuar
+              </button>
+            </div>
+          ) : (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="combat-rewards-title"
+              className="pointer-events-auto w-full max-w-xl"
+            >
+              <div
+                className={`${menuFont.className} rounded-xl border border-amber-700/70 bg-[#1c120e]/95 p-5 shadow-[0_14px_50px_rgba(0,0,0,0.55)] sm:p-6`}
+              >
+                <p
+                  id="combat-rewards-title"
+                  className="mb-5 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/95"
+                >
+                  Recompensas del combate
+                </p>
+                <div className="mt-3 rounded-lg border border-amber-700/55 bg-black/20 p-3">
+                  <div className="mx-auto mt-2 flex max-w-full flex-wrap items-start justify-center gap-2 gap-y-3">
+                    <div className="w-full max-w-[7rem] rounded-md border border-violet-600/60 bg-violet-900/20 p-2 text-center">
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-violet-500/70 bg-violet-950/40">
+                        <Image
+                          src="/img/resources/iconos/icon_xp.png"
+                          alt="Experiencia"
+                          width={32}
+                          height={32}
+                          className="h-8 w-8 object-contain"
+                        />
+                      </div>
+                      <p className="mt-1 truncate text-[10px] font-semibold uppercase text-emerald-100/90">
+                        Experiencia
+                      </p>
+                      <p className="text-xs font-black text-emerald-100">+{victoryTotalXp}</p>
+                    </div>
+                    {victoryLootItems.map((loot) => {
+                      const rarityBorderStyle =
+                        typeof loot.rarityColor === "string" && loot.rarityColor.trim().length > 0
+                          ? { borderColor: loot.rarityColor.trim() }
+                          : undefined;
+                      return (
+                      <div
+                        key={loot.lootKey}
+                        className="group relative w-full max-w-[7rem] rounded-md border border-amber-700/55 bg-amber-900/20 p-2 text-center"
+                        style={rarityBorderStyle}
+                      >
+                        <button
+                          type="button"
+                          className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-amber-600/60 bg-amber-950/40 transition hover:bg-amber-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                          style={rarityBorderStyle}
+                          aria-label={`Ver detalles de ${loot.name}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setVictoryLootTooltip((prev) =>
+                              prev.open && prev.lootKey === loot.lootKey
+                                ? { open: false, lootKey: null }
+                                : { open: true, lootKey: loot.lootKey },
+                            );
+                          }}
+                        >
+                          {loot.iconPath ? (
+                            <Image
+                              src={loot.iconPath}
+                              alt={loot.name}
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 object-contain"
+                            />
+                          ) : (
+                            <span className="text-[10px] font-black text-amber-100">?</span>
+                          )}
+                        </button>
+                        <p className="mt-1 truncate text-[10px] font-semibold uppercase text-amber-100/90" title={loot.name}>
+                          {loot.name}
+                        </p>
+                        <p className="text-xs font-black text-amber-100">x{loot.quantity}</p>
+                        <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 hidden w-64 -translate-x-1/2 rounded-lg border border-amber-700/75 bg-[#1c120e]/95 px-3 py-2 text-left text-sm text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)] sm:group-hover:block">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`${menuFont.className} text-sm font-bold leading-tight text-amber-200`}>
+                              {loot.name}
+                            </p>
+                            {loot.itemTypeId !== 2 ? (
+                              <div className="flex items-center gap-1 text-xs font-semibold text-amber-200">
+                                <Image
+                                  src="/img/resources/iconos/icon_gold.png"
+                                  alt="Oro"
+                                  width={12}
+                                  height={12}
+                                  className="h-3 w-3 object-contain"
+                                />
+                                <span>{loot.sellValue}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-[10px] uppercase text-amber-200/80">
+                            {capitalizeFirst(loot.itemTypeCode ?? "item")}
+                          </p>
+                          {loot.description ? (
+                            <p className={`${helpCardFont.className} mt-1 text-[11px] italic leading-relaxed text-amber-50/90`}>
+                              {loot.description}
+                            </p>
+                          ) : null}
+                          {loot.quoteText ? (
+                            <p
+                              className={`${helpCardFont.className} mt-1 text-[10px] italic leading-relaxed text-amber-200/85`}
+                              style={{ fontStyle: "italic" }}
+                            >
+                              - <em>"{loot.quoteText}"</em>
+                            </p>
+                          ) : null}
+                          {(() => {
+                            const roll = loot.weaponInstance ?? loot.equipmentInstance ?? null;
+                            if (!roll) return null;
+                            const showDamage = Boolean(loot.weaponInstance);
+                            const statLines = [
+                              formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
+                              formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
+                              formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                            ].filter(Boolean);
+                            return (
+                              <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
+                                {roll.rarity ? (
+                                  <p className="font-semibold" style={{ color: roll.rarityColor ?? undefined }}>
+                                    {roll.rarity}
+                                  </p>
+                                ) : null}
+                                {showDamage ? (
+                                  <>
+                                    <p>
+                                      {weaponDamageRange(
+                                        loot.weaponInstance?.attackDamageMin,
+                                        loot.weaponInstance?.attackDamageMax,
+                                      )}{" "}
+                                      Daño
+                                    </p>
+                                    <p>
+                                      {weaponDamageRange(
+                                        loot.weaponInstance?.magicDamageMin,
+                                        loot.weaponInstance?.magicDamageMax,
+                                      )}{" "}
+                                      Daño Mágico
+                                    </p>
+                                  </>
+                                ) : null}
+                                {statLines.map((line, idx) => (
+                                  <p key={`${line}-${idx}`}>{line}</p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )})}
+                    {victoryLootItems.length === 0 ? (
+                      <p className="w-full text-center text-xs font-semibold text-amber-100/80">
+                        No obtuviste ítems en este combate.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                {victoryLootTooltip.open ? (
+                  <>
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-[210] cursor-default bg-transparent"
+                      aria-label="Cerrar tooltip de loot"
+                      onClick={() => setVictoryLootTooltip({ open: false, lootKey: null })}
+                    />
+                    {(() => {
+                      const entry =
+                        victoryLootTooltip.lootKey == null
+                          ? null
+                          : victoryLootItems.find((l) => l.lootKey === victoryLootTooltip.lootKey) ?? null;
+                      if (!entry) return null;
+                      const rarityBorderStyle =
+                        typeof entry.rarityColor === "string" && entry.rarityColor.trim().length > 0
+                          ? { borderColor: entry.rarityColor.trim() }
+                          : undefined;
+                      return (
+                        <div
+                          className="fixed left-1/2 top-24 z-[220] w-[min(92vw,26rem)] -translate-x-1/2 rounded-lg border border-amber-700/75 bg-[#1c120e]/95 px-3 py-2 text-left text-sm text-amber-100 shadow-[0_12px_30px_rgba(0,0,0,0.65)]"
+                          style={rarityBorderStyle}
+                          role="dialog"
+                          aria-modal="true"
+                          aria-label={`Detalles de ${entry.name}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/80 bg-amber-950/60 text-[10px] font-black text-amber-100 transition hover:bg-amber-900/75"
+                            aria-label="Cerrar"
+                            onClick={() => setVictoryLootTooltip({ open: false, lootKey: null })}
+                          >
+                            X
+                          </button>
+                          <div className="flex items-start justify-between gap-2 pr-7">
+                            <p className={`${menuFont.className} text-sm font-bold leading-tight text-amber-200`}>
+                              {entry.name}
+                            </p>
+                            {entry.itemTypeId !== 2 ? (
+                              <div className="flex items-center gap-1 text-xs font-semibold text-amber-200">
+                                <Image
+                                  src="/img/resources/iconos/icon_gold.png"
+                                  alt="Oro"
+                                  width={12}
+                                  height={12}
+                                  className="h-3 w-3 object-contain"
+                                />
+                                <span>{entry.sellValue}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-[10px] uppercase text-amber-200/80">
+                            {capitalizeFirst(entry.itemTypeCode ?? "item")}
+                          </p>
+                          {entry.description ? (
+                            <p className={`${helpCardFont.className} mt-1 text-[11px] italic leading-relaxed text-amber-50/90`}>
+                              {entry.description}
+                            </p>
+                          ) : null}
+                          {entry.quoteText ? (
+                            <p
+                              className={`${helpCardFont.className} mt-1 text-[10px] italic leading-relaxed text-amber-200/85`}
+                              style={{ fontStyle: "italic" }}
+                            >
+                              - <em>"{entry.quoteText}"</em>
+                            </p>
+                          ) : null}
+                          {(() => {
+                            const roll = entry.weaponInstance ?? entry.equipmentInstance ?? null;
+                            if (!roll) return null;
+                            const showDamage = Boolean(entry.weaponInstance);
+                            const statLines = [
+                              formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
+                              formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
+                              formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                            ].filter(Boolean);
+                            return (
+                              <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
+                                {roll.rarity ? (
+                                  <p className="font-semibold" style={{ color: roll.rarityColor ?? undefined }}>
+                                    {roll.rarity}
+                                  </p>
+                                ) : null}
+                                {showDamage ? (
+                                  <>
+                                    <p>
+                                      {weaponDamageRange(
+                                        entry.weaponInstance?.attackDamageMin,
+                                        entry.weaponInstance?.attackDamageMax,
+                                      )}{" "}
+                                      Daño
+                                    </p>
+                                    <p>
+                                      {weaponDamageRange(
+                                        entry.weaponInstance?.magicDamageMin,
+                                        entry.weaponInstance?.magicDamageMax,
+                                      )}{" "}
+                                      Daño Mágico
+                                    </p>
+                                  </>
+                                ) : null}
+                                {statLines.map((line, idx) => (
+                                  <p key={`${line}-${idx}`}>{line}</p>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : null}
+              </div>
+              <Link
+                href={escapeHref}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-amber-600/90 bg-amber-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-amber-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-amber-700/95 sm:mt-6`}
+              >
+                Volver al mapa
+              </Link>
+            </div>
+          )}
+          {isLevelUpModalOpen ? (
+            <div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/70 p-4">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="combat-levelup-title"
+                className="pointer-events-auto w-full max-w-md"
+              >
+                <div
+                  className={`${menuFont.className} rounded-xl border border-violet-400/85 bg-gradient-to-b from-violet-700/95 via-violet-900/95 to-violet-950/95 px-6 py-6 text-center shadow-[0_18px_50px_rgba(0,0,0,0.6),0_0_24px_rgba(139,92,246,0.28),inset_0_1px_0_rgba(237,233,254,0.25)]`}
+                >
+                  <p
+                    id="combat-levelup-title"
+                    className="text-1xl font-black uppercase tracking-[0.18em] text-violet-50 sm:text-2xl"
+                  >
+                    Has subido a nivel <span className="text-amber-300">{levelAfterVictorySafe}</span>
+                  </p>
+                  <p className="mt-3 text-xs font-semibold text-violet-100/90">
+                    Podés asignar tus puntos de característica en la página de perfil de tu personaje
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsLevelUpModalOpen(false)}
+                    className="mx-auto mt-5 block w-full max-w-xs rounded-md border border-violet-300/80 bg-violet-800/80 px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-violet-50 transition hover:bg-violet-700/90"
+                  >
+                    Continuar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

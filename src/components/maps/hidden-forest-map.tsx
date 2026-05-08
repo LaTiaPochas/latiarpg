@@ -78,17 +78,25 @@ type HiddenForestMapProps = {
   currentCombatStep: number;
   /** `zones.code` del área (p. ej. `hidden_forest` desde `game-zones`). */
   zoneCode: string;
+  /** Hotspot a preseleccionar al volver desde combate. */
+  initialHotspotId?: string | null;
 };
 
-export function HiddenForestMap({ currentCombatStep, zoneCode }: HiddenForestMapProps) {
+export function HiddenForestMap({ currentCombatStep, zoneCode, initialHotspotId = null }: HiddenForestMapProps) {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapNaturalSize, setMapNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [mapFrame, setMapFrame] = useState<{ left: number; top: number; width: number; height: number } | null>(
     null,
   );
+  const requestedHotspot =
+    typeof initialHotspotId === "string" && initialHotspotId.trim().length > 0
+      ? HOTSPOTS.find((spot) => spot.id === initialHotspotId.trim()) ?? null
+      : null;
   const initialHotspot =
-    HOTSPOTS.find((spot) => spot.step <= currentCombatStep) ?? HOTSPOTS[0];
+    requestedHotspot && requestedHotspot.step <= currentCombatStep
+      ? requestedHotspot
+      : HOTSPOTS.find((spot) => spot.step <= currentCombatStep) ?? HOTSPOTS[0];
   const [selectedHotspotId, setSelectedHotspotId] = useState<string>(
     initialHotspot.id,
   );
@@ -177,6 +185,7 @@ export function HiddenForestMap({ currentCombatStep, zoneCode }: HiddenForestMap
             src={MAP_SRC}
             alt="Mapa del bosque inexplorado"
             fill
+            sizes="(min-width: 1024px) 1024px, 100vw"
             priority
             className="object-contain select-none"
             onLoad={(event) => {
@@ -256,7 +265,8 @@ export function HiddenForestMap({ currentCombatStep, zoneCode }: HiddenForestMap
             onClick={() => {
               const encounterCode = encodeURIComponent(selectedHotspot.id);
               const z = encodeURIComponent(zoneCode.trim());
-              router.push(`/combate/${encounterCode}?zone=${z}`);
+              const hotspot = encodeURIComponent(selectedHotspot.id);
+              router.push(`/combate/${encounterCode}?zone=${z}&hotspot=${hotspot}`);
             }}
             className="shrink-0 cursor-pointer rounded border border-slate-700/90 bg-gradient-to-b from-slate-600 to-slate-800 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-100 shadow-[0_0_8px_rgba(25,25,25,0.8)] transition hover:from-slate-500 hover:to-slate-700 disabled:cursor-not-allowed disabled:border-slate-700 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-300 disabled:shadow-none"
           >

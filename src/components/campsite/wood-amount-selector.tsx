@@ -47,7 +47,7 @@ export function WoodAmountSelector({ maxAmount, onContribute }: WoodAmountSelect
             })
           }
           disabled={!canSubmit}
-          className="cursor-pointer rounded-lg border border-[#7a5c31]/80 bg-[#9b7a46] px-8 py-2.5 text-sm font-bold tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#886a3d] active:bg-[#735932] disabled:cursor-not-allowed disabled:border-slate-500/70 disabled:bg-slate-500/60 disabled:text-slate-200/80 lg:text-base"
+          className="cursor-pointer rounded-lg border border-slate-500/80 bg-slate-700 px-8 py-2.5 text-sm font-bold tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-slate-600 active:bg-slate-700 disabled:cursor-not-allowed disabled:border-slate-500/70 disabled:bg-slate-500/60 disabled:text-slate-200/80 lg:text-base"
         >
           {isPending ? "APORTANDO..." : "APORTAR"}
         </button>

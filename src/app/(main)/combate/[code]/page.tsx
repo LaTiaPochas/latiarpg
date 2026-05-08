@@ -3,19 +3,23 @@ import { notFound, redirect } from "next/navigation";
 
 import {
   CombatEncounterShell,
+  type CombatEncounterStatsPayload,
+  type CombatConsumeResult,
   type CombatEncounterDebugPayload,
   type CombatEncounterEnemyView,
   type CombatEncounterEnemySkill,
+  type CombatVictoryLootItem,
   type CombatPlayerConsumableView,
   type CombatPlayerSkillView,
+  type CombatDefeatLostItem,
 } from "@/components/combat/combat-encounter-shell";
 import { mapPathByZoneCode } from "@/lib/game-zones";
 import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ debug?: string; zone?: string }>;
+  searchParams: Promise<{ debug?: string; zone?: string; hotspot?: string }>;
 };
 
 type EnemyTemplateRow = Record<string, unknown>;
@@ -27,6 +31,8 @@ type EncounterEnemyRow = {
   ai_profile: string | null;
   sprite_offset_x: number | null;
   sprite_offset_y: number | null;
+  mobile_offset_x: number | null;
+  mobile_offset_y: number | null;
   sprite_scale: number | null;
   sprite_z_index: number | null;
   enemy_templates: EnemyTemplateRow | EnemyTemplateRow[] | null;
@@ -36,6 +42,10 @@ type UserCharacterRow = {
   /** Puede ser `user_profiles.id` u otro UUID; no siempre es igual a `auth.uid()`. */
   profile_id?: string | null;
   character_name: string | null;
+  level: number | null;
+  class_name: string | null;
+  experience_to_next: number | null;
+  experience_current: number | null;
   hp_total: number | null;
   hp_actual: number | null;
   mana_total: number | null;
@@ -62,14 +72,198 @@ type CombatConsumableInventoryRow = {
         name: string | null;
         description: string | null;
         item_type_id: string | null;
+        json_consumable_effect: unknown;
       }
     | Array<{
         id: string;
         name: string | null;
         description: string | null;
         item_type_id: string | null;
+        json_consumable_effect: unknown;
       }>
     | null;
+};
+type DefeatPenaltyInventoryRow = {
+  id: number;
+  profile_id: string | null;
+  quantity: number | null;
+  weapon_instance_id: number | null;
+  equipment_instance_id: number | null;
+  items:
+    | {
+        name: string | null;
+        icon_path: string | null;
+        is_stackable: boolean | null;
+      }
+    | Array<{
+        name: string | null;
+        icon_path: string | null;
+        is_stackable: boolean | null;
+      }>
+    | null;
+};
+
+type EnemyDropTableRow = {
+  /** `combat_encounters.code`: loot por encuentro (no por template). */
+  combat_encounter_id: string | null;
+  enemy_template_id: string | null;
+  item_id: string | null;
+  weapon_instance_id: number | null;
+  equipment_instance_id: number | null;
+  drop_chance: number | null;
+  drop_group: string | null;
+  min_qty: number | null;
+  max_qty: number | null;
+  items:
+    | {
+        id: string;
+        name: string | null;
+        description: string | null;
+        quote_text: string | null;
+        icon_path: string | null;
+        sell_value: number | null;
+        item_type_id: number | null;
+        equip_slot: string | null;
+        rarity: string | null;
+        rarity_color: string | null;
+        item_types:
+          | {
+              code: string | null;
+            }
+          | Array<{
+              code: string | null;
+            }>
+          | null;
+      }
+    | Array<{
+        id: string;
+        name: string | null;
+        description: string | null;
+        quote_text: string | null;
+        icon_path: string | null;
+        sell_value: number | null;
+        item_type_id: number | null;
+        equip_slot: string | null;
+        rarity: string | null;
+        rarity_color: string | null;
+        item_types:
+          | {
+              code: string | null;
+            }
+          | Array<{
+              code: string | null;
+            }>
+          | null;
+      }>
+    | null;
+  weapon_instance:
+    | {
+        id: number;
+        item_id: string | null;
+        rarity_color: string | null;
+        rarity: string | null;
+        attack_damage_min: number | null;
+        attack_damage_max: number | null;
+        magic_damage_min: number | null;
+        magic_damage_max: number | null;
+        stat_key_1: string | null;
+        value_flat_1: number | null;
+        value_pct_1: number | null;
+        stat_key_2: string | null;
+        value_flat_2: number | null;
+        value_pct_2: number | null;
+        stat_key_3: string | null;
+        value_flat_3: number | null;
+        value_pct_3: number | null;
+      }
+    | Array<{
+        id: number;
+        item_id: string | null;
+        rarity_color: string | null;
+        rarity: string | null;
+        attack_damage_min: number | null;
+        attack_damage_max: number | null;
+        magic_damage_min: number | null;
+        magic_damage_max: number | null;
+        stat_key_1: string | null;
+        value_flat_1: number | null;
+        value_pct_1: number | null;
+        stat_key_2: string | null;
+        value_flat_2: number | null;
+        value_pct_2: number | null;
+        stat_key_3: string | null;
+        value_flat_3: number | null;
+        value_pct_3: number | null;
+      }>
+    | null;
+  equipment_instances:
+    | {
+        id: number;
+        item_id: string | null;
+        rarity_color: string | null;
+        rarity: string | null;
+        stat_key_1: string | null;
+        value_flat_1: number | null;
+        value_pct_1: number | null;
+        stat_key_2: string | null;
+        value_flat_2: number | null;
+        value_pct_2: number | null;
+        stat_key_3: string | null;
+        value_flat_3: number | null;
+        value_pct_3: number | null;
+      }
+    | Array<{
+        id: number;
+        item_id: string | null;
+        rarity_color: string | null;
+        rarity: string | null;
+        stat_key_1: string | null;
+        value_flat_1: number | null;
+        value_pct_1: number | null;
+        stat_key_2: string | null;
+        value_flat_2: number | null;
+        value_pct_2: number | null;
+        stat_key_3: string | null;
+        value_flat_3: number | null;
+        value_pct_3: number | null;
+      }>
+    | null;
+};
+
+type WeaponInstancePoolRow = {
+  id: number;
+  item_id: string | null;
+  rarity: string | null;
+  rarity_color: string | null;
+  attack_damage_min: number | null;
+  attack_damage_max: number | null;
+  magic_damage_min: number | null;
+  magic_damage_max: number | null;
+  stat_key_1: string | null;
+  value_flat_1: number | null;
+  value_pct_1: number | null;
+  stat_key_2: string | null;
+  value_flat_2: number | null;
+  value_pct_2: number | null;
+  stat_key_3: string | null;
+  value_flat_3: number | null;
+  value_pct_3: number | null;
+};
+
+type EquipmentInstancePoolRow = {
+  id: number;
+  item_id: string | null;
+  rarity: string | null;
+  rarity_color: string | null;
+  stat_key_1: string | null;
+  value_flat_1: number | null;
+  value_pct_1: number | null;
+  stat_key_2: string | null;
+  value_flat_2: number | null;
+  value_pct_2: number | null;
+  stat_key_3: string | null;
+  value_flat_3: number | null;
+  value_pct_3: number | null;
 };
 
 function pickTemplate(raw: EncounterEnemyRow["enemy_templates"]): EnemyTemplateRow | null {
@@ -196,6 +390,21 @@ function num(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function capitalizeFirst(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
 function optionalNum(value: unknown): number | null {
   if (value == null) return null;
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -204,6 +413,14 @@ function optionalNum(value: unknown): number | null {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function randomIntInclusive(minValue: number, maxValue: number): number {
+  const lo = Math.trunc(minValue);
+  const hi = Math.trunc(maxValue);
+  const safeMin = Math.min(lo, hi);
+  const safeMax = Math.max(lo, hi);
+  return Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
 }
 
 type PlayerSkillRow = Record<string, unknown>;
@@ -400,6 +617,10 @@ function mapRowToEnemyView(
 
   return {
     id: `${encounterId}-${spawn}-${index}`,
+    templateId:
+      t.id != null && (typeof t.id === "string" || typeof t.id === "number")
+        ? String(t.id)
+        : null,
     spawnIndex: spawn,
     name,
     portraitSrc: normalizeEnemyTemplateAssetUrl(templatePortraitRaw(t), "portrait"),
@@ -414,6 +635,24 @@ function mapRowToEnemyView(
     ),
     spriteOffsetY: spriteOffsetNum(
       row.sprite_offset_y ??
+        t.sprite_offset_y ??
+        t.combat_sprite_offset_y ??
+        t.offset_y ??
+        t.pos_y,
+      0,
+    ),
+    mobileSpriteOffsetX: spriteOffsetNum(
+      row.mobile_offset_x ??
+        row.sprite_offset_x ??
+        t.sprite_offset_x ??
+        t.combat_sprite_offset_x ??
+        t.offset_x ??
+        t.pos_x,
+      0,
+    ),
+    mobileSpriteOffsetY: spriteOffsetNum(
+      row.mobile_offset_y ??
+        row.sprite_offset_y ??
         t.sprite_offset_y ??
         t.combat_sprite_offset_y ??
         t.offset_y ??
@@ -464,15 +703,21 @@ export default async function CombatEncounterPage({
 }: CombatEncounterPageProps) {
   const { code: rawCode } = await params;
   const code = decodeURIComponent(rawCode);
-  const { debug: debugParam, zone: zoneQuery } = await searchParams;
+  const { debug: debugParam, zone: zoneQuery, hotspot: hotspotQuery } = await searchParams;
   const zoneCode =
     typeof zoneQuery === "string" && zoneQuery.trim().length > 0
       ? zoneQuery.trim()
+      : "";
+  const hotspotId =
+    typeof hotspotQuery === "string" && hotspotQuery.trim().length > 0
+      ? hotspotQuery.trim()
       : "";
   const showCombatDebug =
     debugParam === "1" || debugParam === "true" || debugParam === "yes";
 
   const supabase = await createClient();
+  /** Plantillas de instancia suelen estar bloqueadas por RLS para el rol `authenticated`. */
+  const lootInstancePoolClient = createServiceRoleClient() ?? supabase;
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -497,12 +742,17 @@ export default async function CombatEncounterPage({
 
   /** Sin `id`: en tu esquema `user_character` puede no tener PK `id` y PostgREST devuelve 42703 si se pide. */
   const userCharacterSelect =
-    "profile_id, character_name, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
+    "profile_id, character_name, level, class_name, experience_to_next, experience_current, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
   const {
     character: userCharacter,
     steps: combatCharacterLoadSteps,
     profileCandidates: combatCharacterProfileCandidates,
   } = await loadCombatUserCharacter(supabase, user.id, userCharacterSelect);
+  const { data: userProfile } = await supabase
+    .from("user_profiles")
+    .select("color")
+    .eq("id", user.id)
+    .maybeSingle();
 
   if (!userCharacter) {
     if (process.env.NODE_ENV === "development") {
@@ -548,6 +798,29 @@ export default async function CombatEncounterPage({
   if (encounterError || !encounter) {
     notFound();
   }
+  const encounterZoneRefId =
+    typeof encounter.zone_id === "string" && encounter.zone_id.trim().length > 0
+      ? encounter.zone_id.trim()
+      : null;
+  let combatProgressZoneCode = zoneCode || null;
+  if (!combatProgressZoneCode && encounterZoneRefId) {
+    const { data: encounterZoneRow } = await supabase
+      .from("zones")
+      .select("code")
+      .eq("id", encounterZoneRefId)
+      .maybeSingle();
+    if (
+      encounterZoneRow &&
+      typeof encounterZoneRow.code === "string" &&
+      encounterZoneRow.code.trim().length > 0
+    ) {
+      combatProgressZoneCode = encounterZoneRow.code.trim();
+    }
+  }
+  const encounterCombatStepForProgress =
+    typeof encounter.combat_step === "number" && Number.isFinite(encounter.combat_step)
+      ? Math.max(0, Math.trunc(encounter.combat_step))
+      : 0;
 
   const baseEnemySelect = `
       spawn_index,
@@ -556,6 +829,8 @@ export default async function CombatEncounterPage({
       ai_profile,
       sprite_offset_x,
       sprite_offset_y,
+      mobile_offset_x,
+      mobile_offset_y,
       sprite_scale,
       sprite_z_index,
       enemy_templates (
@@ -579,6 +854,8 @@ export default async function CombatEncounterPage({
       ai_profile,
       sprite_offset_x,
       sprite_offset_y,
+      mobile_offset_x,
+      mobile_offset_y,
       sprite_scale,
       sprite_z_index,
       enemy_templates (
@@ -603,6 +880,8 @@ export default async function CombatEncounterPage({
       ai_profile,
       sprite_offset_x,
       sprite_offset_y,
+      mobile_offset_x,
+      mobile_offset_y,
       sprite_scale,
       sprite_z_index,
       enemy_templates (
@@ -655,6 +934,521 @@ export default async function CombatEncounterPage({
     .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i))
     .filter((e): e is CombatEncounterEnemyView => e !== null);
 
+  const { data: enemyDropRows } = await supabase
+    .from("enemy_drop_tables")
+    .select(
+      "combat_encounter_id, enemy_template_id, item_id, weapon_instance_id, equipment_instance_id, drop_chance, drop_group, min_qty, max_qty, items(id, name, description, quote_text, icon_path, sell_value, item_type_id, equip_slot, rarity, rarity_color, item_types(code)), weapon_instance(id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3), equipment_instances(id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3)",
+    )
+    .eq("combat_encounter_id", code);
+
+  const dropRowsSafe = (enemyDropRows ?? []) as EnemyDropTableRow[];
+  const dropResolvedItemIds = Array.from(
+    new Set(
+      dropRowsSafe
+        .map((row) => {
+          const direct = typeof row.item_id === "string" ? row.item_id.trim() : "";
+          if (direct) return direct;
+          const weaponJoin = Array.isArray(row.weapon_instance)
+            ? (row.weapon_instance[0] ?? null)
+            : row.weapon_instance;
+          const fromWeapon =
+            weaponJoin && typeof weaponJoin.item_id === "string" ? weaponJoin.item_id.trim() : "";
+          if (fromWeapon) return fromWeapon;
+          const equipmentJoin = Array.isArray(row.equipment_instances)
+            ? (row.equipment_instances[0] ?? null)
+            : row.equipment_instances;
+          const fromEquipment =
+            equipmentJoin && typeof equipmentJoin.item_id === "string"
+              ? equipmentJoin.item_id.trim()
+              : "";
+          return fromEquipment || null;
+        })
+        .filter((v): v is string => v !== null && v.length > 0),
+    ),
+  );
+  const { data: dropItems } =
+    dropResolvedItemIds.length > 0
+      ? await supabase
+          .from("items")
+          .select("id, name, description, quote_text, icon_path, sell_value, item_type_id, equip_slot, rarity, rarity_color, item_types(code)")
+          .in("id", dropResolvedItemIds)
+      : { data: [] };
+  const dropItemsMap = new Map(
+    (dropItems ?? []).map((item) => [String(item.id), item as Record<string, unknown>]),
+  );
+  const { data: weaponInstancePoolRows } =
+    dropResolvedItemIds.length > 0
+      ? await lootInstancePoolClient
+          .from("weapon_instance")
+          .select(
+            "id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+          )
+          .in("item_id", dropResolvedItemIds)
+      : { data: [] };
+  const { data: equipmentInstancePoolRows } =
+    dropResolvedItemIds.length > 0
+      ? await lootInstancePoolClient
+          .from("equipment_instances")
+          .select(
+            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+          )
+          .in("item_id", dropResolvedItemIds)
+      : { data: [] };
+
+  /**
+   * Misma rareza en `items` y en instancias a veces no matchea por acentos o wording
+   * (ej. items "Poco Común" vs instancia "poco comun" o "Uncommon").
+   */
+  const normalizeRarityKey = (raw: unknown): string => {
+    if (typeof raw !== "string") return "";
+    let t = raw
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    if (!t) return "";
+    const hasPoco = t.includes("poco");
+    const looksComun = /\b(comun|common)\b/.test(t) || t.includes("comun") || t.includes("common");
+    const looksRaro = /\b(raro|rare)\b/.test(t);
+    const looksEpic =
+      /\b(epic|epico|épico)\b/.test(t) || t.includes("epico") || t.includes("epic");
+    /** "pococomun", "poco comun", "uncommon", etc. */
+    if (t === "uncommon" || (hasPoco && looksComun)) return "poco_comun";
+    if ((looksComun || t === "common") && !hasPoco) return "comun";
+    if (looksRaro) return "raro";
+    if (looksEpic) return "epico";
+    return t.replace(/\s+/g, "_");
+  };
+
+  const normalizeEquipSlot = (raw: unknown): string => {
+    if (typeof raw !== "string") return "";
+    return raw
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "");
+  };
+  const instancePoolKey = (itemId: string, rarity: string): string => `${itemId}::${rarity}`;
+  const pickRandom = <T,>(list: T[]): T | null => {
+    if (list.length === 0) return null;
+    return list[Math.floor(Math.random() * list.length)] ?? null;
+  };
+  const weaponPoolByItemRarity = new Map<string, WeaponInstancePoolRow[]>();
+  const weaponPoolByItemId = new Map<string, WeaponInstancePoolRow[]>();
+  for (const row of (weaponInstancePoolRows ?? []) as WeaponInstancePoolRow[]) {
+    const itemId = typeof row.item_id === "string" ? row.item_id.trim() : "";
+    const rarity = normalizeRarityKey(row.rarity);
+    if (!itemId) continue;
+    const byItem = weaponPoolByItemId.get(itemId) ?? [];
+    byItem.push(row);
+    weaponPoolByItemId.set(itemId, byItem);
+    if (rarity) {
+      const key = instancePoolKey(itemId, rarity);
+      const list = weaponPoolByItemRarity.get(key) ?? [];
+      list.push(row);
+      weaponPoolByItemRarity.set(key, list);
+    }
+  }
+  const equipmentPoolByItemRarity = new Map<string, EquipmentInstancePoolRow[]>();
+  const equipmentPoolByItemId = new Map<string, EquipmentInstancePoolRow[]>();
+  for (const row of (equipmentInstancePoolRows ?? []) as EquipmentInstancePoolRow[]) {
+    const itemId = typeof row.item_id === "string" ? row.item_id.trim() : "";
+    const rarity = normalizeRarityKey(row.rarity);
+    if (!itemId) continue;
+    const byItem = equipmentPoolByItemId.get(itemId) ?? [];
+    byItem.push(row);
+    equipmentPoolByItemId.set(itemId, byItem);
+    if (rarity) {
+      const key = instancePoolKey(itemId, rarity);
+      const list = equipmentPoolByItemRarity.get(key) ?? [];
+      list.push(row);
+      equipmentPoolByItemRarity.set(key, list);
+    }
+  }
+
+  const lootAgg = new Map<
+    string,
+    {
+      lootKey: string;
+      itemId: string;
+      name: string;
+      iconPath: string | null;
+      quantity: number;
+      description: string | null;
+      quoteText: string | null;
+      sellValue: number;
+      itemTypeId: number | null;
+      itemTypeCode: string | null;
+      rarityColor: string | null;
+      weaponInstance?: {
+        rarity: string | null;
+        rarityColor: string | null;
+        attackDamageMin: number | null;
+        attackDamageMax: number | null;
+        magicDamageMin: number | null;
+        magicDamageMax: number | null;
+        statKey1: string | null;
+        valueFlat1: number | null;
+        valuePct1: number | null;
+        statKey2: string | null;
+        valueFlat2: number | null;
+        valuePct2: number | null;
+        statKey3: string | null;
+        valueFlat3: number | null;
+        valuePct3: number | null;
+      } | null;
+      equipmentInstance?: {
+        rarity: string | null;
+        rarityColor: string | null;
+        statKey1: string | null;
+        valueFlat1: number | null;
+        valuePct1: number | null;
+        statKey2: string | null;
+        valueFlat2: number | null;
+        valuePct2: number | null;
+        statKey3: string | null;
+        valueFlat3: number | null;
+        valuePct3: number | null;
+      } | null;
+    }
+  >();
+  const lootRollTrace: Array<Record<string, unknown>> = [];
+
+  const resolveDropItemId = (row: EnemyDropTableRow): string => {
+    const direct = typeof row.item_id === "string" ? row.item_id.trim() : "";
+    if (direct) return direct;
+    const weaponJoin = Array.isArray(row.weapon_instance)
+      ? (row.weapon_instance[0] ?? null)
+      : row.weapon_instance;
+    const fromWeapon =
+      weaponJoin && typeof weaponJoin.item_id === "string" ? weaponJoin.item_id.trim() : "";
+    if (fromWeapon) return fromWeapon;
+    const equipmentJoin = Array.isArray(row.equipment_instances)
+      ? (row.equipment_instances[0] ?? null)
+      : row.equipment_instances;
+    const fromEquipment =
+      equipmentJoin && typeof equipmentJoin.item_id === "string" ? equipmentJoin.item_id.trim() : "";
+    return fromEquipment;
+  };
+  const resolveDropItemJoin = (row: EnemyDropTableRow): Record<string, unknown> | null => {
+    const inline = Array.isArray(row.items) ? (row.items[0] ?? null) : row.items;
+    if (inline) return inline as unknown as Record<string, unknown>;
+    const resolvedId = resolveDropItemId(row);
+    if (!resolvedId) return null;
+    return (dropItemsMap.get(resolvedId) as Record<string, unknown> | undefined) ?? null;
+  };
+  const resolveDropLootKey = (
+    row: EnemyDropTableRow,
+    selectedWeaponInstanceId: number | null,
+    selectedEquipmentInstanceId: number | null,
+  ): string => {
+    if (typeof selectedWeaponInstanceId === "number") return `weapon:${selectedWeaponInstanceId}`;
+    if (typeof selectedEquipmentInstanceId === "number") return `equipment:${selectedEquipmentInstanceId}`;
+    if (typeof row.weapon_instance_id === "number") return `weapon:${row.weapon_instance_id}`;
+    if (typeof row.equipment_instance_id === "number") return `equipment:${row.equipment_instance_id}`;
+    const itemId = resolveDropItemId(row);
+    if (itemId) return `item:${itemId}`;
+    return `fallback:${Math.random().toString(36).slice(2)}`;
+  };
+
+  const addLoot = (row: EnemyDropTableRow, quantity: number) => {
+    if (quantity <= 0) return;
+    const itemJoin = resolveDropItemJoin(row);
+    if (!itemJoin) return;
+    const itemId = resolveDropItemId(row);
+    if (!itemId) return;
+    const rawTypes = itemJoin.item_types as unknown;
+    const typeJoin = Array.isArray(rawTypes) ? (rawTypes[0] ?? null) : rawTypes;
+    const rowWeaponJoin = Array.isArray(row.weapon_instance)
+      ? (row.weapon_instance[0] ?? null)
+      : row.weapon_instance;
+    const rowEquipmentJoin = Array.isArray(row.equipment_instances)
+      ? (row.equipment_instances[0] ?? null)
+      : row.equipment_instances;
+    const dropGroup =
+      typeof row.drop_group === "string" && row.drop_group.trim().length > 0
+        ? row.drop_group.trim().toLowerCase()
+        : "";
+    const itemRarity = normalizeRarityKey(itemJoin.rarity);
+    const rarityPoolKeyWeapon = itemRarity ? instancePoolKey(itemId, itemRarity) : "";
+    const rarityPoolWeapon = itemRarity ? (weaponPoolByItemRarity.get(rarityPoolKeyWeapon) ?? []) : [];
+    const allWeaponForItem = weaponPoolByItemId.get(itemId) ?? [];
+
+    const rarityPoolKeyEquip = itemRarity ? instancePoolKey(itemId, itemRarity) : "";
+    const rarityPoolEquip = itemRarity
+      ? (equipmentPoolByItemRarity.get(rarityPoolKeyEquip) ?? [])
+      : [];
+    const allEquipForItem = equipmentPoolByItemId.get(itemId) ?? [];
+
+    const equipSlotNorm = normalizeEquipSlot(itemJoin.equip_slot);
+
+    let selectedWeaponFromPool: WeaponInstancePoolRow | null = null;
+    let selectedEquipmentFromPool: EquipmentInstancePoolRow | null = null;
+
+    if (dropGroup === "weapon") {
+      selectedWeaponFromPool = pickRandom(
+        (itemRarity && rarityPoolWeapon.length > 0
+          ? rarityPoolWeapon
+          : null) ??
+          (allWeaponForItem.length > 0 ? allWeaponForItem : []),
+      );
+    } else if (dropGroup === "equipment") {
+      if (equipSlotNorm === "weapon") {
+        selectedWeaponFromPool = pickRandom(
+          (itemRarity && rarityPoolWeapon.length > 0
+            ? rarityPoolWeapon
+            : null) ??
+            (allWeaponForItem.length > 0 ? allWeaponForItem : []),
+        );
+      } else {
+        selectedEquipmentFromPool = pickRandom(
+          (itemRarity && rarityPoolEquip.length > 0
+            ? rarityPoolEquip
+            : null) ??
+            (allEquipForItem.length > 0 ? allEquipForItem : []),
+        );
+      }
+    } else {
+      // Fallback: si `drop_group` no viene seteado, igual intentar randomizar por pool.
+      // Prioriza weapon cuando el equip_slot del item es weapon; caso contrario usa equipment.
+      if (equipSlotNorm === "weapon" && allWeaponForItem.length > 0) {
+        selectedWeaponFromPool = pickRandom(
+          (itemRarity && rarityPoolWeapon.length > 0
+            ? rarityPoolWeapon
+            : null) ??
+            allWeaponForItem,
+        );
+      } else if (allEquipForItem.length > 0) {
+        selectedEquipmentFromPool = pickRandom(
+          (itemRarity && rarityPoolEquip.length > 0
+            ? rarityPoolEquip
+            : null) ??
+            allEquipForItem,
+        );
+      }
+    }
+
+    const weaponJoin = selectedWeaponFromPool ?? rowWeaponJoin;
+    const equipmentJoin = selectedEquipmentFromPool ?? rowEquipmentJoin;
+      const rarityFromItem =
+      typeof itemJoin.rarity_color === "string" && itemJoin.rarity_color.trim().length > 0
+        ? itemJoin.rarity_color.trim()
+        : null;
+    const rarityFromWeapon =
+      weaponJoin && typeof weaponJoin.rarity_color === "string" && weaponJoin.rarity_color.trim().length > 0
+        ? weaponJoin.rarity_color.trim()
+        : null;
+    const rarityFromEquipment =
+      equipmentJoin &&
+      typeof equipmentJoin.rarity_color === "string" &&
+      equipmentJoin.rarity_color.trim().length > 0
+        ? equipmentJoin.rarity_color.trim()
+        : null;
+    const rarityColor = rarityFromWeapon ?? rarityFromEquipment ?? rarityFromItem;    
+    const itemTypeCode =
+      typeof typeJoin?.code === "string" && typeJoin.code.trim().length > 0
+        ? typeJoin.code.trim().toLowerCase()
+        : null;
+    const lootKey = resolveDropLootKey(
+      row,
+      selectedWeaponFromPool?.id ?? null,
+      selectedEquipmentFromPool?.id ?? null,
+    );
+    const current = lootAgg.get(lootKey);
+    if (current) {
+      current.quantity += quantity;
+      return;
+    }
+    lootAgg.set(lootKey, {
+      lootKey,
+      itemId,
+      name:
+        typeof itemJoin.name === "string" && itemJoin.name.trim().length > 0
+          ? itemJoin.name.trim()
+          : "Item",
+      iconPath: normalizePublicAssetUrl(
+        typeof itemJoin.icon_path === "string" ? itemJoin.icon_path : null,
+      ),
+      quantity,
+      description:
+        typeof itemJoin.description === "string" && itemJoin.description.trim().length > 0
+          ? itemJoin.description.trim()
+          : null,
+      quoteText:
+        typeof itemJoin.quote_text === "string" && itemJoin.quote_text.trim().length > 0
+          ? itemJoin.quote_text.trim()
+          : null,
+      sellValue: Math.max(0, Math.trunc(num(itemJoin.sell_value, 0))),
+      itemTypeId:
+      itemJoin.item_type_id != null && Number.isFinite(Number(itemJoin.item_type_id))
+        ? Math.trunc(Number(itemJoin.item_type_id))
+        : null,
+      itemTypeCode,
+      rarityColor,
+      weaponInstance: weaponJoin
+        ? {
+            rarity: typeof weaponJoin.rarity === "string" ? weaponJoin.rarity : null,
+            rarityColor: typeof weaponJoin.rarity_color === "string" ? weaponJoin.rarity_color : null,
+            attackDamageMin:
+              weaponJoin.attack_damage_min != null ? Number(weaponJoin.attack_damage_min) : null,
+            attackDamageMax:
+              weaponJoin.attack_damage_max != null ? Number(weaponJoin.attack_damage_max) : null,
+            magicDamageMin:
+              weaponJoin.magic_damage_min != null ? Number(weaponJoin.magic_damage_min) : null,
+            magicDamageMax:
+              weaponJoin.magic_damage_max != null ? Number(weaponJoin.magic_damage_max) : null,
+            statKey1: typeof weaponJoin.stat_key_1 === "string" ? weaponJoin.stat_key_1 : null,
+            valueFlat1: weaponJoin.value_flat_1 != null ? Number(weaponJoin.value_flat_1) : null,
+            valuePct1: weaponJoin.value_pct_1 != null ? Number(weaponJoin.value_pct_1) : null,
+            statKey2: typeof weaponJoin.stat_key_2 === "string" ? weaponJoin.stat_key_2 : null,
+            valueFlat2: weaponJoin.value_flat_2 != null ? Number(weaponJoin.value_flat_2) : null,
+            valuePct2: weaponJoin.value_pct_2 != null ? Number(weaponJoin.value_pct_2) : null,
+            statKey3: typeof weaponJoin.stat_key_3 === "string" ? weaponJoin.stat_key_3 : null,
+            valueFlat3: weaponJoin.value_flat_3 != null ? Number(weaponJoin.value_flat_3) : null,
+            valuePct3: weaponJoin.value_pct_3 != null ? Number(weaponJoin.value_pct_3) : null,
+          }
+        : null,
+      equipmentInstance: equipmentJoin
+        ? {
+            rarity: typeof equipmentJoin.rarity === "string" ? equipmentJoin.rarity : null,
+            rarityColor:
+              typeof equipmentJoin.rarity_color === "string" ? equipmentJoin.rarity_color : null,
+            statKey1:
+              typeof equipmentJoin.stat_key_1 === "string" ? equipmentJoin.stat_key_1 : null,
+            valueFlat1:
+              equipmentJoin.value_flat_1 != null ? Number(equipmentJoin.value_flat_1) : null,
+            valuePct1: equipmentJoin.value_pct_1 != null ? Number(equipmentJoin.value_pct_1) : null,
+            statKey2:
+              typeof equipmentJoin.stat_key_2 === "string" ? equipmentJoin.stat_key_2 : null,
+            valueFlat2:
+              equipmentJoin.value_flat_2 != null ? Number(equipmentJoin.value_flat_2) : null,
+            valuePct2: equipmentJoin.value_pct_2 != null ? Number(equipmentJoin.value_pct_2) : null,
+            statKey3:
+              typeof equipmentJoin.stat_key_3 === "string" ? equipmentJoin.stat_key_3 : null,
+            valueFlat3:
+              equipmentJoin.value_flat_3 != null ? Number(equipmentJoin.value_flat_3) : null,
+            valuePct3: equipmentJoin.value_pct_3 != null ? Number(equipmentJoin.value_pct_3) : null,
+          }
+        : null,
+    });
+  };
+
+  const rowItemName = (row: EnemyDropTableRow): string => {
+    const itemJoin = resolveDropItemJoin(row);
+    return typeof itemJoin?.name === "string" && itemJoin.name.trim().length > 0
+      ? itemJoin.name.trim()
+      : "Item";
+  };
+
+  const rowItemId = (row: EnemyDropTableRow): string => {
+    return resolveDropItemId(row);
+  };
+
+  const lootRollContextId = code;
+
+  const rollRow = (row: EnemyDropTableRow, traceId: string, source: "ungrouped" | "grouped") => {
+    const chance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+    const roll = Math.random();
+    if (roll > chance) {
+      lootRollTrace.push({
+        enemyId: traceId,
+        source,
+        itemId: rowItemId(row),
+        itemName: rowItemName(row),
+        dropGroup: row.drop_group,
+        chance,
+        roll,
+        passed: false,
+        droppedQty: 0,
+      });
+      return;
+    }
+    const minQty = Math.max(0, Math.trunc(num(row.min_qty, 0)));
+    const maxQty = Math.max(minQty, Math.trunc(num(row.max_qty, minQty)));
+    const qty = randomIntInclusive(minQty, maxQty);
+    addLoot(row, qty);
+    lootRollTrace.push({
+      enemyId: traceId,
+      source,
+      itemId: rowItemId(row),
+      itemName: rowItemName(row),
+      dropGroup: row.drop_group,
+      chance,
+      roll,
+      passed: true,
+      droppedQty: qty,
+    });
+  };
+
+  {
+    const grouped = new Map<string, EnemyDropTableRow[]>();
+    const ungrouped: EnemyDropTableRow[] = [];
+    for (const row of dropRowsSafe) {
+      const group =
+        typeof row.drop_group === "string" && row.drop_group.trim().length > 0
+          ? row.drop_group.trim()
+          : "";
+      if (!group) {
+        ungrouped.push(row);
+        continue;
+      }
+      const list = grouped.get(group) ?? [];
+      list.push(row);
+      grouped.set(group, list);
+    }
+
+    for (const row of ungrouped) rollRow(row, lootRollContextId, "ungrouped");
+
+    for (const [groupKey, groupRows] of grouped) {
+      const passed = groupRows.filter((row) => {
+        const chance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+        const roll = Math.random();
+        const ok = roll <= chance;
+        lootRollTrace.push({
+          enemyId: lootRollContextId,
+          source: "grouped-check",
+          group: groupKey,
+          itemId: rowItemId(row),
+          itemName: rowItemName(row),
+          chance,
+          roll,
+          passed: ok,
+        });
+        return ok;
+      });
+      if (passed.length === 0) continue;
+      const chosen = passed[Math.floor(Math.random() * passed.length)] ?? null;
+      if (!chosen) continue;
+      const minQty = Math.max(0, Math.trunc(num(chosen.min_qty, 0)));
+      const maxQty = Math.max(minQty, Math.trunc(num(chosen.max_qty, minQty)));
+      const qty = randomIntInclusive(minQty, maxQty);
+      addLoot(chosen, qty);
+      lootRollTrace.push({
+        enemyId: lootRollContextId,
+        source: "grouped-picked",
+        group: groupKey,
+        chosenItemId: rowItemId(chosen),
+        chosenItemName: rowItemName(chosen),
+        droppedQty: qty,
+      });
+    }
+  }
+
+  const victoryLootItems: CombatVictoryLootItem[] = Array.from(lootAgg.values()).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  const victoryGoldFromLoot = victoryLootItems.reduce((sum, item) => {
+    const isGoldType =
+      item.itemTypeCode === "gold" ||
+      item.itemTypeCode === "oro" ||
+      item.itemTypeCode === "currency" ||
+      item.itemTypeCode === "coin";
+    const isGoldName = item.name.toLowerCase().includes("oro") || item.name.toLowerCase().includes("gold");
+    return isGoldType || isGoldName ? sum + Math.max(0, Math.trunc(item.quantity)) : sum;
+  }, 0);
+
   const rowsErrorPayload =
     rowsError != null
       ? {
@@ -683,6 +1477,25 @@ export default async function CombatEncounterPage({
           ai_profile: row.ai_profile,
           enemyTemplate: pickTemplate(row.enemy_templates),
         })),
+        lootDebug: {
+          combatEncounterLootKey: code,
+          dropTableRows: dropRowsSafe.map((row) => ({
+            combat_encounter_id: row.combat_encounter_id,
+            enemy_template_id: row.enemy_template_id,
+            item_id_raw: row.item_id,
+            weapon_instance_id: row.weapon_instance_id,
+            equipment_instance_id: row.equipment_instance_id,
+            item_id: rowItemId(row),
+            item_name: rowItemName(row),
+            drop_chance: num(row.drop_chance, 0),
+            drop_group: row.drop_group,
+            min_qty: Math.max(0, Math.trunc(num(row.min_qty, 0))),
+            max_qty: Math.max(0, Math.trunc(num(row.max_qty, num(row.min_qty, 0)))),
+          })),
+          rollTrace: lootRollTrace,
+          finalLoot: victoryLootItems,
+          victoryGoldFromLoot,
+        },
       }
     : null;
 
@@ -691,11 +1504,29 @@ export default async function CombatEncounterPage({
     typeof backgroundRaw === "string" && backgroundRaw.trim().length > 0
       ? backgroundRaw.trim()
       : null;
-  const escapeToMapHref = mapPathByZoneCode(zoneCode || null) ?? "/";
+  const mapBaseHref = mapPathByZoneCode(zoneCode || null) ?? "/";
+  const mapDisplayName =
+    zoneCode === "hidden_forest"
+      ? "Bosque Inexplorado"
+      : encounter.name != null && String(encounter.name).trim().length > 0
+        ? String(encounter.name).trim()
+        : "Mapa desconocido";
+  const escapeToMapHref =
+    hotspotId && mapBaseHref.startsWith("/")
+      ? `${mapBaseHref}?hotspot=${encodeURIComponent(hotspotId)}`
+      : mapBaseHref;
   const playerDisplayName =
     typeof userCharacter.character_name === "string" && userCharacter.character_name.trim().length > 0
       ? userCharacter.character_name.trim().toUpperCase()
       : "AVENTURERO";
+  const playerLogName =
+    typeof userCharacter.character_name === "string" && userCharacter.character_name.trim().length > 0
+      ? capitalizeFirst(userCharacter.character_name)
+      : "Aventurero";
+  const playerLogColor =
+    typeof userProfile?.color === "string" && userProfile.color.trim().length > 0
+      ? userProfile.color.trim()
+      : "#f8fafc";
   /** Mismo criterio que perfil: nombre en minúsculas y espacios → `_`. */
   const characterNameToken = playerDisplayName.toLowerCase().replace(/\s+/g, "_");
   const playerPortraitSrc = `/img/resources/caracters_faces/pj_${characterNameToken}_rpg_face.png`;
@@ -722,6 +1553,63 @@ export default async function CombatEncounterPage({
   const playerStatWis = Math.max(0, num(userCharacter.wis, 0));
   const playerArmor = Math.max(0, num(userCharacter.armor_total, 0));
   const playerMr = Math.max(0, num(userCharacter.mr_total, 0));
+  const playerExperienceToNext = Math.max(0, Math.trunc(num(userCharacter.experience_to_next, 0)));
+  const playerLevel = Math.max(1, Math.trunc(num(userCharacter.level, 1)));
+  const rawPlayerClassName =
+    typeof userCharacter.class_name === "string" && userCharacter.class_name.trim().length > 0
+      ? userCharacter.class_name.trim()
+      : "";
+  let playerClassId: string | null = null;
+  let playerClassName: string | null = null;
+  if (rawPlayerClassName) {
+    const { data: classById } = await supabase
+      .from("classes")
+      .select("id, name")
+      .eq("id", rawPlayerClassName)
+      .maybeSingle<{ id: string; name: string | null }>();
+    if (classById) {
+      playerClassId = classById.id;
+      playerClassName =
+        typeof classById.name === "string" && classById.name.trim().length > 0
+          ? classById.name.trim()
+          : null;
+    } else {
+      const { data: classByName } = await supabase
+        .from("classes")
+        .select("id, name")
+        .eq("name", rawPlayerClassName)
+        .maybeSingle<{ id: string; name: string | null }>();
+      if (classByName) {
+        playerClassId = classByName.id;
+        playerClassName =
+          typeof classByName.name === "string" && classByName.name.trim().length > 0
+            ? classByName.name.trim()
+            : null;
+      }
+    }
+  }
+  const playerClassKeys = new Set(
+    [rawPlayerClassName, playerClassId ?? "", playerClassName ?? ""]
+      .map((v) => v.trim().toLowerCase())
+      .filter((v) => v.length > 0),
+  );
+  const victoryXpGain = enemies.reduce(
+    (sum, enemy) => sum + Math.max(0, Math.trunc(num(enemy.xpReward, 0))),
+    0,
+  );
+  const playerExperienceCurrent = Math.max(0, Math.trunc(num(userCharacter.experience_current, 0)));
+  const projectedExperienceAfterVictory = playerExperienceCurrent + Math.max(0, Math.trunc(victoryXpGain));
+  const { data: projectedLevelProgress } = await supabase
+    .from("level_progression")
+    .select("level")
+    .lte("xp_required_total", projectedExperienceAfterVictory)
+    .order("level", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ level: number }>();
+  const projectedLevelAfterVictory = Math.max(
+    playerLevel,
+    Math.max(1, Math.trunc(Number(projectedLevelProgress?.level ?? playerLevel))),
+  );
 
   /**
    * `user_character_skills.profile_id` referencia el personaje igual que `user_character.profile_id`.
@@ -793,6 +1681,7 @@ export default async function CombatEncounterPage({
       .from("user_character_skills")
       .select(selectExpr)
       .eq("profile_id", characterSkillsProfileId)
+      .lte("player_skills.unlock_level", playerLevel)
       .order("id", { ascending: true });
 
     if (!error) {
@@ -812,7 +1701,20 @@ export default async function CombatEncounterPage({
   }
 
   const skillMapSkips: Array<{ ucsId: string; reason: string }> = [];
-  const playerSkills: CombatPlayerSkillView[] = (characterSkillRowsRaw ?? [])
+  const classAndLevelFilteredRows = (characterSkillRowsRaw ?? []).filter((row) => {
+    if (!(typeof row === "object" && row !== null)) return false;
+    const rec = row as Record<string, unknown>;
+    const ps = pickPlayerSkillJoin(rec.player_skills);
+    if (!ps) return false;
+    const unlockLevel = Math.max(0, Math.trunc(num(ps.unlock_level, 0)));
+    if (unlockLevel > playerLevel) return false;
+    if (playerClassKeys.size === 0) return true;
+    const skillClassRaw = firstNonEmptyString(ps.class_id, ps.class_name);
+    if (!skillClassRaw) return false;
+    return playerClassKeys.has(skillClassRaw.trim().toLowerCase());
+  });
+
+  const playerSkills: CombatPlayerSkillView[] = classAndLevelFilteredRows
     .map((row) => {
       if (!(typeof row === "object" && row !== null)) return null;
       const rec = row as Record<string, unknown>;
@@ -834,7 +1736,7 @@ export default async function CombatEncounterPage({
   const { data: consumableRows } = await supabase
     .from("user_inventory")
     .select(
-      "id, quantity, item_id, items!inner(id, name, description, item_type_id)",
+      "id, quantity, item_id, items!inner(id, name, description, item_type_id, json_consumable_effect)",
     )
     .in("profile_id", consumableProfileIds)
     .gt("quantity", 0)
@@ -859,10 +1761,558 @@ export default async function CombatEncounterPage({
           typeof itemJoin.description === "string" && itemJoin.description.trim().length > 0
             ? itemJoin.description.trim()
             : null,
+        effect:
+          itemJoin.json_consumable_effect &&
+          typeof itemJoin.json_consumable_effect === "object" &&
+          !Array.isArray(itemJoin.json_consumable_effect)
+            ? (itemJoin.json_consumable_effect as Record<string, unknown>)
+            : null,
         quantity: Math.max(0, Math.trunc(num(row.quantity, 0))),
       };
     })
     .filter((entry): entry is CombatPlayerConsumableView => entry !== null && entry.quantity > 0);
+
+  const profileIdForPenalty =
+    typeof characterSkillsProfileId === "string" && characterSkillsProfileId.trim().length > 0
+      ? characterSkillsProfileId.trim()
+      : user.id;
+  const { data: penaltyInventoryRows } = await supabase
+    .from("user_inventory")
+    .select(
+      "id, profile_id, quantity, weapon_instance_id, equipment_instance_id, items!inner(name, icon_path, is_stackable)",
+    )
+    .eq("profile_id", profileIdForPenalty)
+    .gt("quantity", 0);
+  const { data: penaltyEquippedRows } = await supabase
+    .from("user_equipment")
+    .select("inventory_id")
+    .eq("profile_id", profileIdForPenalty);
+  const equippedPenaltyIds = new Set(
+    (penaltyEquippedRows ?? [])
+      .map((row) => Number(row.inventory_id))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.trunc(value)),
+  );
+  const penaltyCandidates = ((penaltyInventoryRows ?? []) as DefeatPenaltyInventoryRow[])
+    .filter((row) => {
+      const id = Number(row.id);
+      if (!Number.isFinite(id)) return false;
+      if (equippedPenaltyIds.has(Math.trunc(id))) return false;
+      return true;
+    })
+    .map((row) => {
+      const itemJoin = Array.isArray(row.items) ? (row.items[0] ?? null) : row.items;
+      const quantity = Math.max(0, Math.trunc(num(row.quantity, 0)));
+      const isStackable = itemJoin?.is_stackable === true;
+      const quantityLost = isStackable ? Math.max(1, Math.floor(quantity * 0.2)) : 1;
+      return {
+        inventoryId: Math.trunc(Number(row.id)),
+        name:
+          typeof itemJoin?.name === "string" && itemJoin.name.trim().length > 0
+            ? itemJoin.name.trim()
+            : "Item",
+        iconPath: normalizePublicAssetUrl(
+          typeof itemJoin?.icon_path === "string" ? itemJoin.icon_path : null,
+        ),
+        quantityLost: Math.max(1, Math.min(quantityLost, quantity)),
+      } satisfies CombatDefeatLostItem;
+    })
+    .filter((entry) => entry.quantityLost > 0);
+  const defeatLostItems: CombatDefeatLostItem[] = [];
+  const penaltyPool = [...penaltyCandidates];
+  while (penaltyPool.length > 0 && defeatLostItems.length < 2) {
+    const randomIndex = Math.floor(Math.random() * penaltyPool.length);
+    const picked = penaltyPool[randomIndex];
+    if (!picked) break;
+    defeatLostItems.push(picked);
+    penaltyPool.splice(randomIndex, 1);
+  }
+
+  async function logPlayerDefeatedInGlobalLog() {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const safePlayerName = escapeHtml(playerLogName);
+    const safePlayerColor = escapeHtml(playerLogColor);
+    const safeMapName = escapeHtml(mapDisplayName);
+    const eventHtml = `<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> ha caido en combate en ${safeMapName}. Prendemos una vela por él.`;
+
+    await supabaseAction.from("global_world_event_log").insert({
+      member_name: playerLogName,
+      event_html: eventHtml,
+    });
+  }
+
+  async function logPlayerLevelUpInGlobalLog(newLevel: number) {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const safePlayerName = escapeHtml(playerLogName);
+    const safePlayerColor = escapeHtml(playerLogColor);
+    const safeLevel = Math.max(1, Math.trunc(Number.isFinite(Number(newLevel)) ? Number(newLevel) : 1));
+    const eventHtml = `¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
+
+    await supabaseAction.from("global_world_event_log").insert({
+      member_name: playerLogName,
+      event_html: eventHtml,
+    });
+  }
+
+  async function persistCombatStats(payload: CombatEncounterStatsPayload) {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const asNonNegativeInt = (value: unknown): number =>
+      Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
+    const didWin = payload.didWin === true;
+    const didLose = !didWin;
+    const combatsWonDelta = didWin ? 1 : 0;
+    const deathsDelta = didWin ? 0 : 1;
+    const enemiesDefeatedDelta = asNonNegativeInt(payload.enemiesDefeated);
+    const bossesDefeatedDelta = asNonNegativeInt(payload.bossesDefeated);
+    const totalDamageDealtDelta = asNonNegativeInt(payload.totalDamageDealt);
+    const totalDamageTakenDelta = asNonNegativeInt(payload.totalDamageTaken);
+    const totalHealingDelta = asNonNegativeInt(payload.totalHealing);
+    const highestHitDealtThisCombat = asNonNegativeInt(payload.highestHitDealt);
+    const highestHitReceivedThisCombat = asNonNegativeInt(payload.highestHitReceived);
+    const finalHpAfterCombat = asNonNegativeInt(payload.finalHp);
+    const finalManaAfterCombat = asNonNegativeInt(payload.finalMana);
+
+    const { data: currentStats } = await supabaseAction
+      .from("user_stats")
+      .select(
+        "combats_won, deaths, enemies_defeated, bosses_defeated, total_damage_dealt, total_damage_taken, total_healing, highest_hit_dealt, highest_hit_received",
+      )
+      .eq("user_id", actionUser.id)
+      .maybeSingle();
+
+    const currentCombatsWon = asNonNegativeInt(currentStats?.combats_won);
+    const currentDeaths = asNonNegativeInt(currentStats?.deaths);
+    const currentEnemiesDefeated = asNonNegativeInt(currentStats?.enemies_defeated);
+    const currentBossesDefeated = asNonNegativeInt(currentStats?.bosses_defeated);
+    const currentTotalDamageDealt = asNonNegativeInt(currentStats?.total_damage_dealt);
+    const currentTotalDamageTaken = asNonNegativeInt(currentStats?.total_damage_taken);
+    const currentTotalHealing = asNonNegativeInt(currentStats?.total_healing);
+    const currentHighestHitDealt = asNonNegativeInt(currentStats?.highest_hit_dealt);
+    const currentHighestHitReceived = asNonNegativeInt(currentStats?.highest_hit_received);
+
+    await supabaseAction.from("user_stats").upsert(
+      {
+        user_id: actionUser.id,
+        combats_won: currentCombatsWon + combatsWonDelta,
+        deaths: currentDeaths + deathsDelta,
+        enemies_defeated: currentEnemiesDefeated + enemiesDefeatedDelta,
+        bosses_defeated: currentBossesDefeated + bossesDefeatedDelta,
+        total_damage_dealt: currentTotalDamageDealt + totalDamageDealtDelta,
+        total_damage_taken: currentTotalDamageTaken + totalDamageTakenDelta,
+        total_healing: currentTotalHealing + totalHealingDelta,
+        highest_hit_dealt: Math.max(currentHighestHitDealt, highestHitDealtThisCombat),
+        highest_hit_received: Math.max(currentHighestHitReceived, highestHitReceivedThisCombat),
+      },
+      { onConflict: "user_id" },
+    );
+
+    const profileTargets = Array.from(
+      new Set([characterSkillsProfileId, actionUser.id].map((v) => String(v).trim()).filter(Boolean)),
+    );
+    const persistCharacterVitals = async () => {
+      for (const profileId of profileTargets) {
+        const { data: characterRow, error: characterReadError } = await supabaseAction
+          .from("user_character")
+          .select("hp_total, mana_total")
+          .eq("profile_id", profileId)
+          .maybeSingle();
+        if (characterReadError || !characterRow) continue;
+        const hpTotal = asNonNegativeInt(characterRow.hp_total);
+        const manaTotal = asNonNegativeInt(characterRow.mana_total);
+        const nextHpActual = didLose ? Math.min(hpTotal, 10) : Math.min(hpTotal, finalHpAfterCombat);
+        const nextManaActual = didLose
+          ? Math.min(manaTotal, 10)
+          : Math.min(manaTotal, finalManaAfterCombat);
+        const { error: characterUpdateError } = await supabaseAction
+          .from("user_character")
+          .update({ hp_actual: nextHpActual, mana_actual: nextManaActual })
+          .eq("profile_id", profileId);
+        if (!characterUpdateError) break;
+      }
+    };
+
+    if (!didWin) {
+      await persistCharacterVitals();
+      if (defeatLostItems.length > 0) {
+        for (const lost of defeatLostItems) {
+          const { data: inventoryRow, error: inventoryReadError } = await supabaseAction
+            .from("user_inventory")
+            .select("id, quantity")
+            .eq("id", lost.inventoryId)
+            .eq("profile_id", profileIdForPenalty)
+            .maybeSingle();
+          if (inventoryReadError || !inventoryRow) continue;
+          const currentQty = Math.max(0, Math.trunc(num(inventoryRow.quantity, 0)));
+          if (currentQty <= 0) continue;
+          const toRemove = Math.max(1, Math.min(Math.trunc(lost.quantityLost), currentQty));
+          const nextQty = currentQty - toRemove;
+          if (nextQty <= 0) {
+            await supabaseAction.from("user_inventory").delete().eq("id", lost.inventoryId);
+          } else {
+            await supabaseAction
+              .from("user_inventory")
+              .update({ quantity: nextQty })
+              .eq("id", lost.inventoryId);
+          }
+        }
+      }
+      return;
+    }
+    const profileIdForInventory =
+      typeof characterSkillsProfileId === "string" && characterSkillsProfileId.trim().length > 0
+        ? characterSkillsProfileId.trim()
+        : actionUser.id;
+
+    const safeVictoryXpGain = Math.max(0, Math.trunc(victoryXpGain));
+    const didLevelUpOnVictory =
+      didWin &&
+      playerExperienceToNext > 0 &&
+      safeVictoryXpGain >= playerExperienceToNext;
+    if (safeVictoryXpGain > 0) {
+      for (const profileId of profileTargets) {
+        const { data: characterRow, error: characterReadError } = await supabaseAction
+          .from("user_character")
+          .select("experience_current")
+          .eq("profile_id", profileId)
+          .maybeSingle();
+        if (characterReadError || !characterRow) continue;
+        const currentExperience =
+          typeof characterRow.experience_current === "number" &&
+          Number.isFinite(characterRow.experience_current)
+            ? Math.max(0, Math.trunc(characterRow.experience_current))
+            : 0;
+        const { error: characterUpdateError } = await supabaseAction
+          .from("user_character")
+          .update({ experience_current: currentExperience + safeVictoryXpGain })
+          .eq("profile_id", profileId);
+        if (!characterUpdateError) break;
+      }
+    }
+    // Si hubo level up, dejamos que el trigger conserve HP/Mana al máximo.
+    if (!didLevelUpOnVictory) {
+      // Persistir HP/Mana al final de la rama de victoria (después de update de XP/triggeres).
+      await persistCharacterVitals();
+    }
+
+    const lootItemIds = Array.from(
+      new Set(
+        victoryLootItems
+          .map((loot) => (typeof loot.itemId === "string" ? loot.itemId.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+    const { data: inventoryRowsForCapacity } = await supabaseAction
+      .from("user_inventory")
+      .select("id, item_id, weapon_instance_id, equipment_instance_id, quantity")
+      .eq("profile_id", profileIdForInventory)
+      .gt("quantity", 0);
+    const { data: equippedRowsForCapacity } = await supabaseAction
+      .from("user_equipment")
+      .select("inventory_id")
+      .eq("profile_id", profileIdForInventory);
+    const equippedInventoryIdSet = new Set<number>(
+      (equippedRowsForCapacity ?? [])
+        .map((row) => Number(row.inventory_id))
+        .filter((value) => Number.isFinite(value))
+        .map((value) => Math.trunc(value)),
+    );
+    const currentInventoryRows = (inventoryRowsForCapacity ?? []) as Array<{
+      id: number;
+      item_id: string | null;
+      weapon_instance_id: number | null;
+      equipment_instance_id: number | null;
+      quantity: number | null;
+    }>;
+    const unequippedInventoryCount = currentInventoryRows.reduce((sum, row) => {
+      const id = Number(row.id);
+      if (!Number.isFinite(id)) return sum;
+      return equippedInventoryIdSet.has(Math.trunc(id)) ? sum : sum + 1;
+    }, 0);
+    let remainingInventorySlots = Math.max(0, 24 - unequippedInventoryCount);
+    const { data: lootItemsData } =
+      lootItemIds.length > 0
+        ? await supabaseAction.from("items").select("id, is_stackable").in("id", lootItemIds)
+        : { data: [] };
+    const lootItemsMap = new Map<string, boolean>(
+      (lootItemsData ?? []).map((row) => [String(row.id), row.is_stackable === true]),
+    );
+    const stackableItemRows = new Map<string, { id: number; quantity: number }>();
+    for (const row of currentInventoryRows) {
+      const itemId = typeof row.item_id === "string" ? row.item_id.trim() : "";
+      const id = Number(row.id);
+      if (!itemId || !Number.isFinite(id)) continue;
+      if (row.weapon_instance_id != null || row.equipment_instance_id != null) continue;
+      const currentQty =
+        typeof row.quantity === "number" && Number.isFinite(row.quantity)
+          ? Math.max(0, Math.trunc(row.quantity))
+          : 0;
+      const existing = stackableItemRows.get(itemId);
+      if (!existing || existing.id > Math.trunc(id)) {
+        stackableItemRows.set(itemId, { id: Math.trunc(id), quantity: currentQty });
+      }
+    }
+    const parseLootInstanceId = (lootKey: string, prefix: "weapon" | "equipment"): number | null => {
+      if (!lootKey.startsWith(`${prefix}:`)) return null;
+      const raw = lootKey.slice(prefix.length + 1).trim();
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    };
+
+    for (const loot of victoryLootItems) {
+      const qty = Math.max(0, Math.trunc(Number(loot.quantity ?? 0)));
+      if (qty <= 0) continue;
+      const itemId = typeof loot.itemId === "string" ? loot.itemId.trim() : "";
+      if (!itemId) continue;
+
+      const weaponInstanceId = parseLootInstanceId(loot.lootKey, "weapon");
+      const equipmentInstanceId = parseLootInstanceId(loot.lootKey, "equipment");
+      if (weaponInstanceId != null) {
+        if (remainingInventorySlots <= 0) continue;
+        await supabaseAction.from("user_inventory").insert({
+          profile_id: profileIdForInventory,
+          quantity: qty,
+          weapon_instance_id: weaponInstanceId,
+        });
+        remainingInventorySlots -= 1;
+        continue;
+      }
+      if (equipmentInstanceId != null) {
+        if (remainingInventorySlots <= 0) continue;
+        await supabaseAction.from("user_inventory").insert({
+          profile_id: profileIdForInventory,
+          quantity: qty,
+          equipment_instance_id: equipmentInstanceId,
+        });
+        remainingInventorySlots -= 1;
+        continue;
+      }
+
+      const isStackable = lootItemsMap.get(itemId) === true;
+      if (isStackable) {
+        const existingItemRow = stackableItemRows.get(itemId) ?? null;
+        if (existingItemRow && typeof existingItemRow.id === "number") {
+          const currentQty = Math.max(0, Math.trunc(existingItemRow.quantity));
+          await supabaseAction
+            .from("user_inventory")
+            .update({ quantity: currentQty + qty })
+            .eq("id", Math.trunc(existingItemRow.id));
+          stackableItemRows.set(itemId, {
+            id: Math.trunc(existingItemRow.id),
+            quantity: currentQty + qty,
+          });
+        } else {
+          if (remainingInventorySlots <= 0) continue;
+          await supabaseAction.from("user_inventory").insert({
+            profile_id: profileIdForInventory,
+            quantity: qty,
+            item_id: itemId,
+          });
+          remainingInventorySlots -= 1;
+        }
+        continue;
+      }
+
+      if (remainingInventorySlots <= 0) continue;
+      await supabaseAction.from("user_inventory").insert({
+        profile_id: profileIdForInventory,
+        quantity: qty,
+        item_id: itemId,
+      });
+      remainingInventorySlots -= 1;
+    }
+
+    const zoneProgressId = combatProgressZoneCode;
+    if (!zoneProgressId) return;
+    const nextCombatStep = encounterCombatStepForProgress + 1;
+    if (process.env.NODE_ENV === "development") {
+      console.log("[combat-progress] start", {
+        encounterCode: code,
+        encounterZoneId: encounterZoneRefId,
+        resolvedZoneCode: zoneProgressId,
+        encounterCombatStep: encounterCombatStepForProgress,
+        nextCombatStep,
+        userId: actionUser.id,
+        didWin,
+      });
+    }
+
+    const { data: currentProgress, error: currentProgressError } = await supabaseAction
+      .from("user_combat_progress")
+      .select("id, combat_step")
+      .eq("user_id", actionUser.id)
+      .eq("zone_id", zoneProgressId)
+      .order("combat_step", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (process.env.NODE_ENV === "development") {
+      console.log("[combat-progress] current-row", {
+        zoneId: zoneProgressId,
+        row: currentProgress ?? null,
+        error: currentProgressError
+          ? {
+              message: currentProgressError.message,
+              code: currentProgressError.code,
+              details: currentProgressError.details,
+            }
+          : null,
+      });
+    }
+    const currentCombatStep =
+      typeof currentProgress?.combat_step === "number" && Number.isFinite(currentProgress.combat_step)
+        ? Math.max(0, Math.trunc(currentProgress.combat_step))
+        : 0;
+    if (nextCombatStep <= currentCombatStep) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[combat-progress] skip-update", {
+          reason: "next_step_not_greater",
+          currentCombatStep,
+          nextCombatStep,
+          zoneId: zoneProgressId,
+          userId: actionUser.id,
+        });
+      }
+      return;
+    }
+
+    let progressWriteError:
+      | { message: string; code?: string; details?: string | null }
+      | null = null;
+    if (currentProgress && typeof currentProgress.id === "number") {
+      const { error: updateError } = await supabaseAction
+        .from("user_combat_progress")
+        .update({ combat_step: nextCombatStep })
+        .eq("id", currentProgress.id);
+      progressWriteError = updateError
+        ? { message: updateError.message, code: updateError.code, details: updateError.details }
+        : null;
+    } else {
+      const { error: insertError } = await supabaseAction.from("user_combat_progress").insert({
+        user_id: actionUser.id,
+        zone_id: zoneProgressId,
+        combat_step: nextCombatStep,
+      });
+      progressWriteError = insertError
+        ? { message: insertError.message, code: insertError.code, details: insertError.details }
+        : null;
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.log("[combat-progress] upsert-result", {
+        zoneId: zoneProgressId,
+        userId: actionUser.id,
+        writtenCombatStep: nextCombatStep,
+        error: progressWriteError,
+      });
+    }
+  }
+
+  async function consumeCombatConsumable(inventoryId: number): Promise<CombatConsumeResult> {
+    "use server";
+
+    const safeInventoryId = Math.max(0, Math.trunc(Number(inventoryId)));
+    if (safeInventoryId <= 0) {
+      return { ok: false, error: "Consumible inválido." };
+    }
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) {
+      return { ok: false, error: "Tu sesión expiró. Volvé a iniciar sesión." };
+    }
+
+    const { data: invRow, error: invError } = await supabaseAction
+      .from("user_inventory")
+      .select("id, quantity, profile_id")
+      .eq("id", safeInventoryId)
+      .maybeSingle();
+
+    if (invError || !invRow) {
+      return { ok: false, error: "No se encontró el consumible en inventario." };
+    }
+
+    const profileId = typeof invRow.profile_id === "string" ? invRow.profile_id.trim() : "";
+    if (profileId !== actionUser.id && profileId !== characterSkillsProfileId) {
+      return { ok: false, error: "No podés consumir este objeto." };
+    }
+
+    const currentQty = Math.max(0, Math.trunc(Number(invRow.quantity ?? 0)));
+    if (currentQty <= 0) {
+      return { ok: false, error: "Ya no te quedan unidades de ese consumible." };
+    }
+
+    const nextQty = currentQty - 1;
+    const { error: updateError } = await supabaseAction
+      .from("user_inventory")
+      .update({ quantity: nextQty })
+      .eq("id", safeInventoryId);
+
+    if (updateError) {
+      return { ok: false, error: "No se pudo descontar el consumible." };
+    }
+
+    return { ok: true, remainingQuantity: nextQty };
+  }
+
+  async function persistEscapeCombatState(payload: {
+    finalHp: number;
+    finalMana: number;
+  }) {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await supabaseAction.auth.getUser();
+    if (!actionUser) return;
+
+    const asNonNegativeInt = (value: unknown): number =>
+      Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
+    const finalHpAfterEscape = asNonNegativeInt(payload.finalHp);
+    const finalManaAfterEscape = asNonNegativeInt(payload.finalMana);
+    const profileTargets = Array.from(
+      new Set([characterSkillsProfileId, actionUser.id].map((v) => String(v).trim()).filter(Boolean)),
+    );
+
+    for (const profileId of profileTargets) {
+      const { data: characterRow, error: characterReadError } = await supabaseAction
+        .from("user_character")
+        .select("hp_total, mana_total")
+        .eq("profile_id", profileId)
+        .maybeSingle();
+      if (characterReadError || !characterRow) continue;
+      const hpTotal = asNonNegativeInt(characterRow.hp_total);
+      const manaTotal = asNonNegativeInt(characterRow.mana_total);
+      const nextHpActual = Math.min(hpTotal, finalHpAfterEscape);
+      const nextManaActual = Math.min(manaTotal, finalManaAfterEscape);
+      const { error: characterUpdateError } = await supabaseAction
+        .from("user_character")
+        .update({ hp_actual: nextHpActual, mana_actual: nextManaActual })
+        .eq("profile_id", profileId);
+      if (!characterUpdateError) break;
+    }
+  }
 
   return (
     <CombatEncounterShell
@@ -899,8 +2349,19 @@ export default async function CombatEncounterPage({
       playerStatWis={playerStatWis}
       playerArmor={playerArmor}
       playerMr={playerMr}
+      playerExperienceToNext={playerExperienceToNext}
+      playerLevelCurrent={playerLevel}
+      playerLevelAfterVictory={projectedLevelAfterVictory}
       playerSkills={playerSkills}
       playerConsumables={playerConsumables}
+      victoryLootItems={victoryLootItems}
+      defeatLostItems={defeatLostItems}
+      victoryGoldFromLoot={victoryGoldFromLoot}
+      onConsumeConsumable={consumeCombatConsumable}
+      onEscapePersistState={persistEscapeCombatState}
+      onPlayerDefeatedGlobalLog={logPlayerDefeatedInGlobalLog}
+      onPlayerLevelUpGlobalLog={logPlayerLevelUpInGlobalLog}
+      onCombatFinishedStats={persistCombatStats}
     />
   );
 }
