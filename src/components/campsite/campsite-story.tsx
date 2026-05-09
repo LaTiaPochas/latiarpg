@@ -167,7 +167,7 @@ export function CampsiteStory({ playerName, playerSpriteSrc, onViewContributions
                         })
                       }
                       disabled={isPending}
-                      className="pointer-events-auto cursor-pointer rounded border border-lime-700/90 bg-gradient-to-b from-lime-600 to-emerald-800 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-lime-100 shadow-[0_0_8px_rgba(34,197,94,0.35)] transition hover:from-lime-500 hover:to-emerald-700 disabled:cursor-not-allowed disabled:border-slate-700 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-300 disabled:shadow-none"
+                      className="pointer-events-auto cursor-pointer rounded border border-slate-700/90 bg-gradient-to-b from-slate-600 to-slate-800 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-100 shadow-[0_0_3px_rgba(41,134,204,0.35)] transition hover:from-slate-500 hover:to-slate-700 disabled:cursor-not-allowed disabled:border-slate-700 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-300 disabled:shadow-none"
                     >
                       {isPending ? "Guardando..." : "Ver aportes"}
                     </button>

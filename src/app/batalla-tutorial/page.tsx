@@ -830,66 +830,68 @@ export default function BatallaTutorialPage() {
             )}
           </div>
 
-          <div className="relative">
-            {!isCombatLogPanelOpen && (
-              <button
-                type="button"
-                onClick={() =>
-                  setIsCombatLogPanelOpen((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setIsActionsPanelOpen(false);
-                      setActionMenu("main");
-                    }
-                    return next;
-                  })
-                }
-                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                aria-expanded={isCombatLogPanelOpen}
-              >
-                <div className="min-w-0 text-left">
-                  <p>Combat Log</p>
-                  <p
-                    className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[11px] normal-case tracking-normal leading-relaxed text-amber-50/92`}
-                  >
-                    {combatLog[combatLog.length - 1] ?? ""}
-                  </p>
-                </div>
-                <span className="ml-2 shrink-0" aria-hidden>
-                  ▲
-                </span>
-              </button>
-            )}
-
-            {isCombatLogPanelOpen && (
-              <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+          {!isActionsPanelOpen && (
+            <div className="relative">
+              {!isCombatLogPanelOpen && (
                 <button
                   type="button"
-                  onClick={() => setIsCombatLogPanelOpen(false)}
-                  className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
-                  aria-label="Colapsar combat log"
+                  onClick={() =>
+                    setIsCombatLogPanelOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsActionsPanelOpen(false);
+                        setActionMenu("main");
+                      }
+                      return next;
+                    })
+                  }
+                  className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                  aria-expanded={isCombatLogPanelOpen}
                 >
-                  <span>Combat Log</span>
-                  <span aria-hidden>▼</span>
-                </button>
-                <div
-                  ref={combatLogMobileRef}
-                  className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px] leading-relaxed text-amber-50/92`}
-                >
-                  {combatLog.map((line, idx) => (
+                  <div className="min-w-0 text-left">
+                    <p>Combat Log</p>
                     <p
-                      key={`${line}-${idx}`}
-                      className={`rounded-md bg-black/25 px-2 py-1 ${
-                        idx === 0 ? "text-red-300" : ""
-                      }`}
+                      className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[11px] normal-case tracking-normal leading-relaxed text-amber-50/92`}
                     >
-                      {renderCombatLogLine(line)}
+                      {combatLog[combatLog.length - 1] ?? ""}
                     </p>
-                  ))}
+                  </div>
+                  <span className="ml-2 shrink-0" aria-hidden>
+                    ▲
+                  </span>
+                </button>
+              )}
+
+              {isCombatLogPanelOpen && (
+                <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={() => setIsCombatLogPanelOpen(false)}
+                    className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
+                    aria-label="Colapsar combat log"
+                  >
+                    <span>Combat Log</span>
+                    <span aria-hidden>▼</span>
+                  </button>
+                  <div
+                    ref={combatLogMobileRef}
+                    className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px] leading-relaxed text-amber-50/92`}
+                  >
+                    {combatLog.map((line, idx) => (
+                      <p
+                        key={`${line}-${idx}`}
+                        className={`rounded-md bg-black/25 px-2 py-1 ${
+                          idx === 0 ? "text-red-300" : ""
+                        }`}
+                      >
+                        {renderCombatLogLine(line)}
+                      </p>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </section>
 
         <section className="mt-4 hidden min-h-0 flex-none grid-cols-[0.9fr_1.5fr] gap-3 pb-1 sm:grid">
