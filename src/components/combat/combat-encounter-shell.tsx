@@ -283,27 +283,211 @@ function formatEnemySkillCombatLogDescription(template: string, damageDealt: num
   return template.replaceAll("{daño}", s).replaceAll("{dano}", s).replaceAll("{damage}", s);
 }
 
+/** Un término `{ stat, ratio }` → `floor(stat × ratio)` (ratio puede ser decimal). */
+function playerSkillScalingEntryBonus(
+  entry: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
+  const scaling = entry as Record<string, unknown>;
+  const statLabel = typeof scaling.stat === "string" ? scaling.stat.trim().toUpperCase() : "";
+  const ratioParsed =
+    typeof scaling.ratio === "number"
+      ? scaling.ratio
+      : typeof scaling.ratio === "string"
+        ? Number(scaling.ratio)
+        : Number.NaN;
+  if (statLabel === "" || !Number.isFinite(ratioParsed)) return 0;
+  return Math.floor(Math.max(0, getCombatStatValue(statLabel)) * ratioParsed);
+}
+
+/**
+ * Suma de escalados: `scaling` ausente, objeto único `{ stat, ratio }`, o array de esos objetos.
+ */
+function sumPlayerSkillScalingBonus(
+  scalingRaw: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (scalingRaw == null) return 0;
+  if (Array.isArray(scalingRaw)) {
+    let sum = 0;
+    for (const item of scalingRaw) {
+      sum += playerSkillScalingEntryBonus(item, getCombatStatValue);
+    }
+    return sum;
+  }
+  if (typeof scalingRaw === "object") {
+    return playerSkillScalingEntryBonus(scalingRaw, getCombatStatValue);
+  }
+  return 0;
+}
+
+function buffEffectTargetIsSelf(effect: Record<string, unknown>): boolean {
+  const raw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
+  return raw === "self" || raw === "player";
+}
+
+function isPlayerSelfBuffEffect(effect: Record<string, unknown>): boolean {
+  const t = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  return t === "buff" && buffEffectTargetIsSelf(effect);
+}
+
+function buffScalingRatioParsed(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+/** Estadísticas que puede incrementar `affected-stat` en buff self (solo encuentro actual). */
+type PlayerSelfBuffAffectedStat =
+  | "armor"
+  | "mr"
+  | "hp"
+  | "mana"
+  | "speed"
+  | "weapon_damage_min"
+  | "weapon_damage_max"
+  | "magic_damage_min"
+  | "magic_damage_max";
+
+function parsePlayerSelfAffectedStat(effect: Record<string, unknown>): PlayerSelfBuffAffectedStat | null {
+  const raw =
+    typeof effect["affected-stat"] === "string"
+      ? effect["affected-stat"].trim().toLowerCase()
+      : typeof effect.affected_stat === "string"
+        ? effect.affected_stat.trim().toLowerCase()
+        : "";
+
+  const map = new Map<string, PlayerSelfBuffAffectedStat>([
+    ["armor", "armor"],
+    ["armadura", "armor"],
+    ["mr", "mr"],
+    ["magic_resist", "mr"],
+    ["magicresist", "mr"],
+    ["hp", "hp"],
+    ["mana", "mana"],
+    ["mp", "mana"],
+    ["speed", "speed"],
+    ["velocidad", "speed"],
+    ["weapon_damage_min", "weapon_damage_min"],
+    ["weapon-damage-min", "weapon_damage_min"],
+    ["weapon_damage_max", "weapon_damage_max"],
+    ["weapon-damage-max", "weapon_damage_max"],
+    ["magic_damage_min", "magic_damage_min"],
+    ["magic-damage-min", "magic_damage_min"],
+    ["magic_damage_max", "magic_damage_max"],
+    ["magic-damage-max", "magic_damage_max"],
+  ]);
+  const hit = raw.replace(/\s+/g, "_");
+  return map.get(hit) ?? map.get(raw) ?? null;
+}
+
+/**
+ * Contribución de una línea de `scaling`:
+ * - `stat: Fixed` → `amount` entero ≥ 0
+ * - `stat: STR|DEX|INT|WIS` → `floor(amount + stat × ratio)`
+ */
+function selfBuffScalingLineValue(
+  entry: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
+  const o = entry as Record<string, unknown>;
+  const statRaw = typeof o.stat === "string" ? o.stat.trim() : "";
+  if (statRaw === "") return 0;
+  const upper = statRaw.toUpperCase();
+  const amount = coerceEffectNumber(o.amount, 0);
+  const ratio = buffScalingRatioParsed(o.ratio);
+
+  if (upper === "FIXED") {
+    return Math.max(0, Math.floor(amount));
+  }
+  if (["STR", "DEX", "INT", "WIS"].includes(upper)) {
+    const fromStat = Math.max(0, getCombatStatValue(upper)) * ratio;
+    return Math.max(0, Math.floor(amount + fromStat));
+  }
+  return 0;
+}
+
+function sumSelfBuffScalingTotals(
+  scalingRaw: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (scalingRaw == null) return 0;
+  if (Array.isArray(scalingRaw)) {
+    return scalingRaw.reduce(
+      (sum, item) => sum + selfBuffScalingLineValue(item, getCombatStatValue),
+      0,
+    );
+  }
+  if (typeof scalingRaw === "object") {
+    return selfBuffScalingLineValue(scalingRaw, getCombatStatValue);
+  }
+  return 0;
+}
+
+function formatPlayerSelfBuffCombatLog(
+  template: string,
+  appliedTotal: number,
+  affected: PlayerSelfBuffAffectedStat | null,
+): string {
+  const amt = String(Math.max(0, Math.trunc(appliedTotal)));
+  const z = () => String(0);
+  return template
+    .replaceAll("{amount}", amt)
+    .replaceAll("{armor}", affected === "armor" ? amt : z())
+    .replaceAll("{mr}", affected === "mr" ? amt : z())
+    .replaceAll("{hp}", affected === "hp" ? amt : z())
+    .replaceAll("{mana}", affected === "mana" ? amt : z())
+    .replaceAll("{speed}", affected === "speed" ? amt : z());
+}
+
+/** Bases cuando el effect_json trae `min`/`max` en 0 según `subtype`. */
+type PlayerSkillDamageBaseBounds = {
+  /** `weapon_damage_*` del PJ + buffs temporales de combate (misma lógica que el ataque físico). */
+  weaponMin: number;
+  weaponMax: number;
+  /** `magic_damage_*` del PJ (sin el flat post-tiro de buffs mágicos de combate). */
+  magicMin: number;
+  magicMax: number;
+};
+
+/**
+ * Si `min` y `max` del JSON son 0: `magical` usa daño mágico base; `physical` usa daño de arma.
+ */
+function resolvePlayerSkillDamageRollBounds(
+  effect: Record<string, unknown>,
+  bases: PlayerSkillDamageBaseBounds,
+): { minV: number; maxV: number } {
+  let minV = Math.max(0, coerceEffectNumber(effect.min, 0));
+  let maxV = Math.max(minV, coerceEffectNumber(effect.max, minV));
+  if (minV !== 0 || maxV !== 0) return { minV, maxV };
+
+  const sub = getPlayerSkillEffectSubtype(effect);
+  if (sub === "magical") {
+    const mmin = Math.max(0, Math.trunc(bases.magicMin));
+    const mmax = Math.max(mmin, Math.trunc(bases.magicMax));
+    return { minV: mmin, maxV: mmax };
+  }
+  if (sub === "physical") {
+    const wmin = Math.max(0, Math.trunc(bases.weaponMin));
+    const wmax = Math.max(wmin, Math.trunc(bases.weaponMax));
+    return { minV: wmin, maxV: wmax };
+  }
+  return { minV, maxV };
+}
+
 function rollDamageFromPlayerSkillEffect(
   effect: Record<string, unknown>,
   getCombatStatValue: (statKeyUpper: string) => number,
+  bases: PlayerSkillDamageBaseBounds,
 ): number {
-  const minV = Math.max(0, coerceEffectNumber(effect.min, 0));
-  const maxV = Math.max(minV, coerceEffectNumber(effect.max, minV));
+  const { minV, maxV } = resolvePlayerSkillDamageRollBounds(effect, bases);
   let total = randomIntInclusive(minV, maxV);
-  const scalingRaw = effect.scaling;
-  if (scalingRaw !== null && typeof scalingRaw === "object" && !Array.isArray(scalingRaw)) {
-    const scaling = scalingRaw as Record<string, unknown>;
-    const statLabel = typeof scaling.stat === "string" ? scaling.stat.trim().toUpperCase() : "";
-    const ratioParsed =
-      typeof scaling.ratio === "number"
-        ? scaling.ratio
-        : typeof scaling.ratio === "string"
-          ? Number(scaling.ratio)
-          : Number.NaN;
-    if (statLabel !== "" && Number.isFinite(ratioParsed)) {
-      total += Math.floor(Math.max(0, getCombatStatValue(statLabel)) * ratioParsed);
-    }
-  }
+  total += sumPlayerSkillScalingBonus(effect.scaling, getCombatStatValue);
   return Math.max(0, total);
 }
 
@@ -314,29 +498,26 @@ function rollDamageFromPlayerSkillEffect(
 function computePlayerSkillDamageRangeBeforeArmor(
   effect: Record<string, unknown>,
   getCombatStatValue: (statKeyUpper: string) => number,
+  /** Bonos temporales mágicos de combate (buff `magic_damage_*`), solo si subtype es mágico. */
+  magicalCombatBonusFlat = 0,
+  bases: PlayerSkillDamageBaseBounds = {
+    weaponMin: 0,
+    weaponMax: 0,
+    magicMin: 0,
+    magicMax: 0,
+  },
 ): { min: number; max: number } | null {
   const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
   if (typeRaw !== "damage") return null;
-  const minV = Math.max(0, coerceEffectNumber(effect.min, 0));
-  const maxV = Math.max(minV, coerceEffectNumber(effect.max, minV));
-  let bonus = 0;
-  const scalingRaw = effect.scaling;
-  if (scalingRaw !== null && typeof scalingRaw === "object" && !Array.isArray(scalingRaw)) {
-    const scaling = scalingRaw as Record<string, unknown>;
-    const statLabel = typeof scaling.stat === "string" ? scaling.stat.trim().toUpperCase() : "";
-    const ratioParsed =
-      typeof scaling.ratio === "number"
-        ? scaling.ratio
-        : typeof scaling.ratio === "string"
-          ? Number(scaling.ratio)
-          : Number.NaN;
-    if (statLabel !== "" && Number.isFinite(ratioParsed)) {
-      bonus = Math.floor(Math.max(0, getCombatStatValue(statLabel)) * ratioParsed);
-    }
-  }
+  const { minV, maxV } = resolvePlayerSkillDamageRollBounds(effect, bases);
+  const bonus = sumPlayerSkillScalingBonus(effect.scaling, getCombatStatValue);
+  const extra =
+    getPlayerSkillEffectSubtype(effect) === "magical"
+      ? Math.max(0, Math.trunc(magicalCombatBonusFlat))
+      : 0;
   return {
-    min: Math.max(0, minV + bonus),
-    max: Math.max(0, maxV + bonus),
+    min: Math.max(0, minV + bonus + extra),
+    max: Math.max(0, maxV + bonus + extra),
   };
 }
 
@@ -663,6 +844,9 @@ export type CombatEncounterShellProps = {
   playerSpeed?: number;
   playerWeaponDamageMin?: number;
   playerWeaponDamageMax?: number;
+  /** Daño mágico base del PJ (ej. `user_character.magic_damage_*`); hechizos con min/max 0 en JSON usan esto. */
+  playerMagicDamageMin?: number;
+  playerMagicDamageMax?: number;
   playerStatStr?: number;
   playerStatDex?: number;
   playerStatInt?: number;
@@ -948,6 +1132,8 @@ export function CombatEncounterShell({
   playerSpeed = 0,
   playerWeaponDamageMin = 1,
   playerWeaponDamageMax = 1,
+  playerMagicDamageMin = 0,
+  playerMagicDamageMax = 0,
   playerStatStr = 0,
   playerStatDex = 0,
   playerStatInt = 0,
@@ -1089,6 +1275,23 @@ export function CombatEncounterShell({
 
   const [playerCurrentHp, setPlayerCurrentHp] = useState(playerHp);
   const [displayPlayerMana, setDisplayPlayerMana] = useState(playerMana);
+  /** Bonificaciones durante el encuentro (`type:buff` + `target:self` + `affected-stat` + `scaling`). */
+  const [playerCombatArmorBonus, setPlayerCombatArmorBonus] = useState(0);
+  const [playerCombatMrBonus, setPlayerCombatMrBonus] = useState(0);
+  const [playerCombatSpeedBonus, setPlayerCombatSpeedBonus] = useState(0);
+  const [playerCombatWeaponDamageMinBonus, setPlayerCombatWeaponDamageMinBonus] = useState(0);
+  const [playerCombatWeaponDamageMaxBonus, setPlayerCombatWeaponDamageMaxBonus] = useState(0);
+  const [playerCombatMagicDamageMinBonus, setPlayerCombatMagicDamageMinBonus] = useState(0);
+  const [playerCombatMagicDamageMaxBonus, setPlayerCombatMagicDamageMaxBonus] = useState(0);
+  const effectivePlayerArmor = useMemo(
+    () => Math.max(0, Math.trunc(playerArmor + playerCombatArmorBonus)),
+    [playerArmor, playerCombatArmorBonus],
+  );
+  const effectivePlayerMr = useMemo(
+    () => Math.max(0, Math.trunc(playerMr + playerCombatMrBonus)),
+    [playerMr, playerCombatMrBonus],
+  );
+
   const [enemySkillNextAvailableTurn, setEnemySkillNextAvailableTurn] = useState<
     Record<string, Record<string, number>>
   >({});
@@ -1126,6 +1329,13 @@ export function CombatEncounterShell({
       totalHealing: 0,
       highestHitReceived: 0,
     };
+    setPlayerCombatArmorBonus(0);
+    setPlayerCombatMrBonus(0);
+    setPlayerCombatSpeedBonus(0);
+    setPlayerCombatWeaponDamageMinBonus(0);
+    setPlayerCombatWeaponDamageMaxBonus(0);
+    setPlayerCombatMagicDamageMinBonus(0);
+    setPlayerCombatMagicDamageMaxBonus(0);
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
       defeatModalDelayRef.current = null;
@@ -1276,7 +1486,11 @@ export function CombatEncounterShell({
   }, [initialEnemies]);
   const turnOrder = useMemo<TurnActor[]>(() => {
     const actors: TurnActor[] = [
-      { id: "player", type: "player", speed: Math.max(0, Math.trunc(playerSpeed)) },
+      {
+        id: "player",
+        type: "player",
+        speed: Math.max(0, Math.trunc(playerSpeed + playerCombatSpeedBonus)),
+      },
       ...displayEnemies
         .filter((enemy) => enemy.hp > 0)
         .map((enemy) => ({
@@ -1287,7 +1501,7 @@ export function CombatEncounterShell({
         })),
     ];
     return actors.sort((a, b) => b.speed - a.speed);
-  }, [displayEnemies, playerSpeed]);
+  }, [displayEnemies, playerCombatSpeedBonus, playerSpeed]);
   /** Firma estable del orden de iniciativa (quién actúa). Cambia al morir un enemigo o variar velocidades. */
   const initiativeOrderSig = useMemo(
     () => turnOrder.map((a) => a.id).join(">"),
@@ -1348,7 +1562,7 @@ export function CombatEncounterShell({
   const currentActor = turnOrder[effectiveTurnIndex] ?? null;
   const runtimeInitiativeDebug = useMemo(
     () => ({
-      playerSpeed: Math.max(0, Math.trunc(playerSpeed)),
+      playerSpeed: Math.max(0, Math.trunc(playerSpeed + playerCombatSpeedBonus)),
       enemies: displayEnemies.map((enemy) => ({
         id: enemy.id,
         name: enemy.name,
@@ -1368,7 +1582,15 @@ export function CombatEncounterShell({
       currentActorType: currentActor?.type ?? null,
       turn,
     }),
-    [playerSpeed, displayEnemies, turnOrder, effectiveTurnIndex, currentActor, turn],
+    [
+      playerCombatSpeedBonus,
+      playerSpeed,
+      displayEnemies,
+      turnOrder,
+      effectiveTurnIndex,
+      currentActor,
+      turn,
+    ],
   );
   useEffect(() => {
     if (turnOrder.length === 0) return;
@@ -1784,11 +2006,95 @@ export function CombatEncounterShell({
       );
     };
 
+    if (effectTypeRaw === "buff" && isPlayerSelfBuffEffect(effect)) {
+      const affectedStat = parsePlayerSelfAffectedStat(effect);
+      const totalGain = Math.max(
+        0,
+        Math.trunc(sumSelfBuffScalingTotals(effect.scaling, getCombatStatValue)),
+      );
+
+      if (affectedStat != null && totalGain > 0) {
+        switch (affectedStat) {
+          case "armor":
+            setPlayerCombatArmorBonus((v) => v + totalGain);
+            break;
+          case "mr":
+            setPlayerCombatMrBonus((v) => v + totalGain);
+            break;
+          case "hp": {
+            const cap = Math.max(1, playerHpMax);
+            const prevHp = playerCurrentHp;
+            const nextHp = Math.min(cap, prevHp + totalGain);
+            setPlayerCurrentHp(nextHp);
+            recordPlayerHealing(Math.max(0, nextHp - prevHp));
+            break;
+          }
+          case "mana":
+            setDisplayPlayerMana((m) =>
+              Math.min(Math.max(0, playerManaMax), m + totalGain),
+            );
+            break;
+          case "speed":
+            setPlayerCombatSpeedBonus((v) => v + totalGain);
+            break;
+          case "weapon_damage_min":
+            setPlayerCombatWeaponDamageMinBonus((v) => v + totalGain);
+            break;
+          case "weapon_damage_max":
+            setPlayerCombatWeaponDamageMaxBonus((v) => v + totalGain);
+            break;
+          case "magic_damage_min":
+            setPlayerCombatMagicDamageMinBonus((v) => v + totalGain);
+            break;
+          case "magic_damage_max":
+            setPlayerCombatMagicDamageMaxBonus((v) => v + totalGain);
+            break;
+          default:
+            break;
+        }
+      }
+
+      const buffText =
+        descTemplate != null
+          ? formatPlayerSelfBuffCombatLog(descTemplate, totalGain, affectedStat)
+          : `Usás ${skillEntry.skill.name}.`;
+      appendCombatLog(buffText, "default");
+      scheduleAdvanceTurn();
+      return;
+    }
+
     if (effectTypeRaw !== "damage") {
       appendSpellLog(0);
       scheduleAdvanceTurn();
       return;
     }
+
+    const magicalCombatDamageFlat = Math.max(
+      0,
+      Math.trunc(playerCombatMagicDamageMinBonus + playerCombatMagicDamageMaxBonus),
+    );
+    const applyMagicalCombatFlatToRawDamage = (
+      subtype: PlayerSkillEffectSubtype,
+      rolled: number,
+    ) =>
+      subtype === "magical"
+        ? Math.max(0, Math.trunc(rolled + magicalCombatDamageFlat))
+        : rolled;
+
+    const effectiveWeaponDamageMin = Math.max(
+      1,
+      Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+    );
+    const effectiveWeaponDamageMax = Math.max(
+      effectiveWeaponDamageMin,
+      Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+    );
+    const skillDamageBases: PlayerSkillDamageBaseBounds = {
+      weaponMin: effectiveWeaponDamageMin,
+      weaponMax: effectiveWeaponDamageMax,
+      magicMin: playerMagicDamageMin,
+      magicMax: playerMagicDamageMax,
+    };
 
     const needsSingleEnemy = playerSkillRequiresSingleEnemySelection(skillEntry);
     const isArea = playerSkillDamageHitsAllEnemies(effect);
@@ -1799,7 +2105,8 @@ export function CombatEncounterShell({
 
       const subtype = getPlayerSkillEffectSubtype(effect);
       const defenseStat = enemyDefenseStatForPlayerSkill(subtype, target);
-      const rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue);
+      let rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue, skillDamageBases);
+      rawDamage = applyMagicalCombatFlatToRawDamage(subtype, rawDamage);
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, target.hp);
       const updatedHp = target.hp - damageDone;
@@ -1834,7 +2141,8 @@ export function CombatEncounterShell({
     for (const enemy of displayEnemies) {
       if (enemy.hp <= 0) continue;
       const defenseStat = enemyDefenseStatForPlayerSkill(skillSubtype, enemy);
-      const rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue);
+      let rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue, skillDamageBases);
+      rawDamage = applyMagicalCombatFlatToRawDamage(skillSubtype, rawDamage);
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, enemy.hp);
       const hpNext = enemy.hp - damageDone;
@@ -1913,8 +2221,14 @@ export function CombatEncounterShell({
       return;
     }
 
-    const damageMin = Math.max(1, Math.floor(playerWeaponDamageMin));
-    const damageMax = Math.max(damageMin, Math.floor(playerWeaponDamageMax));
+    const damageMin = Math.max(
+      1,
+      Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+    );
+    const damageMax = Math.max(
+      damageMin,
+      Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+    );
     const rawDamage = randomIntInclusive(damageMin, damageMax);
     const mitigated = mitigateDamageByDefense(rawDamage, target.armor);
     const updatedHp = Math.max(0, target.hp - mitigated);
@@ -2026,7 +2340,11 @@ export function CombatEncounterShell({
       incomingSubtype = "physical";
       rawDamage = Math.max(0, randomIntInclusive(enemy.attackMin, enemy.attackMax));
     }
-    const defenseStat = playerDefenseStatVsIncoming(incomingSubtype, playerArmor, playerMr);
+    const defenseStat = playerDefenseStatVsIncoming(
+      incomingSubtype,
+      effectivePlayerArmor,
+      effectivePlayerMr,
+    );
     const damage = mitigateDamageByDefense(rawDamage, defenseStat);
     recordPlayerDamageTaken(damage);
     const nextPlayerHp = Math.max(0, playerCurrentHp - damage);
@@ -2060,10 +2378,10 @@ export function CombatEncounterShell({
     currentActor,
     effectiveTurnIndex,
     displayEnemies,
+    effectivePlayerArmor,
+    effectivePlayerMr,
     isTurnTransitioning,
-    playerArmor,
     playerCurrentHp,
-    playerMr,
     turn,
   ]);
 
@@ -2842,9 +3160,28 @@ export function CombatEncounterShell({
                   return 0;
               }
             };
+            const magicalBonusFlatTooltip = Math.max(
+              0,
+              Math.trunc(playerCombatMagicDamageMinBonus + playerCombatMagicDamageMaxBonus),
+            );
+            const tooltipWeaponMin = Math.max(
+              1,
+              Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+            );
+            const tooltipWeaponMax = Math.max(
+              tooltipWeaponMin,
+              Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+            );
             const dmgRange = computePlayerSkillDamageRangeBeforeArmor(
               skillTooltipEntry.skill.effect,
               getStat,
+              magicalBonusFlatTooltip,
+              {
+                weaponMin: tooltipWeaponMin,
+                weaponMax: tooltipWeaponMax,
+                magicMin: playerMagicDamageMin,
+                magicMax: playerMagicDamageMax,
+              },
             );
             return (
               <>

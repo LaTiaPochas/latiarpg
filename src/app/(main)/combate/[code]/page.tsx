@@ -53,6 +53,8 @@ type UserCharacterRow = {
   speed_total: number | null;
   weapon_damage_min: number | null;
   weapon_damage_max: number | null;
+  magic_damage_min: number | null;
+  magic_damage_max: number | null;
   str: number | null;
   dex: number | null;
   int: number | null;
@@ -742,7 +744,7 @@ export default async function CombatEncounterPage({
 
   /** Sin `id`: en tu esquema `user_character` puede no tener PK `id` y PostgREST devuelve 42703 si se pide. */
   const userCharacterSelect =
-    "profile_id, character_name, level, class_name, experience_to_next, experience_current, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
+    "profile_id, character_name, level, class_name, experience_to_next, experience_current, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
   const {
     character: userCharacter,
     steps: combatCharacterLoadSteps,
@@ -1546,6 +1548,13 @@ export default async function CombatEncounterPage({
   const playerWeaponDamageMax = Math.max(
     playerWeaponDamageMin,
     num(userCharacter.weapon_damage_max, playerWeaponDamageMin),
+  );
+  const playerMagicDamageRawMin = num(userCharacter.magic_damage_min, 0);
+  const playerMagicDamageRawMax = num(userCharacter.magic_damage_max, playerMagicDamageRawMin);
+  const playerMagicDamageMin = Math.max(0, Math.trunc(playerMagicDamageRawMin));
+  const playerMagicDamageMax = Math.max(
+    playerMagicDamageMin,
+    Math.trunc(playerMagicDamageRawMax),
   );
   const playerStatStr = Math.max(0, num(userCharacter.str, 0));
   const playerStatDex = Math.max(0, num(userCharacter.dex, 0));
@@ -2395,6 +2404,8 @@ export default async function CombatEncounterPage({
       playerSpeed={playerSpeed}
       playerWeaponDamageMin={playerWeaponDamageMin}
       playerWeaponDamageMax={playerWeaponDamageMax}
+      playerMagicDamageMin={playerMagicDamageMin}
+      playerMagicDamageMax={playerMagicDamageMax}
       playerStatStr={playerStatStr}
       playerStatDex={playerStatDex}
       playerStatInt={playerStatInt}
