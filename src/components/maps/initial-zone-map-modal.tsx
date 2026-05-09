@@ -250,6 +250,10 @@ export function InitialZoneMapModal({
                 router.push("/bosque-inexplorado");
                 return;
               }
+              if (selectedHotspot.id === "near-woods") {
+                router.push("/near-woods");
+                return;
+              }
               if (selectedHotspot.id === "relaxing-waters") {
                 router.push("/relaxing-waters");
                 return;

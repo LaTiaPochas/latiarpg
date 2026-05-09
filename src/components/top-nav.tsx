@@ -36,6 +36,7 @@ export async function TopNav() {
             width={125}
             height={40}
             className="h-auto w-auto max-h-13"
+            style={{ width: "auto", height: "auto" }}
             priority
           />
         </Link>

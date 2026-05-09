@@ -222,6 +222,10 @@ export function GarrisonMap({
           <button
             type="button"
             onClick={() => {
+              if (selectedHotspot.id === "warehouse-spot") {
+                router.push("/warehouse");
+                return;
+              }
               if (selectedHotspot.id === "relaxing-waters-tent") {
                 router.push("/relaxing_waters_stand");
                 return;

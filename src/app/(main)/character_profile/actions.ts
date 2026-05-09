@@ -1,5 +1,6 @@
 "use server";
 
+import { resolveEquippedWeaponSprites } from "@/lib/equipped-weapon-sprites";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
@@ -125,7 +126,7 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
 
   const { data: itemData, error: itemError } = await supabase
     .from("items")
-    .select("equip_slot")
+    .select("equip_slot, code")
     .eq("id", itemId)
     .maybeSingle();
 
@@ -287,14 +288,54 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
   // Forzar un UPDATE benigno para que Postgres ejecute el BEFORE trigger y reaplique el arma.
   const { data: charRow } = await supabase
     .from("user_character")
-    .select("str")
+    .select("str, character_name")
     .eq("profile_id", user.id)
     .maybeSingle();
 
   if (charRow) {
+    const payload: {
+      str: number;
+      active_combat_sprite?: string;
+      active_still_sprite?: string;
+    } = { str: charRow.str };
+
+    if (equipSlot === "weapon") {
+      const rawCode =
+        itemData &&
+        typeof itemData === "object" &&
+        "code" in itemData &&
+        (itemData as { code?: unknown }).code != null
+          ? String((itemData as { code?: unknown }).code)
+          : null;
+      const sprites = resolveEquippedWeaponSprites(
+        typeof charRow.character_name === "string" ? charRow.character_name : null,
+        rawCode,
+      );
+      payload.active_combat_sprite = sprites.active_combat_sprite;
+      payload.active_still_sprite = sprites.active_still_sprite;
+
+      if (process.env.NODE_ENV === "development" || process.env.DEBUG_WEAPON_SPRITES === "1") {
+        console.log(
+          "[weapon-sprites] equipInventoryItem → user_character.update payload",
+          JSON.stringify(
+            {
+              profileId: user.id,
+              inventoryId: inventoryRow.id,
+              itemId,
+              rawItemCodeFromDb: rawCode,
+              active_combat_sprite: payload.active_combat_sprite,
+              active_still_sprite: payload.active_still_sprite,
+            },
+            null,
+            2,
+          ),
+        );
+      }
+    }
+
     const { error: bumpError } = await supabase
       .from("user_character")
-      .update({ str: charRow.str })
+      .update(payload)
       .eq("profile_id", user.id);
 
     if (bumpError) {
