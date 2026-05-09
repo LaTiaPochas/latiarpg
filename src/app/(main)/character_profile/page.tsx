@@ -69,6 +69,7 @@ type EquipmentInstanceRow = {
 type CharacterAbilityView = {
   id: string;
   name: string;
+  iconPath: string;
   description: string;
   manaCost: number;
   cooldownTurns: number;
@@ -204,7 +205,7 @@ export default async function CharacterProfilePage() {
   const { data: character, error: characterError } = await supabase
     .from("user_character")
     .select(
-      "character_name, level, experience_current, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod, speed_total, hp_total, hp_actual, mana_total, mana_actual, armor_total, mr_total, attack_damage_total, magic_damage_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, stat_points_remaining",
+      "character_name, active_still_sprite, level, experience_current, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod, speed_total, hp_total, hp_actual, mana_total, mana_actual, armor_total, mr_total, attack_damage_total, magic_damage_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, stat_points_remaining",
     )
     .eq("profile_id", user.id)
     .maybeSingle();
@@ -516,9 +517,15 @@ export default async function CharacterProfilePage() {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_");
-  const avatarSrc = characterImageName
-    ? `/img/resources/characters/pj_${characterImageName}_rpg_standing.png`
-    : "/img/resources/logos/logo_latia_rpg.png";
+  const activeStillSprite =
+    typeof character?.active_still_sprite === "string"
+      ? character.active_still_sprite.trim().replaceAll("\\", "/")
+      : "";
+  const avatarSrc = activeStillSprite
+    ? activeStillSprite
+    : characterImageName
+      ? `/img/resources/characters/pj_${characterImageName}_rpg_standing.png`
+      : "/img/resources/logos/logo_latia_rpg.png";
   const characterPaperDoll: CharacterPaperDollData = {
     characterNameUppercase,
     level,
@@ -595,6 +602,7 @@ export default async function CharacterProfilePage() {
         id,
         name,
         description,
+        skill_icon_path,
         mana_cost,
         cooldown_turns,
         unlock_level,
@@ -624,6 +632,9 @@ export default async function CharacterProfilePage() {
         typeof skill.name === "string" && skill.name.trim().length > 0
           ? skill.name.trim()
           : "Habilidad";
+      const iconPath = resolveInventoryIconPath(
+        typeof skill.skill_icon_path === "string" ? skill.skill_icon_path : null,
+      );
       const description =
         typeof skill.description === "string" && skill.description.trim().length > 0
           ? skill.description.trim()
@@ -654,6 +665,7 @@ export default async function CharacterProfilePage() {
       return {
         id: skillId,
         name,
+        iconPath,
         description,
         manaCost,
         cooldownTurns,

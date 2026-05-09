@@ -1953,6 +1953,7 @@ export default async function CombatEncounterPage({
     };
 
     if (!didWin) {
+      const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
       await persistCharacterVitals();
       if (defeatLostItems.length > 0) {
         for (const lost of defeatLostItems) {
@@ -1976,6 +1977,29 @@ export default async function CombatEncounterPage({
               .eq("id", lost.inventoryId);
           }
         }
+      }
+      const { data: globalWarehouseRow } = await supabaseAction
+        .from("global_warehouse")
+        .select("quantity")
+        .eq("item_id", RELAXING_WATER_ITEM_ID)
+        .eq("is_global_item", true)
+        .maybeSingle();
+      const currentGlobalQuantity =
+        typeof globalWarehouseRow?.quantity === "number" && Number.isFinite(globalWarehouseRow.quantity)
+          ? Math.max(0, Math.trunc(globalWarehouseRow.quantity))
+          : 0;
+      if (globalWarehouseRow) {
+        await supabaseAction
+          .from("global_warehouse")
+          .update({ quantity: currentGlobalQuantity + 1 })
+          .eq("item_id", RELAXING_WATER_ITEM_ID)
+          .eq("is_global_item", true);
+      } else {
+        await supabaseAction.from("global_warehouse").insert({
+          item_id: RELAXING_WATER_ITEM_ID,
+          quantity: 1,
+          is_global_item: true,
+        });
       }
       return;
     }
@@ -2140,6 +2164,34 @@ export default async function CombatEncounterPage({
         item_id: itemId,
       });
       remainingInventorySlots -= 1;
+    }
+
+    const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
+    const shouldGrantRelaxingWaterOnWin = Math.random() < 0.3;
+    if (shouldGrantRelaxingWaterOnWin) {
+      const { data: globalWarehouseRow } = await supabaseAction
+        .from("global_warehouse")
+        .select("quantity")
+        .eq("item_id", RELAXING_WATER_ITEM_ID)
+        .eq("is_global_item", true)
+        .maybeSingle();
+      const currentGlobalQuantity =
+        typeof globalWarehouseRow?.quantity === "number" && Number.isFinite(globalWarehouseRow.quantity)
+          ? Math.max(0, Math.trunc(globalWarehouseRow.quantity))
+          : 0;
+      if (globalWarehouseRow) {
+        await supabaseAction
+          .from("global_warehouse")
+          .update({ quantity: currentGlobalQuantity + 1 })
+          .eq("item_id", RELAXING_WATER_ITEM_ID)
+          .eq("is_global_item", true);
+      } else {
+        await supabaseAction.from("global_warehouse").insert({
+          item_id: RELAXING_WATER_ITEM_ID,
+          quantity: 1,
+          is_global_item: true,
+        });
+      }
     }
 
     const zoneProgressId = combatProgressZoneCode;

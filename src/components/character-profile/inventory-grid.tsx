@@ -15,6 +15,7 @@ import Image from "next/image";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState, useTransition, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   consumeInventoryItem,
   discardInventoryItems,
@@ -55,6 +56,7 @@ type EquippedEntry = {
 type PlayerAbilityEntry = {
   id: string;
   name: string;
+  iconPath: string;
   description: string;
   manaCost: number;
   cooldownTurns: number;
@@ -67,6 +69,10 @@ type AbilityStatSnapshot = {
   dex: number;
   int: number;
   wis: number;
+};
+type MobileAbilityTooltipPos = {
+  x: number;
+  y: number;
 };
 
 type TooltipState = {
@@ -106,6 +112,8 @@ const abilitiesFont = Montserrat({
   subsets: ["latin"],
   weight: ["500", "600", "700"],
 });
+const MOBILE_ABILITY_TOOLTIP_WIDTH = 240;
+const MOBILE_ABILITY_TOOLTIP_EDGE_GAP = 8;
 
 function capitalizeFirst(value: string): string {
   const trimmed = value.trim();
@@ -634,6 +642,9 @@ export function InventoryGrid({
   const [isDiscardSelecting, setIsDiscardSelecting] = useState(false);
   const [discardSelectedSlotNumbers, setDiscardSelectedSlotNumbers] = useState<number[]>([]);
   const [abilitiesOpen, setAbilitiesOpen] = useState(false);
+  const [mobileAbilityTooltipId, setMobileAbilityTooltipId] = useState<string | null>(null);
+  const [mobileAbilityTooltipPos, setMobileAbilityTooltipPos] = useState<MobileAbilityTooltipPos | null>(null);
+  const [desktopTooltipUpById, setDesktopTooltipUpById] = useState<Record<string, boolean>>({});
   const [activeMobilePanel, setActiveMobilePanel] = useState<"stats" | "inventory" | "abilities" | null>(
     null,
   );
@@ -684,6 +695,22 @@ export function InventoryGrid({
       }),
     );
   }, [slots, isDiscardSelecting]);
+
+  useEffect(() => {
+    if (!mobileAbilityTooltipId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-mobile-ability-tooltip="true"]')) return;
+      if (target.closest('[data-mobile-ability-trigger="true"]')) return;
+      setMobileAbilityTooltipId(null);
+      setMobileAbilityTooltipPos(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [mobileAbilityTooltipId]);
 
   const discardSelectedItems = useMemo(() => {
     const list: InventoryItem[] = [];
@@ -1235,39 +1262,171 @@ export function InventoryGrid({
             {abilities.length === 0 ? (
               <p className="text-sm text-amber-100/65">No tenés habilidades aprendidas.</p>
             ) : (
-              <div className="grid gap-2 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 {abilities.map((ability) => {
                   const subtype = abilitySubtype(ability.effect);
                   const targetKind = abilityTargetKind(ability.effect);
                   const dmg = abilityDamageRange(ability.effect, abilityStats);
+                  const isMobileTooltipOpen = mobileAbilityTooltipId === ability.id;
+                  const shouldOpenUpDesktop = desktopTooltipUpById[ability.id] === true;
                   return (
                     <article
                       key={ability.id}
-                      className={`rounded-md border px-3 py-2 ${abilityCardClass(subtype)}`}
+                      className={`group relative rounded-md border px-1 py-1 sm:px-2 sm:py-2 ${abilityCardClass(subtype)}`}
+                      onMouseEnter={(event) => {
+                        if (!isDesktopViewport()) return;
+                        const cardRect = event.currentTarget.getBoundingClientRect();
+                        const estimatedTooltipHeight = 180;
+                        const spaceBelow = window.innerHeight - cardRect.bottom;
+                        setDesktopTooltipUpById((prev) => ({
+                          ...prev,
+                          [ability.id]: spaceBelow < estimatedTooltipHeight,
+                        }));
+                      }}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-semibold text-amber-100">
-                          {ability.name} ({ability.manaCost} MP) - {targetKind}
-                        </p>
-                        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
-                          <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
-                          CD {ability.cooldownTurns}
-                        </span>
-                      </div>
-                      {dmg ? (
-                        <>
-                          <p className="mt-1 text-xs font-semibold text-amber-100/90">
-                            Daño: {dmg.min}-{dmg.max}
+                      <button
+                        type="button"
+                        data-mobile-ability-trigger="true"
+                        onClick={(event) => {
+                          if (isDesktopViewport()) return;
+                          const visualViewport = window.visualViewport;
+                          const viewportWidth = visualViewport?.width ?? window.innerWidth;
+                          const viewportHeight = visualViewport?.height ?? window.innerHeight;
+                          const viewportOffsetLeft = visualViewport?.offsetLeft ?? 0;
+                          const viewportOffsetTop = visualViewport?.offsetTop ?? 0;
+                          const clickX = event.clientX + viewportOffsetLeft;
+                          const clickY = event.clientY + viewportOffsetTop;
+                          const availableWidth = viewportWidth - MOBILE_ABILITY_TOOLTIP_EDGE_GAP * 2;
+                          const effectiveTooltipWidth = Math.max(
+                            120,
+                            Math.min(MOBILE_ABILITY_TOOLTIP_WIDTH, availableWidth),
+                          );
+                          const halfTooltipWidth = effectiveTooltipWidth / 2;
+                          const minX =
+                            viewportOffsetLeft + MOBILE_ABILITY_TOOLTIP_EDGE_GAP + halfTooltipWidth;
+                          const maxX =
+                            viewportOffsetLeft +
+                            viewportWidth -
+                            MOBILE_ABILITY_TOOLTIP_EDGE_GAP -
+                            halfTooltipWidth;
+                          const clampedX =
+                            minX > maxX
+                              ? viewportOffsetLeft + viewportWidth / 2
+                              : Math.min(Math.max(clickX, minX), maxX);
+                          const anchorY = Math.min(
+                            viewportOffsetTop + viewportHeight - MOBILE_ABILITY_TOOLTIP_EDGE_GAP,
+                            Math.max(viewportOffsetTop + MOBILE_ABILITY_TOOLTIP_EDGE_GAP, clickY),
+                          );
+                          setMobileAbilityTooltipId((current) => {
+                            const next = current === ability.id ? null : ability.id;
+                            if (next === null) {
+                              setMobileAbilityTooltipPos(null);
+                            } else {
+                              setMobileAbilityTooltipPos({ x: clampedX, y: anchorY });
+                            }
+                            return next;
+                          });
+                        }}
+                        className="flex w-full items-start gap-2 text-left sm:gap-2"
+                      >
+                        <Image
+                          src={ability.iconPath}
+                          alt={ability.name}
+                          width={250}
+                          height={250}
+                          className="h-11 w-11 rounded-sm object-cover sm:h-20 sm:w-20"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-amber-100">{ability.name}</p>
+                          <div className="mt-0.5 flex items-center gap-2 text-[8px] font-semibold text-amber-300/90 sm:text-[11px]">
+                            <span>{ability.manaCost} MP</span>
+                            <span className="inline-flex items-center gap-1">
+                              <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
+                              CD {ability.cooldownTurns}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+
+                      <div
+                        className={`absolute left-1/2 bottom-[calc(100%+8px)] z-20 hidden w-[240px] -translate-x-1/2 rounded-md border border-amber-700/70 bg-[#1a100c]/95 p-2 text-xs shadow-[0_10px_25px_rgba(0,0,0,0.35)] lg:w-[260px] lg:group-hover:block ${
+                          shouldOpenUpDesktop
+                            ? "lg:bottom-[calc(100%+8px)] lg:top-auto"
+                            : "lg:top-[calc(100%+8px)] lg:bottom-auto"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold text-amber-100">
+                            {ability.name} ({ability.manaCost} MP) - {targetKind}
                           </p>
-                          <div
-                            className="mt-1 h-px w-full bg-gradient-to-r from-transparent via-amber-300/50 to-transparent"
-                            aria-hidden
-                          />
-                        </>
-                      ) : null}
-                      <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                        {ability.description}
-                      </p>
+                          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
+                            <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
+                            CD {ability.cooldownTurns}
+                          </span>
+                        </div>
+                        {dmg ? (
+                          <>
+                            <p className="mt-1 text-xs font-semibold text-amber-100/90">
+                              Daño: {dmg.min}-{dmg.max}
+                            </p>
+                            <div
+                              className="mt-1 h-px w-full bg-gradient-to-r from-transparent via-amber-300/50 to-transparent"
+                              aria-hidden
+                            />
+                          </>
+                        ) : null}
+                        <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
+                          {ability.description}
+                        </p>
+                      </div>
+                      {isMobileTooltipOpen &&
+                      mobileAbilityTooltipPos &&
+                      typeof document !== "undefined"
+                        ? createPortal(
+                            <div
+                              data-mobile-ability-tooltip="true"
+                              className="fixed z-[90] rounded-md border border-amber-700/70 bg-[#1a100c]/95 p-2 text-xs shadow-[0_10px_25px_rgba(0,0,0,0.35)] lg:hidden"
+                              style={{
+                                left: `${mobileAbilityTooltipPos.x}px`,
+                                top: `${mobileAbilityTooltipPos.y}px`,
+                                transform: "translate(-50%, -100%)",
+                                width: `min(${MOBILE_ABILITY_TOOLTIP_WIDTH}px, calc(100vw - ${MOBILE_ABILITY_TOOLTIP_EDGE_GAP * 2}px))`,
+                                maxWidth: `calc(100vw - ${MOBILE_ABILITY_TOOLTIP_EDGE_GAP * 2}px)`,
+                                maxHeight: `${Math.max(
+                                  120,
+                                  mobileAbilityTooltipPos.y - MOBILE_ABILITY_TOOLTIP_EDGE_GAP,
+                                )}px`,
+                                overflowY: "auto",
+                              }}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="text-sm font-semibold text-amber-100">
+                                  {ability.name} ({ability.manaCost} MP) - {targetKind}
+                                </p>
+                                <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
+                                  <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
+                                  CD {ability.cooldownTurns}
+                                </span>
+                              </div>
+                              {dmg ? (
+                                <>
+                                  <p className="mt-1 text-xs font-semibold text-amber-100/90">
+                                    Daño: {dmg.min}-{dmg.max}
+                                  </p>
+                                  <div
+                                    className="mt-1 h-px w-full bg-gradient-to-r from-transparent via-amber-300/50 to-transparent"
+                                    aria-hidden
+                                  />
+                                </>
+                              ) : null}
+                              <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
+                                {ability.description}
+                              </p>
+                            </div>,
+                            document.body,
+                          )
+                        : null}
                     </article>
                   );
                 })}
