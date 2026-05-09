@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { NearWoodsGrantedItemView } from "@/app/(main)/near-woods/actions";
 import { gatherNearWoods } from "@/app/(main)/near-woods/actions";
 import { NearWoodsGrantedItemDisplay } from "@/components/near-woods/near-woods-granted-item-display";
@@ -30,6 +31,7 @@ type GatherModalState = {
 };
 
 export function NearWoodsGatherActions() {
+  const router = useRouter();
   const titleId = useId();
   const [isPending, startTransition] = useTransition();
   const [rolled, setRolled] = useState<GatherModalState | null>(null);
@@ -66,6 +68,15 @@ export function NearWoodsGatherActions() {
               const out = await gatherNearWoods();
               if (!out.ok) {
                 setActionError(out.error);
+                return;
+              }
+              if (
+                out.result === "enemy" &&
+                "encounterCode" in out &&
+                typeof out.encounterCode === "string" &&
+                out.encounterCode.length > 0
+              ) {
+                router.push(`/combate/${encodeURIComponent(out.encounterCode)}`);
                 return;
               }
               if (out.granted) {

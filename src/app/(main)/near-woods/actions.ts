@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { resolveInventoryIconPath } from "@/lib/inventory-icon-path";
+import { rollNearWoodsEnemyCombatCode } from "@/lib/near-woods-enemy-combats";
 import { rollNearWoodsGatherOutcome } from "@/lib/near-woods-gather-outcomes";
 import { createClient } from "@/lib/supabase/server";
 
@@ -91,6 +92,8 @@ export type GatherNearWoodsResult =
       granted: false;
       /** Ítem para mostrar icono/tooltip (p. ej. aguas → almacén global, no inventario del PJ). */
       previewItem?: NearWoodsGrantedItemView | null;
+      /** Solo si `result === "enemy"`; destino `/combate/[encounterCode]`. */
+      encounterCode?: string;
     }
   | {
       ok: true;
@@ -169,9 +172,16 @@ export async function gatherNearWoods(): Promise<GatherNearWoodsResult> {
   }
 
   if (result === "enemy") {
+    const encounterCode = rollNearWoodsEnemyCombatCode();
     revalidatePath("/near-woods");
     revalidatePath("/character_profile");
-    return { ok: true, result, chance, granted: false as const };
+    return {
+      ok: true,
+      result,
+      chance,
+      granted: false as const,
+      encounterCode,
+    };
   }
 
   const itemId = OUTCOME_ITEM_IDS[result];
