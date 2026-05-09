@@ -1470,6 +1470,9 @@ export function CombatEncounterShell({
     (displayPlayerMana / Math.max(1, playerManaMax)) * 100,
   );
 
+  /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
+  const floatPlayerStatusOverActionsMobile = isActionsPanelOpen && isMobileViewport;
+
   const portraitResolved =
     typeof playerPortraitSrc === "string" && playerPortraitSrc.trim().length > 0
       ? playerPortraitSrc.trim()
@@ -2146,7 +2149,7 @@ export function CombatEncounterShell({
           </div>
         </header>
 
-        <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] sm:mt-2 sm:p-6">
+        <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] max-sm:pb-[calc(17rem+env(safe-area-inset-bottom,0px))] sm:mt-2 sm:p-6">
           {/* HUD: enemigos arriba a la derecha, PJ abajo a la izquierda (sobre el escenario) */}
           <div className="pointer-events-none absolute inset-0 z-[8] flex flex-col justify-between gap-1 px-0 pb-1 pt-1 sm:gap-2 sm:p-2">
             <div className="pointer-events-auto flex min-h-0 min-w-0 w-full flex-row items-stretch gap-1.5 self-start px-1 sm:w-auto sm:flex-wrap sm:justify-end sm:gap-2 sm:self-auto sm:px-0">
@@ -2162,23 +2165,25 @@ export function CombatEncounterShell({
                   ))
                 : null}
             </div>
-            <div className="pointer-events-auto flex w-full justify-start">
-              <PlayerStatusModal
-                displayName={playerDisplayName}
-                portraitSrc={portraitResolved}
-                hp={playerCurrentHp}
-                hpMax={playerHpMax}
-                mana={displayPlayerMana}
-                manaMax={playerManaMax}
-                hpPercent={playerHpPercent}
-                manaPercent={playerManaPercent}
-              />
-            </div>
+            {!floatPlayerStatusOverActionsMobile && !isMobileViewport ? (
+              <div className="pointer-events-auto flex w-full justify-start">
+                <PlayerStatusModal
+                  displayName={playerDisplayName}
+                  portraitSrc={portraitResolved}
+                  hp={playerCurrentHp}
+                  hpMax={playerHpMax}
+                  mana={displayPlayerMana}
+                  manaMax={playerManaMax}
+                  hpPercent={playerHpPercent}
+                  manaPercent={playerManaPercent}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-row items-end justify-between">
-            <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start py-10">
-              <div className="-translate-y-8 sm:-translate-y-11">
+            <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start py-6 max-sm:py-4 sm:py-10">
+              <div className="max-sm:translate-y-30 sm:-translate-y-0">
                 <Image
                   src={playerSpriteSrc}
                   alt={`${playerDisplayName} en combate`}
@@ -2239,57 +2244,57 @@ export function CombatEncounterShell({
           </div>
         </main>
 
-        <section className="mt-2 grid min-h-0 flex-none grid-cols-1 gap-2 pb-0 sm:hidden">
-          <div className="relative">
-            {!isActionsPanelOpen && (
-              <button
-                type="button"
-                onClick={() =>
-                  setIsActionsPanelOpen((prev) => {
-                    const next = !prev;
-                    if (next) setIsCombatLogPanelOpen(false);
-                    return next;
-                  })
-                }
-                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                aria-expanded={isActionsPanelOpen}
-              >
-                <span>Acciones</span>
-                <span aria-hidden>▲</span>
-              </button>
-            )}
-
-            {isActionsPanelOpen && (
-              <div
-                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsActionsPanelOpen(false);
-                    setActionMenu("main");
-                  }}
-                  className="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90"
-                  aria-label="Colapsar panel de acciones"
+        <section
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-[38] flex justify-center px-2 pb-[max(env(safe-area-inset-bottom,0px),0.5rem)] pt-1 sm:hidden"
+          aria-label="Acciones de combate (mobile)"
+        >
+          <div className="pointer-events-auto flex w-full max-w-6xl flex-col gap-2">
+            {!isActionsPanelOpen && isMobileViewport ? (
+              <div className="pointer-events-none flex w-full justify-start">
+                <PlayerStatusModal
+                  displayName={playerDisplayName}
+                  portraitSrc={portraitResolved}
+                  hp={playerCurrentHp}
+                  hpMax={playerHpMax}
+                  mana={displayPlayerMana}
+                  manaMax={playerManaMax}
+                  hpPercent={playerHpPercent}
+                  manaPercent={playerManaPercent}
+                />
+              </div>
+            ) : null}
+            {isActionsPanelOpen ? (
+              <div className="relative z-20 flex w-full flex-col-reverse gap-2">
+                <div
+                  className={`${menuFont.className} w-full overflow-hidden rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
                 >
-                  <span>Acciones</span>
-                  <span aria-hidden>▼</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsActionsPanelOpen(false);
+                      setActionMenu("main");
+                    }}
+                    className="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90"
+                    aria-label="Colapsar panel de acciones"
+                  >
+                    <span>Acciones</span>
+                    <span aria-hidden>▼</span>
+                  </button>
 
-                <div className="flex items-center gap-2">
-                  {actionMenu !== "main" && (
-                    <button
-                      type="button"
-                      onClick={() => setActionMenu("main")}
-                      className="cursor-pointer rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-sm font-bold text-amber-200 transition hover:bg-amber-900/60"
-                      aria-label="Volver a acciones"
-                    >
-                      ←
-                    </button>
-                  )}
-                </div>
+                  <div className="flex items-center gap-2">
+                    {actionMenu !== "main" && (
+                      <button
+                        type="button"
+                        onClick={() => setActionMenu("main")}
+                        className="cursor-pointer rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-sm font-bold text-amber-200 transition hover:bg-amber-900/60"
+                        aria-label="Volver a acciones"
+                      >
+                        ←
+                      </button>
+                    )}
+                  </div>
 
-                <div className={actionMenu === "main" ? "mt-2" : ACTIONS_PANEL_BODY_MOBILE}>
+                  <div className={actionMenu === "main" ? "mt-2" : ACTIONS_PANEL_BODY_MOBILE}>
                 {actionMenu === "main" ? (
                   <div className="grid grid-cols-2 gap-1.5">
                     <div
@@ -2471,81 +2476,111 @@ export function CombatEncounterShell({
                 )}
                 </div>
               </div>
+                {floatPlayerStatusOverActionsMobile ? (
+                  <div
+                    className="pointer-events-none w-[min(100vw,12rem)] max-w-[min(92vw,11.5rem)] shrink-0 self-start px-1 drop-shadow-[0_6px_16px_rgba(0,0,0,0.55)]"
+                    role="presentation"
+                  >
+                    <PlayerStatusModal
+                      displayName={playerDisplayName}
+                      portraitSrc={portraitResolved}
+                      hp={playerCurrentHp}
+                      hpMax={playerHpMax}
+                      mana={displayPlayerMana}
+                      manaMax={playerManaMax}
+                      hpPercent={playerHpPercent}
+                      manaPercent={playerManaPercent}
+                    />
+                  </div>
+                ) : null}
+            </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsActionsPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) setIsCombatLogPanelOpen(false);
+                    return next;
+                  })
+                }
+                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                aria-expanded={isActionsPanelOpen}
+              >
+                <span>Acciones</span>
+                <span aria-hidden>▲</span>
+              </button>
             )}
-          </div>
 
           {!isActionsPanelOpen ? (
-            <div className="relative">
-              {!isCombatLogPanelOpen && (
+            isCombatLogPanelOpen ? (
+              <div className="relative z-20 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
                 <button
                   type="button"
-                  onClick={() =>
-                    setIsCombatLogPanelOpen((prev) => {
-                      const next = !prev;
-                      if (next) {
-                        setIsActionsPanelOpen(false);
-                        setActionMenu("main");
-                      }
-                      return next;
-                    })
-                  }
-                  className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                  aria-expanded={isCombatLogPanelOpen}
+                  onClick={() => {
+                    setIsCombatLogPanelOpen(false);
+                  }}
+                  className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
+                  aria-label="Colapsar combat log"
                 >
-                  <div className="min-w-0 text-left">
-                    <p>Combat Log</p>
-                    <p
-                      className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
-                    >
-                      {combatLog.length > 0 ? (
-                        <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
-                      ) : (
-                        ""
-                      )}
-                    </p>
-                  </div>
-                  <span className="ml-2 shrink-0" aria-hidden>
-                    ▲
-                  </span>
+                  <span>Combat Log</span>
+                  <span aria-hidden>▼</span>
                 </button>
-              )}
-
-              {isCombatLogPanelOpen && (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCombatLogPanelOpen(false);
-                    }}
-                    className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
-                    aria-label="Colapsar combat log"
-                  >
-                    <span>Combat Log</span>
-                    <span aria-hidden>▼</span>
-                  </button>
-                  <div
-                    ref={combatLogMobileRef}
-                    className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
-                  >
-                    {combatLog.map((entry) => (
-                      <p
-                        key={entry.id}
-                        className={`rounded-md bg-black/25 px-2 py-1 ${
-                          entry.tone === "success"
-                            ? "text-emerald-300"
-                            : entry.tone === "danger"
-                              ? "text-red-300"
-                              : ""
-                        }`}
-                      >
-                        <CombatLogLineBody entry={entry} />
-                      </p>
-                    ))}
-                  </div>
+                <div
+                  ref={combatLogMobileRef}
+                  className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
+                >
+                  {combatLog.map((entry) => (
+                    <p
+                      key={entry.id}
+                      className={`rounded-md bg-black/25 px-2 py-1 ${
+                        entry.tone === "success"
+                          ? "text-emerald-300"
+                          : entry.tone === "danger"
+                            ? "text-red-300"
+                            : ""
+                      }`}
+                    >
+                      <CombatLogLineBody entry={entry} />
+                    </p>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsCombatLogPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setIsActionsPanelOpen(false);
+                      setActionMenu("main");
+                    }
+                    return next;
+                  })
+                }
+                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                aria-expanded={isCombatLogPanelOpen}
+              >
+                <div className="min-w-0 text-left">
+                  <p>Combat Log</p>
+                  <p
+                    className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
+                  >
+                    {combatLog.length > 0 ? (
+                      <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
+                    ) : (
+                      ""
+                    )}
+                  </p>
+                </div>
+                <span className="ml-2 shrink-0" aria-hidden>
+                  ▲
+                </span>
+              </button>
+            )
           ) : null}
+          </div>
         </section>
 
         <section className="mt-4 hidden min-h-0 flex-none grid-cols-[0.9fr_1.5fr] gap-3 pb-1 sm:grid">
