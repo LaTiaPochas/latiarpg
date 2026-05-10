@@ -141,7 +141,7 @@ export default async function RelaxingWatersPage() {
 
   async function payGoldToHeal() {
     "use server";
-    const HEAL_COST_GOLD = 2;
+    const HEAL_COST_GOLD = 1;
 
     const supabaseAction = await createClient();
     const {
