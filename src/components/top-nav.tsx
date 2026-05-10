@@ -2,6 +2,9 @@ import { createClient } from "@/lib/supabase/server";
 import Image from "next/image";
 import Link from "next/link";
 
+/** `items.id` del oro como ítem de inventario; fuente de verdad real (la columna `user_profiles.oro` está sin sincronizar). */
+const GOLD_ITEM_ID = "8438bdcd-b4b6-412c-8a54-0dcdb6636289";
+
 export async function TopNav() {
   let gold = 0;
 
@@ -16,13 +19,21 @@ export async function TopNav() {
     } = await supabase.auth.getUser();
 
     if (user) {
-      const { data: profile } = await supabase
-        .from("user_profiles")
-        .select("oro")
-        .eq("id", user.id)
-        .maybeSingle();
+      const { data: goldRows } = await supabase
+        .from("user_inventory")
+        .select("quantity")
+        .eq("profile_id", user.id)
+        .eq("item_id", GOLD_ITEM_ID)
+        .gt("quantity", 0);
 
-      gold = profile?.oro ?? 0;
+      gold = (goldRows ?? []).reduce(
+        (sum, row) =>
+          sum +
+          (typeof row.quantity === "number" && Number.isFinite(row.quantity)
+            ? Math.max(0, Math.trunc(row.quantity))
+            : 0),
+        0,
+      );
     }
   }
 
