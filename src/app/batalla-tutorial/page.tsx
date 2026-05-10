@@ -14,7 +14,7 @@ const ENEMY_BLACKWOLF_2 = "/img/resources/enemigos/enemy_sprite_blackwolf_2.png"
 const PJ_FEDE_RPG_FIGHT_STICK =
   "/img/resources/characters/pj_fede_rpg_fight_stick.png";
 const ICON_XP = "/img/resources/iconos/icon_xp.png";
-const ICON_GOLD = "/img/resources/items/item_madera.png";
+const ICON_MADERA = "/img/resources/items/resource_madera.png";
 const ICON_WOODEN_STICK = "/img/resources/items/weapon_wooden_stick.png";
 
 const MAX_PLAYER_HP = 100;
@@ -1156,7 +1156,7 @@ export default function BatallaTutorialPage() {
                           </button>
                           <div className="flex h-full w-full items-center justify-center rounded-xl border border-[#1a2539]/80 bg-[#101a2b]/92 p-2">
                             <Image
-                              src={ICON_GOLD}
+                              src={ICON_MADERA}
                               alt="Item madera"
                               width={112}
                               height={112}
