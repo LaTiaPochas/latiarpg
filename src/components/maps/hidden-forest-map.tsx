@@ -263,6 +263,10 @@ export function HiddenForestMap({ currentCombatStep, zoneCode, initialHotspotId 
             type="button"
             disabled={selectedHotspot.step > currentCombatStep}
             onClick={() => {
+              if (selectedHotspot.id === "cave-entrance") {
+                router.push("/cave-entrance");
+                return;
+              }
               const encounterCode = encodeURIComponent(selectedHotspot.id);
               const z = encodeURIComponent(zoneCode.trim());
               const hotspot = encodeURIComponent(selectedHotspot.id);

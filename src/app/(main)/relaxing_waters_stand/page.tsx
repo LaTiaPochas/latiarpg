@@ -378,7 +378,7 @@ export default async function RelaxingWatersStandPage() {
 
         <div className="absolute inset-x-0 bottom-0 z-30 p-2 sm:p-5">
           <div className="mx-auto w-full max-w-3xl rounded-lg border border-cyan-700/70 bg-[#0f1e2a]/92 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-4">
-            <p className="text-center text-xs leading-relaxed text-cyan-50 sm:text-lg">
+            <p className="text-center text-xs leading-relaxed text-cyan-50 sm:text-sm">
               Nacho se está encargando de embotellar y traer agua del río para que puedan recuperar fuerzas.
             </p>
             <div className="mt-3 flex items-center justify-center gap-1 text-[11px] font-semibold text-cyan-100 sm:text-sm">
