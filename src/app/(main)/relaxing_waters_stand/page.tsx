@@ -378,7 +378,7 @@ export default async function RelaxingWatersStandPage() {
 
         <div className="absolute inset-x-0 bottom-0 z-30 p-2 sm:p-5">
           <div className="mx-auto w-full max-w-3xl rounded-lg border border-cyan-700/70 bg-[#0f1e2a]/92 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-4">
-            <p className="text-center text-xs leading-relaxed text-cyan-50 sm:text-lg">
+            <p className="text-center text-xs leading-relaxed text-cyan-50 sm:text-sm">
               Nacho se está encargando de embotellar y traer agua del río para que puedan recuperar fuerzas.
             </p>
             <div className="mt-3 flex items-center justify-center gap-1 text-[11px] font-semibold text-cyan-100 sm:text-sm">
@@ -399,8 +399,8 @@ export default async function RelaxingWatersStandPage() {
                     disabled={isCharacterAlreadyFull || isNoBottleAvailable}
                     className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
                       isCharacterAlreadyFull || isNoBottleAvailable
-                        ? "cursor-not-allowed border-amber-700/40 bg-amber-950/40 text-amber-200/60"
-                        : "cursor-pointer border-amber-500/80 bg-amber-700/85 text-amber-50 hover:bg-amber-600/90"
+                        ? "cursor-not-allowed border-cyan-700/40 bg-cyan-950/40 text-cyan-200/60"
+                        : "cursor-pointer border-cyan-500/80 bg-cyan-700/85 text-cyan-50 hover:bg-cyan-600/90"
                     }`}
                   >
                     TOMAR 1 BOTELLA
@@ -418,7 +418,7 @@ export default async function RelaxingWatersStandPage() {
               </div>
               <Link
                 href="/garrison"
-                className="rounded-md border border-cyan-500/80 bg-cyan-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-cyan-50 transition hover:bg-cyan-700/90 sm:text-sm"
+                className="rounded-md border border-amber-500/80 bg-amber-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-50 transition hover:bg-amber-700/90 sm:text-sm"
               >
                 VOLVER AL CAMPAMENTO
               </Link>

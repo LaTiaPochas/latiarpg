@@ -1,3 +1,4 @@
+import { MainLayoutShell } from "@/components/main-layout-shell";
 import { TopNav } from "@/components/top-nav";
 
 export default function MainLayout({
@@ -5,10 +6,5 @@ export default function MainLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <>
-      <TopNav />
-      <main className="pt-14">{children}</main>
-    </>
-  );
+  return <MainLayoutShell topNav={<TopNav />}>{children}</MainLayoutShell>;
 }

@@ -6,6 +6,13 @@ import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import {
+  abilityTooltipStatGetterFromCombat,
+  formatAbilityTooltipStatExpressions,
+  formatAbilityTooltipTotalDamageRange,
+  sumAbilityDescriptionStatExpressionBonuses,
+} from "@/lib/ability-tooltip-description";
+
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
 const PJ_FEDE_RPG_FIGHT_STICK =
   "/img/resources/characters/pj_fede_rpg_fight_stick.png";
@@ -278,32 +285,231 @@ function enemySkillCombatLogHadDamagePlaceholder(template: string): boolean {
   );
 }
 
-function formatEnemySkillCombatLogDescription(template: string, damageDealt: number): string {
+/**
+ * Log de habilidad de enemigo: `{enemigo}` = nombre del atacante; daño = infligido al PJ.
+ */
+function formatEnemySkillCombatLogDescription(
+  template: string,
+  damageDealt: number,
+  attackerEnemyName: string,
+): string {
   const s = String(Math.max(0, Math.trunc(damageDealt)));
-  return template.replaceAll("{daño}", s).replaceAll("{dano}", s).replaceAll("{damage}", s);
+  const enemyLabel =
+    typeof attackerEnemyName === "string" && attackerEnemyName.trim().length > 0
+      ? attackerEnemyName.trim()
+      : "";
+  return template
+    .replaceAll("{daño}", s)
+    .replaceAll("{dano}", s)
+    .replaceAll("{damage}", s)
+    .replaceAll("{enemigo}", enemyLabel);
+}
+
+/** Un término `{ stat, ratio }` → `floor(stat × ratio)` (ratio puede ser decimal). */
+function playerSkillScalingEntryBonus(
+  entry: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
+  const scaling = entry as Record<string, unknown>;
+  const statLabel = typeof scaling.stat === "string" ? scaling.stat.trim().toUpperCase() : "";
+  const ratioParsed =
+    typeof scaling.ratio === "number"
+      ? scaling.ratio
+      : typeof scaling.ratio === "string"
+        ? Number(scaling.ratio)
+        : Number.NaN;
+  if (statLabel === "" || !Number.isFinite(ratioParsed)) return 0;
+  return Math.floor(Math.max(0, getCombatStatValue(statLabel)) * ratioParsed);
+}
+
+/**
+ * Suma de escalados: `scaling` ausente, objeto único `{ stat, ratio }`, o array de esos objetos.
+ */
+function sumPlayerSkillScalingBonus(
+  scalingRaw: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (scalingRaw == null) return 0;
+  if (Array.isArray(scalingRaw)) {
+    let sum = 0;
+    for (const item of scalingRaw) {
+      sum += playerSkillScalingEntryBonus(item, getCombatStatValue);
+    }
+    return sum;
+  }
+  if (typeof scalingRaw === "object") {
+    return playerSkillScalingEntryBonus(scalingRaw, getCombatStatValue);
+  }
+  return 0;
+}
+
+function buffEffectTargetIsSelf(effect: Record<string, unknown>): boolean {
+  const raw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
+  return raw === "self" || raw === "player";
+}
+
+function isPlayerSelfBuffEffect(effect: Record<string, unknown>): boolean {
+  const t = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  return t === "buff" && buffEffectTargetIsSelf(effect);
+}
+
+function buffScalingRatioParsed(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+/** Estadísticas que puede incrementar `affected-stat` en buff self (solo encuentro actual). */
+type PlayerSelfBuffAffectedStat =
+  | "armor"
+  | "mr"
+  | "hp"
+  | "mana"
+  | "speed"
+  | "weapon_damage_min"
+  | "weapon_damage_max"
+  | "magic_damage_min"
+  | "magic_damage_max";
+
+function parsePlayerSelfAffectedStat(effect: Record<string, unknown>): PlayerSelfBuffAffectedStat | null {
+  const raw =
+    typeof effect["affected-stat"] === "string"
+      ? effect["affected-stat"].trim().toLowerCase()
+      : typeof effect.affected_stat === "string"
+        ? effect.affected_stat.trim().toLowerCase()
+        : "";
+
+  const map = new Map<string, PlayerSelfBuffAffectedStat>([
+    ["armor", "armor"],
+    ["armadura", "armor"],
+    ["mr", "mr"],
+    ["magic_resist", "mr"],
+    ["magicresist", "mr"],
+    ["hp", "hp"],
+    ["mana", "mana"],
+    ["mp", "mana"],
+    ["speed", "speed"],
+    ["velocidad", "speed"],
+    ["weapon_damage_min", "weapon_damage_min"],
+    ["weapon-damage-min", "weapon_damage_min"],
+    ["weapon_damage_max", "weapon_damage_max"],
+    ["weapon-damage-max", "weapon_damage_max"],
+    ["magic_damage_min", "magic_damage_min"],
+    ["magic-damage-min", "magic_damage_min"],
+    ["magic_damage_max", "magic_damage_max"],
+    ["magic-damage-max", "magic_damage_max"],
+  ]);
+  const hit = raw.replace(/\s+/g, "_");
+  return map.get(hit) ?? map.get(raw) ?? null;
+}
+
+/**
+ * Contribución de una línea de `scaling`:
+ * - `stat: Fixed` → `amount` entero ≥ 0
+ * - `stat: STR|DEX|INT|WIS` → `floor(amount + stat × ratio)`
+ */
+function selfBuffScalingLineValue(
+  entry: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
+  const o = entry as Record<string, unknown>;
+  const statRaw = typeof o.stat === "string" ? o.stat.trim() : "";
+  if (statRaw === "") return 0;
+  const upper = statRaw.toUpperCase();
+  const amount = coerceEffectNumber(o.amount, 0);
+  const ratio = buffScalingRatioParsed(o.ratio);
+
+  if (upper === "FIXED") {
+    return Math.max(0, Math.floor(amount));
+  }
+  if (["STR", "DEX", "INT", "WIS"].includes(upper)) {
+    const fromStat = Math.max(0, getCombatStatValue(upper)) * ratio;
+    return Math.max(0, Math.floor(amount + fromStat));
+  }
+  return 0;
+}
+
+function sumSelfBuffScalingTotals(
+  scalingRaw: unknown,
+  getCombatStatValue: (statKeyUpper: string) => number,
+): number {
+  if (scalingRaw == null) return 0;
+  if (Array.isArray(scalingRaw)) {
+    return scalingRaw.reduce(
+      (sum, item) => sum + selfBuffScalingLineValue(item, getCombatStatValue),
+      0,
+    );
+  }
+  if (typeof scalingRaw === "object") {
+    return selfBuffScalingLineValue(scalingRaw, getCombatStatValue);
+  }
+  return 0;
+}
+
+function formatPlayerSelfBuffCombatLog(
+  template: string,
+  appliedTotal: number,
+  affected: PlayerSelfBuffAffectedStat | null,
+): string {
+  const amt = String(Math.max(0, Math.trunc(appliedTotal)));
+  const z = () => String(0);
+  return template
+    .replaceAll("{amount}", amt)
+    .replaceAll("{armor}", affected === "armor" ? amt : z())
+    .replaceAll("{mr}", affected === "mr" ? amt : z())
+    .replaceAll("{hp}", affected === "hp" ? amt : z())
+    .replaceAll("{mana}", affected === "mana" ? amt : z())
+    .replaceAll("{speed}", affected === "speed" ? amt : z());
+}
+
+/** Bases cuando el effect_json trae `min`/`max` en 0 según `subtype`. */
+type PlayerSkillDamageBaseBounds = {
+  /** `weapon_damage_*` del PJ + buffs temporales de combate (misma lógica que el ataque físico). */
+  weaponMin: number;
+  weaponMax: number;
+  /** `magic_damage_*` del PJ (sin el flat post-tiro de buffs mágicos de combate). */
+  magicMin: number;
+  magicMax: number;
+};
+
+/**
+ * Si `min` y `max` del JSON son 0: `magical` usa daño mágico base; `physical` usa daño de arma.
+ */
+function resolvePlayerSkillDamageRollBounds(
+  effect: Record<string, unknown>,
+  bases: PlayerSkillDamageBaseBounds,
+): { minV: number; maxV: number } {
+  let minV = Math.max(0, coerceEffectNumber(effect.min, 0));
+  let maxV = Math.max(minV, coerceEffectNumber(effect.max, minV));
+  if (minV !== 0 || maxV !== 0) return { minV, maxV };
+
+  const sub = getPlayerSkillEffectSubtype(effect);
+  if (sub === "magical") {
+    const mmin = Math.max(0, Math.trunc(bases.magicMin));
+    const mmax = Math.max(mmin, Math.trunc(bases.magicMax));
+    return { minV: mmin, maxV: mmax };
+  }
+  if (sub === "physical") {
+    const wmin = Math.max(0, Math.trunc(bases.weaponMin));
+    const wmax = Math.max(wmin, Math.trunc(bases.weaponMax));
+    return { minV: wmin, maxV: wmax };
+  }
+  return { minV, maxV };
 }
 
 function rollDamageFromPlayerSkillEffect(
   effect: Record<string, unknown>,
   getCombatStatValue: (statKeyUpper: string) => number,
+  bases: PlayerSkillDamageBaseBounds,
 ): number {
-  const minV = Math.max(0, coerceEffectNumber(effect.min, 0));
-  const maxV = Math.max(minV, coerceEffectNumber(effect.max, minV));
+  const { minV, maxV } = resolvePlayerSkillDamageRollBounds(effect, bases);
   let total = randomIntInclusive(minV, maxV);
-  const scalingRaw = effect.scaling;
-  if (scalingRaw !== null && typeof scalingRaw === "object" && !Array.isArray(scalingRaw)) {
-    const scaling = scalingRaw as Record<string, unknown>;
-    const statLabel = typeof scaling.stat === "string" ? scaling.stat.trim().toUpperCase() : "";
-    const ratioParsed =
-      typeof scaling.ratio === "number"
-        ? scaling.ratio
-        : typeof scaling.ratio === "string"
-          ? Number(scaling.ratio)
-          : Number.NaN;
-    if (statLabel !== "" && Number.isFinite(ratioParsed)) {
-      total += Math.floor(Math.max(0, getCombatStatValue(statLabel)) * ratioParsed);
-    }
-  }
+  total += sumPlayerSkillScalingBonus(effect.scaling, getCombatStatValue);
   return Math.max(0, total);
 }
 
@@ -314,29 +520,26 @@ function rollDamageFromPlayerSkillEffect(
 function computePlayerSkillDamageRangeBeforeArmor(
   effect: Record<string, unknown>,
   getCombatStatValue: (statKeyUpper: string) => number,
+  /** Bonos temporales mágicos de combate (buff `magic_damage_*`), solo si subtype es mágico. */
+  magicalCombatBonusFlat = 0,
+  bases: PlayerSkillDamageBaseBounds = {
+    weaponMin: 0,
+    weaponMax: 0,
+    magicMin: 0,
+    magicMax: 0,
+  },
 ): { min: number; max: number } | null {
   const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
   if (typeRaw !== "damage") return null;
-  const minV = Math.max(0, coerceEffectNumber(effect.min, 0));
-  const maxV = Math.max(minV, coerceEffectNumber(effect.max, minV));
-  let bonus = 0;
-  const scalingRaw = effect.scaling;
-  if (scalingRaw !== null && typeof scalingRaw === "object" && !Array.isArray(scalingRaw)) {
-    const scaling = scalingRaw as Record<string, unknown>;
-    const statLabel = typeof scaling.stat === "string" ? scaling.stat.trim().toUpperCase() : "";
-    const ratioParsed =
-      typeof scaling.ratio === "number"
-        ? scaling.ratio
-        : typeof scaling.ratio === "string"
-          ? Number(scaling.ratio)
-          : Number.NaN;
-    if (statLabel !== "" && Number.isFinite(ratioParsed)) {
-      bonus = Math.floor(Math.max(0, getCombatStatValue(statLabel)) * ratioParsed);
-    }
-  }
+  const { minV, maxV } = resolvePlayerSkillDamageRollBounds(effect, bases);
+  const bonus = sumPlayerSkillScalingBonus(effect.scaling, getCombatStatValue);
+  const extra =
+    getPlayerSkillEffectSubtype(effect) === "magical"
+      ? Math.max(0, Math.trunc(magicalCombatBonusFlat))
+      : 0;
   return {
-    min: Math.max(0, minV + bonus),
-    max: Math.max(0, maxV + bonus),
+    min: Math.max(0, minV + bonus + extra),
+    max: Math.max(0, maxV + bonus + extra),
   };
 }
 
@@ -663,6 +866,9 @@ export type CombatEncounterShellProps = {
   playerSpeed?: number;
   playerWeaponDamageMin?: number;
   playerWeaponDamageMax?: number;
+  /** Daño mágico base del PJ (ej. `user_character.magic_damage_*`); hechizos con min/max 0 en JSON usan esto. */
+  playerMagicDamageMin?: number;
+  playerMagicDamageMax?: number;
   playerStatStr?: number;
   playerStatDex?: number;
   playerStatInt?: number;
@@ -948,6 +1154,8 @@ export function CombatEncounterShell({
   playerSpeed = 0,
   playerWeaponDamageMin = 1,
   playerWeaponDamageMax = 1,
+  playerMagicDamageMin = 0,
+  playerMagicDamageMax = 0,
   playerStatStr = 0,
   playerStatDex = 0,
   playerStatInt = 0,
@@ -1089,6 +1297,23 @@ export function CombatEncounterShell({
 
   const [playerCurrentHp, setPlayerCurrentHp] = useState(playerHp);
   const [displayPlayerMana, setDisplayPlayerMana] = useState(playerMana);
+  /** Bonificaciones durante el encuentro (`type:buff` + `target:self` + `affected-stat` + `scaling`). */
+  const [playerCombatArmorBonus, setPlayerCombatArmorBonus] = useState(0);
+  const [playerCombatMrBonus, setPlayerCombatMrBonus] = useState(0);
+  const [playerCombatSpeedBonus, setPlayerCombatSpeedBonus] = useState(0);
+  const [playerCombatWeaponDamageMinBonus, setPlayerCombatWeaponDamageMinBonus] = useState(0);
+  const [playerCombatWeaponDamageMaxBonus, setPlayerCombatWeaponDamageMaxBonus] = useState(0);
+  const [playerCombatMagicDamageMinBonus, setPlayerCombatMagicDamageMinBonus] = useState(0);
+  const [playerCombatMagicDamageMaxBonus, setPlayerCombatMagicDamageMaxBonus] = useState(0);
+  const effectivePlayerArmor = useMemo(
+    () => Math.max(0, Math.trunc(playerArmor + playerCombatArmorBonus)),
+    [playerArmor, playerCombatArmorBonus],
+  );
+  const effectivePlayerMr = useMemo(
+    () => Math.max(0, Math.trunc(playerMr + playerCombatMrBonus)),
+    [playerMr, playerCombatMrBonus],
+  );
+
   const [enemySkillNextAvailableTurn, setEnemySkillNextAvailableTurn] = useState<
     Record<string, Record<string, number>>
   >({});
@@ -1126,6 +1351,13 @@ export function CombatEncounterShell({
       totalHealing: 0,
       highestHitReceived: 0,
     };
+    setPlayerCombatArmorBonus(0);
+    setPlayerCombatMrBonus(0);
+    setPlayerCombatSpeedBonus(0);
+    setPlayerCombatWeaponDamageMinBonus(0);
+    setPlayerCombatWeaponDamageMaxBonus(0);
+    setPlayerCombatMagicDamageMinBonus(0);
+    setPlayerCombatMagicDamageMaxBonus(0);
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
       defeatModalDelayRef.current = null;
@@ -1276,7 +1508,11 @@ export function CombatEncounterShell({
   }, [initialEnemies]);
   const turnOrder = useMemo<TurnActor[]>(() => {
     const actors: TurnActor[] = [
-      { id: "player", type: "player", speed: Math.max(0, Math.trunc(playerSpeed)) },
+      {
+        id: "player",
+        type: "player",
+        speed: Math.max(0, Math.trunc(playerSpeed + playerCombatSpeedBonus)),
+      },
       ...displayEnemies
         .filter((enemy) => enemy.hp > 0)
         .map((enemy) => ({
@@ -1287,7 +1523,7 @@ export function CombatEncounterShell({
         })),
     ];
     return actors.sort((a, b) => b.speed - a.speed);
-  }, [displayEnemies, playerSpeed]);
+  }, [displayEnemies, playerCombatSpeedBonus, playerSpeed]);
   /** Firma estable del orden de iniciativa (quién actúa). Cambia al morir un enemigo o variar velocidades. */
   const initiativeOrderSig = useMemo(
     () => turnOrder.map((a) => a.id).join(">"),
@@ -1348,7 +1584,7 @@ export function CombatEncounterShell({
   const currentActor = turnOrder[effectiveTurnIndex] ?? null;
   const runtimeInitiativeDebug = useMemo(
     () => ({
-      playerSpeed: Math.max(0, Math.trunc(playerSpeed)),
+      playerSpeed: Math.max(0, Math.trunc(playerSpeed + playerCombatSpeedBonus)),
       enemies: displayEnemies.map((enemy) => ({
         id: enemy.id,
         name: enemy.name,
@@ -1368,7 +1604,15 @@ export function CombatEncounterShell({
       currentActorType: currentActor?.type ?? null,
       turn,
     }),
-    [playerSpeed, displayEnemies, turnOrder, effectiveTurnIndex, currentActor, turn],
+    [
+      playerCombatSpeedBonus,
+      playerSpeed,
+      displayEnemies,
+      turnOrder,
+      effectiveTurnIndex,
+      currentActor,
+      turn,
+    ],
   );
   useEffect(() => {
     if (turnOrder.length === 0) return;
@@ -1469,6 +1713,9 @@ export function CombatEncounterShell({
   const playerManaPercent = Math.round(
     (displayPlayerMana / Math.max(1, playerManaMax)) * 100,
   );
+
+  /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
+  const floatPlayerStatusOverActionsMobile = isActionsPanelOpen && isMobileViewport;
 
   const portraitResolved =
     typeof playerPortraitSrc === "string" && playerPortraitSrc.trim().length > 0
@@ -1740,7 +1987,8 @@ export function CombatEncounterShell({
     const effectTypeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
 
     const getCombatStatValue = (key: string): number => {
-      switch (key.toUpperCase()) {
+      const k = key.toUpperCase();
+      switch (k) {
         case "STR":
           return Math.max(0, Math.floor(playerStatStr));
         case "DEX":
@@ -1749,6 +1997,31 @@ export function CombatEncounterShell({
           return Math.max(0, Math.floor(playerStatInt));
         case "WIS":
           return Math.max(0, Math.floor(playerStatWis));
+        /** Promedio del rango de daño de arma en combate (arma + buffs de weapon_damage_*). */
+        case "ATTACK_DAMAGE":
+        case "WEAPON_DAMAGE": {
+          const wmin = Math.max(
+            1,
+            Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+          );
+          const wmax = Math.max(
+            wmin,
+            Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+          );
+          return Math.floor((wmin + wmax) / 2);
+        }
+        /** Promedio del daño mágico base (para scaling en skills mágicas). */
+        case "MAGIC_DAMAGE": {
+          const mmin = Math.max(
+            0,
+            Math.floor(playerMagicDamageMin + playerCombatMagicDamageMinBonus),
+          );
+          const mmax = Math.max(
+            mmin,
+            Math.floor(playerMagicDamageMax + playerCombatMagicDamageMaxBonus),
+          );
+          return Math.floor((mmin + mmax) / 2);
+        }
         default:
           return 0;
       }
@@ -1781,11 +2054,95 @@ export function CombatEncounterShell({
       );
     };
 
+    if (effectTypeRaw === "buff" && isPlayerSelfBuffEffect(effect)) {
+      const affectedStat = parsePlayerSelfAffectedStat(effect);
+      const totalGain = Math.max(
+        0,
+        Math.trunc(sumSelfBuffScalingTotals(effect.scaling, getCombatStatValue)),
+      );
+
+      if (affectedStat != null && totalGain > 0) {
+        switch (affectedStat) {
+          case "armor":
+            setPlayerCombatArmorBonus((v) => v + totalGain);
+            break;
+          case "mr":
+            setPlayerCombatMrBonus((v) => v + totalGain);
+            break;
+          case "hp": {
+            const cap = Math.max(1, playerHpMax);
+            const prevHp = playerCurrentHp;
+            const nextHp = Math.min(cap, prevHp + totalGain);
+            setPlayerCurrentHp(nextHp);
+            recordPlayerHealing(Math.max(0, nextHp - prevHp));
+            break;
+          }
+          case "mana":
+            setDisplayPlayerMana((m) =>
+              Math.min(Math.max(0, playerManaMax), m + totalGain),
+            );
+            break;
+          case "speed":
+            setPlayerCombatSpeedBonus((v) => v + totalGain);
+            break;
+          case "weapon_damage_min":
+            setPlayerCombatWeaponDamageMinBonus((v) => v + totalGain);
+            break;
+          case "weapon_damage_max":
+            setPlayerCombatWeaponDamageMaxBonus((v) => v + totalGain);
+            break;
+          case "magic_damage_min":
+            setPlayerCombatMagicDamageMinBonus((v) => v + totalGain);
+            break;
+          case "magic_damage_max":
+            setPlayerCombatMagicDamageMaxBonus((v) => v + totalGain);
+            break;
+          default:
+            break;
+        }
+      }
+
+      const buffText =
+        descTemplate != null
+          ? formatPlayerSelfBuffCombatLog(descTemplate, totalGain, affectedStat)
+          : `Usás ${skillEntry.skill.name}.`;
+      appendCombatLog(buffText, "default");
+      scheduleAdvanceTurn();
+      return;
+    }
+
     if (effectTypeRaw !== "damage") {
       appendSpellLog(0);
       scheduleAdvanceTurn();
       return;
     }
+
+    const magicalCombatDamageFlat = Math.max(
+      0,
+      Math.trunc(playerCombatMagicDamageMinBonus + playerCombatMagicDamageMaxBonus),
+    );
+    const applyMagicalCombatFlatToRawDamage = (
+      subtype: PlayerSkillEffectSubtype,
+      rolled: number,
+    ) =>
+      subtype === "magical"
+        ? Math.max(0, Math.trunc(rolled + magicalCombatDamageFlat))
+        : rolled;
+
+    const effectiveWeaponDamageMin = Math.max(
+      1,
+      Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+    );
+    const effectiveWeaponDamageMax = Math.max(
+      effectiveWeaponDamageMin,
+      Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+    );
+    const skillDamageBases: PlayerSkillDamageBaseBounds = {
+      weaponMin: effectiveWeaponDamageMin,
+      weaponMax: effectiveWeaponDamageMax,
+      magicMin: playerMagicDamageMin,
+      magicMax: playerMagicDamageMax,
+    };
 
     const needsSingleEnemy = playerSkillRequiresSingleEnemySelection(skillEntry);
     const isArea = playerSkillDamageHitsAllEnemies(effect);
@@ -1796,7 +2153,8 @@ export function CombatEncounterShell({
 
       const subtype = getPlayerSkillEffectSubtype(effect);
       const defenseStat = enemyDefenseStatForPlayerSkill(subtype, target);
-      const rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue);
+      let rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue, skillDamageBases);
+      rawDamage = applyMagicalCombatFlatToRawDamage(subtype, rawDamage);
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, target.hp);
       const updatedHp = target.hp - damageDone;
@@ -1831,7 +2189,8 @@ export function CombatEncounterShell({
     for (const enemy of displayEnemies) {
       if (enemy.hp <= 0) continue;
       const defenseStat = enemyDefenseStatForPlayerSkill(skillSubtype, enemy);
-      const rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue);
+      let rawDamage = rollDamageFromPlayerSkillEffect(effect, getCombatStatValue, skillDamageBases);
+      rawDamage = applyMagicalCombatFlatToRawDamage(skillSubtype, rawDamage);
       const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
       const damageDone = Math.min(mitigated, enemy.hp);
       const hpNext = enemy.hp - damageDone;
@@ -1910,8 +2269,14 @@ export function CombatEncounterShell({
       return;
     }
 
-    const damageMin = Math.max(1, Math.floor(playerWeaponDamageMin));
-    const damageMax = Math.max(damageMin, Math.floor(playerWeaponDamageMax));
+    const damageMin = Math.max(
+      1,
+      Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+    );
+    const damageMax = Math.max(
+      damageMin,
+      Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+    );
     const rawDamage = randomIntInclusive(damageMin, damageMax);
     const mitigated = mitigateDamageByDefense(rawDamage, target.armor);
     const updatedHp = Math.max(0, target.hp - mitigated);
@@ -2023,7 +2388,11 @@ export function CombatEncounterShell({
       incomingSubtype = "physical";
       rawDamage = Math.max(0, randomIntInclusive(enemy.attackMin, enemy.attackMax));
     }
-    const defenseStat = playerDefenseStatVsIncoming(incomingSubtype, playerArmor, playerMr);
+    const defenseStat = playerDefenseStatVsIncoming(
+      incomingSubtype,
+      effectivePlayerArmor,
+      effectivePlayerMr,
+    );
     const damage = mitigateDamageByDefense(rawDamage, defenseStat);
     recordPlayerDamageTaken(damage);
     const nextPlayerHp = Math.max(0, playerCurrentHp - damage);
@@ -2033,7 +2402,7 @@ export function CombatEncounterShell({
       const fallback = `${enemy.name} usa ${skill.name}.`;
       const template = descRaw && descRaw.length > 0 ? descRaw : fallback;
       const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(template);
-      const logText = hadDamagePh ? formatEnemySkillCombatLogDescription(template, damage) : template;
+      const logText = formatEnemySkillCombatLogDescription(template, damage, enemy.name);
       appendCombatLog(
         logText,
         "danger",
@@ -2057,16 +2426,16 @@ export function CombatEncounterShell({
     currentActor,
     effectiveTurnIndex,
     displayEnemies,
+    effectivePlayerArmor,
+    effectivePlayerMr,
     isTurnTransitioning,
-    playerArmor,
     playerCurrentHp,
-    playerMr,
     turn,
   ]);
 
   return (
     <div
-      className={`${menuFont.className} relative h-[calc(100dvh-3.5rem)] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:min-h-[calc(100dvh-3.5rem)] sm:h-auto`}
+      className={`${menuFont.className} relative h-[100dvh] min-h-[100dvh] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:h-auto sm:min-h-[100dvh]`}
     >
       <div className="absolute inset-0">
         <BattleBackground src={backgroundResolved} />
@@ -2076,7 +2445,7 @@ export function CombatEncounterShell({
         aria-hidden
       />
 
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-[calc(100dvh-3.5rem)] sm:p-6">
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-[100dvh] sm:p-6">
         {combatDebug ? (
           <details className="mb-2 rounded-lg border border-amber-600/50 bg-black/75 p-2 text-left text-[11px] text-amber-100/95 shadow-lg backdrop-blur-sm">
             <summary className="cursor-pointer select-none font-semibold text-amber-300">
@@ -2146,7 +2515,7 @@ export function CombatEncounterShell({
           </div>
         </header>
 
-        <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] sm:mt-2 sm:p-6">
+        <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] max-sm:pb-[calc(17rem+env(safe-area-inset-bottom,0px))] sm:mt-2 sm:p-6">
           {/* HUD: enemigos arriba a la derecha, PJ abajo a la izquierda (sobre el escenario) */}
           <div className="pointer-events-none absolute inset-0 z-[8] flex flex-col justify-between gap-1 px-0 pb-1 pt-1 sm:gap-2 sm:p-2">
             <div className="pointer-events-auto flex min-h-0 min-w-0 w-full flex-row items-stretch gap-1.5 self-start px-1 sm:w-auto sm:flex-wrap sm:justify-end sm:gap-2 sm:self-auto sm:px-0">
@@ -2162,23 +2531,25 @@ export function CombatEncounterShell({
                   ))
                 : null}
             </div>
-            <div className="pointer-events-auto flex w-full justify-start">
-              <PlayerStatusModal
-                displayName={playerDisplayName}
-                portraitSrc={portraitResolved}
-                hp={playerCurrentHp}
-                hpMax={playerHpMax}
-                mana={displayPlayerMana}
-                manaMax={playerManaMax}
-                hpPercent={playerHpPercent}
-                manaPercent={playerManaPercent}
-              />
-            </div>
+            {!floatPlayerStatusOverActionsMobile && !isMobileViewport ? (
+              <div className="pointer-events-auto flex w-full justify-start">
+                <PlayerStatusModal
+                  displayName={playerDisplayName}
+                  portraitSrc={portraitResolved}
+                  hp={playerCurrentHp}
+                  hpMax={playerHpMax}
+                  mana={displayPlayerMana}
+                  manaMax={playerManaMax}
+                  hpPercent={playerHpPercent}
+                  manaPercent={playerManaPercent}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-row items-end justify-between">
-            <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start py-10">
-              <div className="-translate-y-8 sm:-translate-y-11">
+            <div className="intro-character-slide-in pointer-events-none flex w-[42%] items-end justify-start py-6 max-sm:py-4 sm:py-10">
+              <div className="max-sm:translate-y-30 sm:-translate-y-0">
                 <Image
                   src={playerSpriteSrc}
                   alt={`${playerDisplayName} en combate`}
@@ -2239,57 +2610,57 @@ export function CombatEncounterShell({
           </div>
         </main>
 
-        <section className="mt-2 grid min-h-0 flex-none grid-cols-1 gap-2 pb-0 sm:hidden">
-          <div className="relative">
-            {!isActionsPanelOpen && (
-              <button
-                type="button"
-                onClick={() =>
-                  setIsActionsPanelOpen((prev) => {
-                    const next = !prev;
-                    if (next) setIsCombatLogPanelOpen(false);
-                    return next;
-                  })
-                }
-                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                aria-expanded={isActionsPanelOpen}
-              >
-                <span>Acciones</span>
-                <span aria-hidden>▲</span>
-              </button>
-            )}
-
-            {isActionsPanelOpen && (
-              <div
-                className={`${menuFont.className} absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsActionsPanelOpen(false);
-                    setActionMenu("main");
-                  }}
-                  className="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90"
-                  aria-label="Colapsar panel de acciones"
+        <section
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-[38] flex justify-center px-2 pb-[max(env(safe-area-inset-bottom,0px),0.5rem)] pt-1 sm:hidden"
+          aria-label="Acciones de combate (mobile)"
+        >
+          <div className="pointer-events-auto flex w-full max-w-6xl flex-col gap-2">
+            {!isActionsPanelOpen && isMobileViewport ? (
+              <div className="pointer-events-none flex w-full justify-start">
+                <PlayerStatusModal
+                  displayName={playerDisplayName}
+                  portraitSrc={portraitResolved}
+                  hp={playerCurrentHp}
+                  hpMax={playerHpMax}
+                  mana={displayPlayerMana}
+                  manaMax={playerManaMax}
+                  hpPercent={playerHpPercent}
+                  manaPercent={playerManaPercent}
+                />
+              </div>
+            ) : null}
+            {isActionsPanelOpen ? (
+              <div className="relative z-20 flex w-full flex-col-reverse gap-2">
+                <div
+                  className={`${menuFont.className} w-full overflow-hidden rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm`}
                 >
-                  <span>Acciones</span>
-                  <span aria-hidden>▼</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsActionsPanelOpen(false);
+                      setActionMenu("main");
+                    }}
+                    className="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90"
+                    aria-label="Colapsar panel de acciones"
+                  >
+                    <span>Acciones</span>
+                    <span aria-hidden>▼</span>
+                  </button>
 
-                <div className="flex items-center gap-2">
-                  {actionMenu !== "main" && (
-                    <button
-                      type="button"
-                      onClick={() => setActionMenu("main")}
-                      className="cursor-pointer rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-sm font-bold text-amber-200 transition hover:bg-amber-900/60"
-                      aria-label="Volver a acciones"
-                    >
-                      ←
-                    </button>
-                  )}
-                </div>
+                  <div className="flex items-center gap-2">
+                    {actionMenu !== "main" && (
+                      <button
+                        type="button"
+                        onClick={() => setActionMenu("main")}
+                        className="cursor-pointer rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-sm font-bold text-amber-200 transition hover:bg-amber-900/60"
+                        aria-label="Volver a acciones"
+                      >
+                        ←
+                      </button>
+                    )}
+                  </div>
 
-                <div className={actionMenu === "main" ? "mt-2" : ACTIONS_PANEL_BODY_MOBILE}>
+                  <div className={actionMenu === "main" ? "mt-2" : ACTIONS_PANEL_BODY_MOBILE}>
                 {actionMenu === "main" ? (
                   <div className="grid grid-cols-2 gap-1.5">
                     <div
@@ -2471,81 +2842,111 @@ export function CombatEncounterShell({
                 )}
                 </div>
               </div>
+                {floatPlayerStatusOverActionsMobile ? (
+                  <div
+                    className="pointer-events-none w-[min(100vw,12rem)] max-w-[min(92vw,11.5rem)] shrink-0 self-start px-1 drop-shadow-[0_6px_16px_rgba(0,0,0,0.55)]"
+                    role="presentation"
+                  >
+                    <PlayerStatusModal
+                      displayName={playerDisplayName}
+                      portraitSrc={portraitResolved}
+                      hp={playerCurrentHp}
+                      hpMax={playerHpMax}
+                      mana={displayPlayerMana}
+                      manaMax={playerManaMax}
+                      hpPercent={playerHpPercent}
+                      manaPercent={playerManaPercent}
+                    />
+                  </div>
+                ) : null}
+            </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsActionsPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) setIsCombatLogPanelOpen(false);
+                    return next;
+                  })
+                }
+                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                aria-expanded={isActionsPanelOpen}
+              >
+                <span>Acciones</span>
+                <span aria-hidden>▲</span>
+              </button>
             )}
-          </div>
 
           {!isActionsPanelOpen ? (
-            <div className="relative">
-              {!isCombatLogPanelOpen && (
+            isCombatLogPanelOpen ? (
+              <div className="relative z-20 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
                 <button
                   type="button"
-                  onClick={() =>
-                    setIsCombatLogPanelOpen((prev) => {
-                      const next = !prev;
-                      if (next) {
-                        setIsActionsPanelOpen(false);
-                        setActionMenu("main");
-                      }
-                      return next;
-                    })
-                  }
-                  className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
-                  aria-expanded={isCombatLogPanelOpen}
+                  onClick={() => {
+                    setIsCombatLogPanelOpen(false);
+                  }}
+                  className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
+                  aria-label="Colapsar combat log"
                 >
-                  <div className="min-w-0 text-left">
-                    <p>Combat Log</p>
-                    <p
-                      className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
-                    >
-                      {combatLog.length > 0 ? (
-                        <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
-                      ) : (
-                        ""
-                      )}
-                    </p>
-                  </div>
-                  <span className="ml-2 shrink-0" aria-hidden>
-                    ▲
-                  </span>
+                  <span>Combat Log</span>
+                  <span aria-hidden>▼</span>
                 </button>
-              )}
-
-              {isCombatLogPanelOpen && (
-                <div className="absolute bottom-full left-0 z-20 mb-2 w-full rounded-xl border border-amber-800/70 bg-[#1a100c]/95 p-2 shadow-[0_14px_32px_rgba(0,0,0,0.5)] backdrop-blur-sm">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCombatLogPanelOpen(false);
-                    }}
-                    className={`${menuFont.className} mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border border-amber-800/60 bg-[#1a100c]/80 px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90`}
-                    aria-label="Colapsar combat log"
-                  >
-                    <span>Combat Log</span>
-                    <span aria-hidden>▼</span>
-                  </button>
-                  <div
-                    ref={combatLogMobileRef}
-                    className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
-                  >
-                    {combatLog.map((entry) => (
-                      <p
-                        key={entry.id}
-                        className={`rounded-md bg-black/25 px-2 py-1 ${
-                          entry.tone === "success"
-                            ? "text-emerald-300"
-                            : entry.tone === "danger"
-                              ? "text-red-300"
-                              : ""
-                        }`}
-                      >
-                        <CombatLogLineBody entry={entry} />
-                      </p>
-                    ))}
-                  </div>
+                <div
+                  ref={combatLogMobileRef}
+                  className={`${helpCardFont.className} mt-2 min-h-28 max-h-28 space-y-1 overflow-y-auto pr-1 text-[10px] leading-relaxed text-amber-50/92 [scrollbar-color:rgba(217,119,6,0.75)_rgba(0,0,0,0.35)] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-black/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-amber-800/60 [&::-webkit-scrollbar-thumb]:bg-amber-600/75 [&::-webkit-scrollbar-thumb:hover]:bg-amber-500/85`}
+                >
+                  {combatLog.map((entry) => (
+                    <p
+                      key={entry.id}
+                      className={`rounded-md bg-black/25 px-2 py-1 ${
+                        entry.tone === "success"
+                          ? "text-emerald-300"
+                          : entry.tone === "danger"
+                            ? "text-red-300"
+                            : ""
+                      }`}
+                    >
+                      <CombatLogLineBody entry={entry} />
+                    </p>
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsCombatLogPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setIsActionsPanelOpen(false);
+                      setActionMenu("main");
+                    }
+                    return next;
+                  })
+                }
+                className={`${menuFont.className} flex w-full cursor-pointer items-center justify-between rounded-xl border border-amber-800/70 bg-[#1a100c]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/90 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm`}
+                aria-expanded={isCombatLogPanelOpen}
+              >
+                <div className="min-w-0 text-left">
+                  <p>Combat Log</p>
+                  <p
+                    className={`${helpCardFont.className} mt-1 rounded-md bg-black/25 px-2 py-1 text-[10px] normal-case leading-relaxed tracking-normal text-amber-50/92`}
+                  >
+                    {combatLog.length > 0 ? (
+                      <CombatLogLineBody entry={combatLog[combatLog.length - 1]} />
+                    ) : (
+                      ""
+                    )}
+                  </p>
+                </div>
+                <span className="ml-2 shrink-0" aria-hidden>
+                  ▲
+                </span>
+              </button>
+            )
           ) : null}
+          </div>
         </section>
 
         <section className="mt-4 hidden min-h-0 flex-none grid-cols-[0.9fr_1.5fr] gap-3 pb-1 sm:grid">
@@ -2793,24 +3194,44 @@ export function CombatEncounterShell({
           <div className={`my-1 h-px w-full ${skillTooltipStyles.tooltipDivider}`} aria-hidden />
           {(() => {
             const cdRem = playerSkillCooldownTurnsRemaining(skillTooltipEntry);
-            const getStat = (key: string) => {
-              switch (key.toUpperCase()) {
-                case "STR":
-                  return Math.max(0, Math.floor(playerStatStr));
-                case "DEX":
-                  return Math.max(0, Math.floor(playerStatDex));
-                case "INT":
-                  return Math.max(0, Math.floor(playerStatInt));
-                case "WIS":
-                  return Math.max(0, Math.floor(playerStatWis));
-                default:
-                  return 0;
-              }
-            };
+            const magicalBonusFlatTooltip = Math.max(
+              0,
+              Math.trunc(playerCombatMagicDamageMinBonus + playerCombatMagicDamageMaxBonus),
+            );
+            const tooltipWeaponMin = Math.max(
+              1,
+              Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+            );
+            const tooltipWeaponMax = Math.max(
+              tooltipWeaponMin,
+              Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+            );
+            const getStat = abilityTooltipStatGetterFromCombat({
+              str: playerStatStr,
+              dex: playerStatDex,
+              int: playerStatInt,
+              wis: playerStatWis,
+              weaponDamageMinEffective: tooltipWeaponMin,
+              weaponDamageMaxEffective: tooltipWeaponMax,
+              magicDamageMinSheet: playerMagicDamageMin,
+              magicDamageMaxSheet: playerMagicDamageMax,
+              magicCombatMinBonus: playerCombatMagicDamageMinBonus,
+              magicCombatMaxBonus: playerCombatMagicDamageMaxBonus,
+            });
             const dmgRange = computePlayerSkillDamageRangeBeforeArmor(
               skillTooltipEntry.skill.effect,
               getStat,
+              magicalBonusFlatTooltip,
+              {
+                weaponMin: tooltipWeaponMin,
+                weaponMax: tooltipWeaponMax,
+                magicMin: playerMagicDamageMin,
+                magicMax: playerMagicDamageMax,
+              },
             );
+            const skillDescRaw = getPlayerSkillTooltipDescription(skillTooltipEntry.skill);
+            const descPlaceholdersBonus = sumAbilityDescriptionStatExpressionBonuses(skillDescRaw, getStat);
+            const descFormatted = formatAbilityTooltipStatExpressions(skillDescRaw, getStat);
             return (
               <>
                 {dmgRange != null ? (
@@ -2821,7 +3242,11 @@ export function CombatEncounterShell({
                     <span>
                       <span className="font-semibold">Daño</span>{" "}
                       <span className="font-semibold tabular-nums">
-                        {dmgRange.min}–{dmgRange.max}
+                        {formatAbilityTooltipTotalDamageRange(
+                          dmgRange.min,
+                          dmgRange.max,
+                          descPlaceholdersBonus,
+                        )}
                       </span>
                     </span>
                   </div>
@@ -2838,13 +3263,11 @@ export function CombatEncounterShell({
                     ) : null}
                   </span>
                 </div>
+                <div className={`my-2 h-px w-full ${skillTooltipStyles.tooltipDivider}`} aria-hidden />
+                <p className={skillTooltipStyles.tooltipBody}>{descFormatted}</p>
               </>
             );
           })()}
-          <div className={`my-2 h-px w-full ${skillTooltipStyles.tooltipDivider}`} aria-hidden />
-          <p className={skillTooltipStyles.tooltipBody}>
-            {getPlayerSkillTooltipDescription(skillTooltipEntry.skill)}
-          </p>
         </div>
       ) : null}
       {consumableInfoTooltip.open && consumableTooltipEntry ? (
