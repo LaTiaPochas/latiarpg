@@ -28,7 +28,7 @@ const WAREHOUSE_QTY_BADGE_CLASS =
 
 /** En `lg` la grilla no usa todo el ancho del panel: slots algo más chicos en desktop. */
 const WAREHOUSE_INVENTORY_GRID_CLASS =
-  "grid grid-cols-4 gap-1.5 pt-2 sm:gap-1.5 sm:pt-3 lg:mx-auto lg:grid-cols-8 lg:max-w-[min(100%,36rem)] lg:gap-1 lg:pt-2";
+  "grid grid-cols-5 gap-1.5 pt-2 sm:gap-1.5 sm:pt-3 lg:mx-auto lg:grid-cols-8 lg:max-w-[min(100%,36rem)] lg:gap-1 lg:pt-2";
 
 /** Celda de grilla: mejor target táctil en móvil. */
 const WAREHOUSE_SLOT_BUTTON_CLASS =

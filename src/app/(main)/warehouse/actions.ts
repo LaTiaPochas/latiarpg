@@ -20,6 +20,9 @@ export type WithdrawWarehouseEntry = {
 /** Filas visibles en bolsa (objetos no equipados). Equipados no consumen estos espacios. */
 const USER_INVENTORY_BAG_ROW_LIMIT = 24;
 
+/** Filas del almacén de campamento (`global_warehouse.is_global_item === false`), mismas reglas de apilado que al depositar. */
+const CAMP_WAREHOUSE_ROW_LIMIT = 24;
+
 type UserInventoryRowForCapacity = {
   id: number;
   item_id: string | null;
@@ -139,6 +142,119 @@ function evaluateWithdrawAgainstBagCapacity(
       remainingSlots -= 1;
       simStackable.set(itemIdTrim, { id: -1, quantity: withdrawQty });
     }
+  }
+
+  return { ok: true };
+}
+
+type CampWarehouseRowForCapacity = {
+  item_id: string | null;
+  weapon_instance_id: number | null;
+  equipment_instance_id: number | null;
+  quantity: unknown;
+};
+
+type UserInventoryRowForDepositCap = {
+  item_id: string | null;
+  weapon_instance_id: number | null;
+  equipment_instance_id: number | null;
+};
+
+/**
+ * Simula el depósito en el almacén de campamento sin superar `CAMP_WAREHOUSE_ROW_LIMIT` filas,
+ * con la misma lógica que `mergeQuantityIntoCampGlobalWarehouse` (instancias = fila nueva;
+ * solo `item_id` apilable fusiona con fila existente del mismo ítem).
+ */
+function evaluateDepositAgainstCampWarehouseCapacity(
+  entries: DepositInventoryEntry[],
+  rowById: Map<number, UserInventoryRowForDepositCap>,
+  stackableByItemId: Map<string, boolean>,
+  existingCampRows: CampWarehouseRowForCapacity[],
+): { ok: true } | { ok: false; error: string } {
+  let rowsUsed = 0;
+  /** `item_id` que ya tienen una fila solo-material en el almacén (apilable o no). */
+  const plainItemIdsWithRow = new Set<string>();
+
+  for (const r of existingCampRows) {
+    const qty = normalizeInventoryQty(r.quantity);
+    if (qty <= 0) continue;
+    rowsUsed += 1;
+    const hasWeapon =
+      typeof r.weapon_instance_id === "number" &&
+      Number.isFinite(r.weapon_instance_id) &&
+      r.weapon_instance_id > 0;
+    const hasEquipment =
+      typeof r.equipment_instance_id === "number" &&
+      Number.isFinite(r.equipment_instance_id) &&
+      r.equipment_instance_id > 0;
+    if (hasWeapon || hasEquipment) continue;
+    const itemId = typeof r.item_id === "string" ? r.item_id.trim() : "";
+    if (itemId) plainItemIdsWithRow.add(itemId);
+  }
+
+  let remainingSlots = Math.max(0, CAMP_WAREHOUSE_ROW_LIMIT - rowsUsed);
+
+  for (const entry of entries) {
+    const row = rowById.get(entry.inventoryRowId);
+    if (!row) {
+      return { ok: false, error: "No se pudieron leer todos los ítems del inventario." };
+    }
+
+    const hasWeapon =
+      typeof row.weapon_instance_id === "number" &&
+      Number.isFinite(row.weapon_instance_id) &&
+      row.weapon_instance_id > 0;
+    const hasEquipment =
+      typeof row.equipment_instance_id === "number" &&
+      Number.isFinite(row.equipment_instance_id) &&
+      row.equipment_instance_id > 0;
+    const itemIdTrim =
+      row.item_id != null && String(row.item_id).trim().length > 0
+        ? String(row.item_id).trim()
+        : null;
+
+    const itemIsStackable =
+      !hasWeapon && !hasEquipment && itemIdTrim != null && stackableByItemId.get(itemIdTrim) === true;
+
+    if (hasWeapon || hasEquipment) {
+      if (remainingSlots < 1) {
+        return {
+          ok: false,
+          error: `El almacén del campamento solo tiene ${CAMP_WAREHOUSE_ROW_LIMIT} espacios. No hay lugar para depositar esta selección. Retirá ítems del almacén o liberá espacio.`,
+        };
+      }
+      remainingSlots -= 1;
+      continue;
+    }
+
+    if (!itemIdTrim) {
+      return { ok: false, error: "Un ítem no tiene datos válidos para el almacén." };
+    }
+
+    if (!itemIsStackable) {
+      if (remainingSlots < 1) {
+        return {
+          ok: false,
+          error: `El almacén del campamento solo tiene ${CAMP_WAREHOUSE_ROW_LIMIT} espacios. No hay lugar para depositar esta selección. Retirá ítems del almacén o liberá espacio.`,
+        };
+      }
+      remainingSlots -= 1;
+      plainItemIdsWithRow.add(itemIdTrim);
+      continue;
+    }
+
+    if (plainItemIdsWithRow.has(itemIdTrim)) {
+      continue;
+    }
+
+    if (remainingSlots < 1) {
+      return {
+        ok: false,
+        error: `El almacén del campamento solo tiene ${CAMP_WAREHOUSE_ROW_LIMIT} espacios. No hay lugar para depositar esta selección. Retirá ítems del almacén o liberá espacio.`,
+      };
+    }
+    remainingSlots -= 1;
+    plainItemIdsWithRow.add(itemIdTrim);
   }
 
   return { ok: true };
@@ -467,6 +583,26 @@ export async function depositInventoryToGlobalWarehouse(
       if (!id) continue;
       stackableByItemId.set(id, meta.is_stackable === true);
     }
+  }
+
+  const { data: existingCampWarehouseRows, error: campWarehouseReadError } = await supabase
+    .from("global_warehouse")
+    .select("item_id, weapon_instance_id, equipment_instance_id, quantity")
+    .eq("is_global_item", false)
+    .gt("quantity", 0);
+
+  if (campWarehouseReadError) {
+    return { ok: false, error: "No se pudo leer el almacén del campamento." };
+  }
+
+  const depositCap = evaluateDepositAgainstCampWarehouseCapacity(
+    entries,
+    rowById as Map<number, UserInventoryRowForDepositCap>,
+    stackableByItemId,
+    (existingCampWarehouseRows ?? []) as CampWarehouseRowForCapacity[],
+  );
+  if (!depositCap.ok) {
+    return depositCap;
   }
 
   for (const entry of entries) {

@@ -27,7 +27,7 @@ export function WarehouseCompletedView({
   playerLevel,
   playerStats,
 }: WarehouseCompletedViewProps) {
-  const [warehouseModalOpen, setWarehouseModalOpen] = useState(true);
+  const [warehouseModalOpen, setWarehouseModalOpen] = useState(false);
 
   return (
     <div
