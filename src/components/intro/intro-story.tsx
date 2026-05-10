@@ -41,7 +41,7 @@ const PJ_FEDE_RPG_FACE_FIGHT =
   "/img/resources/caracters_faces/pj_fede_rpg_face_fight.png";
 const OBJETO_RANDOM_RAMA_1 =
   "/img/resources/objetos_mapa/objeto_random_rama_1.png";
-const ITEM_MADERA = "/img/resources/items/item_madera.png";
+const ITEM_MADERA = "/img/resources/items/resource_madera.png";
 const ENEMY_BLACKWOLF_1 = "/img/resources/enemigos/enemy_sprite_blackwolf_1.png";
 
 const SCENE_FADE_MS = 600;
