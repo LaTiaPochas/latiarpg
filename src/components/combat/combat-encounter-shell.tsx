@@ -278,9 +278,24 @@ function enemySkillCombatLogHadDamagePlaceholder(template: string): boolean {
   );
 }
 
-function formatEnemySkillCombatLogDescription(template: string, damageDealt: number): string {
+/**
+ * Log de habilidad de enemigo: `{enemigo}` = nombre del atacante; daño = infligido al PJ.
+ */
+function formatEnemySkillCombatLogDescription(
+  template: string,
+  damageDealt: number,
+  attackerEnemyName: string,
+): string {
   const s = String(Math.max(0, Math.trunc(damageDealt)));
-  return template.replaceAll("{daño}", s).replaceAll("{dano}", s).replaceAll("{damage}", s);
+  const enemyLabel =
+    typeof attackerEnemyName === "string" && attackerEnemyName.trim().length > 0
+      ? attackerEnemyName.trim()
+      : "";
+  return template
+    .replaceAll("{daño}", s)
+    .replaceAll("{dano}", s)
+    .replaceAll("{damage}", s)
+    .replaceAll("{enemigo}", enemyLabel);
 }
 
 /** Un término `{ stat, ratio }` → `floor(stat × ratio)` (ratio puede ser decimal). */
@@ -1965,7 +1980,8 @@ export function CombatEncounterShell({
     const effectTypeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
 
     const getCombatStatValue = (key: string): number => {
-      switch (key.toUpperCase()) {
+      const k = key.toUpperCase();
+      switch (k) {
         case "STR":
           return Math.max(0, Math.floor(playerStatStr));
         case "DEX":
@@ -1974,6 +1990,31 @@ export function CombatEncounterShell({
           return Math.max(0, Math.floor(playerStatInt));
         case "WIS":
           return Math.max(0, Math.floor(playerStatWis));
+        /** Promedio del rango de daño de arma en combate (arma + buffs de weapon_damage_*). */
+        case "ATTACK_DAMAGE":
+        case "WEAPON_DAMAGE": {
+          const wmin = Math.max(
+            1,
+            Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+          );
+          const wmax = Math.max(
+            wmin,
+            Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+          );
+          return Math.floor((wmin + wmax) / 2);
+        }
+        /** Promedio del daño mágico base (para scaling en skills mágicas). */
+        case "MAGIC_DAMAGE": {
+          const mmin = Math.max(
+            0,
+            Math.floor(playerMagicDamageMin + playerCombatMagicDamageMinBonus),
+          );
+          const mmax = Math.max(
+            mmin,
+            Math.floor(playerMagicDamageMax + playerCombatMagicDamageMaxBonus),
+          );
+          return Math.floor((mmin + mmax) / 2);
+        }
         default:
           return 0;
       }
@@ -2354,7 +2395,7 @@ export function CombatEncounterShell({
       const fallback = `${enemy.name} usa ${skill.name}.`;
       const template = descRaw && descRaw.length > 0 ? descRaw : fallback;
       const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(template);
-      const logText = hadDamagePh ? formatEnemySkillCombatLogDescription(template, damage) : template;
+      const logText = formatEnemySkillCombatLogDescription(template, damage, enemy.name);
       appendCombatLog(
         logText,
         "danger",
@@ -2387,7 +2428,7 @@ export function CombatEncounterShell({
 
   return (
     <div
-      className={`${menuFont.className} relative h-[calc(100dvh-3.5rem)] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:min-h-[calc(100dvh-3.5rem)] sm:h-auto`}
+      className={`${menuFont.className} relative h-[100dvh] min-h-[100dvh] w-full overflow-hidden bg-[#120b08] text-amber-50 sm:h-auto sm:min-h-[100dvh]`}
     >
       <div className="absolute inset-0">
         <BattleBackground src={backgroundResolved} />
@@ -2397,7 +2438,7 @@ export function CombatEncounterShell({
         aria-hidden
       />
 
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-[calc(100dvh-3.5rem)] sm:p-6">
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-[100dvh] sm:p-6">
         {combatDebug ? (
           <details className="mb-2 rounded-lg border border-amber-600/50 bg-black/75 p-2 text-left text-[11px] text-amber-100/95 shadow-lg backdrop-blur-sm">
             <summary className="cursor-pointer select-none font-semibold text-amber-300">
@@ -3147,7 +3188,8 @@ export function CombatEncounterShell({
           {(() => {
             const cdRem = playerSkillCooldownTurnsRemaining(skillTooltipEntry);
             const getStat = (key: string) => {
-              switch (key.toUpperCase()) {
+              const k = key.toUpperCase();
+              switch (k) {
                 case "STR":
                   return Math.max(0, Math.floor(playerStatStr));
                 case "DEX":
@@ -3156,6 +3198,29 @@ export function CombatEncounterShell({
                   return Math.max(0, Math.floor(playerStatInt));
                 case "WIS":
                   return Math.max(0, Math.floor(playerStatWis));
+                case "ATTACK_DAMAGE":
+                case "WEAPON_DAMAGE": {
+                  const wmin = Math.max(
+                    1,
+                    Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
+                  );
+                  const wmax = Math.max(
+                    wmin,
+                    Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
+                  );
+                  return Math.floor((wmin + wmax) / 2);
+                }
+                case "MAGIC_DAMAGE": {
+                  const mmin = Math.max(
+                    0,
+                    Math.floor(playerMagicDamageMin + playerCombatMagicDamageMinBonus),
+                  );
+                  const mmax = Math.max(
+                    mmin,
+                    Math.floor(playerMagicDamageMax + playerCombatMagicDamageMaxBonus),
+                  );
+                  return Math.floor((mmin + mmax) / 2);
+                }
                 default:
                   return 0;
               }

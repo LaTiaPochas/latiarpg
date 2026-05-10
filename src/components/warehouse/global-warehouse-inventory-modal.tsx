@@ -6,7 +6,11 @@ import {
   type DepositInventoryEntry,
   type WithdrawWarehouseEntry,
 } from "@/app/(main)/warehouse/actions";
-import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/components/character-profile/inventory-types";
+import {
+  formatWeaponAttackTypeLabel,
+  type EquipmentInstanceTooltip,
+  type WeaponInstanceTooltip,
+} from "@/components/character-profile/inventory-types";
 import Image from "next/image";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
@@ -1306,7 +1310,12 @@ export function GlobalWarehouseInventoryModal({
                 ) : null}
                 <div className="mt-2 h-px w-full bg-gradient-to-r from-transparent via-amber-400/45 to-transparent" />
                 <p className="mt-1.5 text-[11px] uppercase tracking-wide text-amber-200/90">
-                  {(activeItem.equipSlot ?? "Sin slot").toUpperCase()}
+                  <span>{(activeItem.equipSlot ?? "Sin slot").toUpperCase()}</span>
+                  {activeItem.weaponInstance?.attackType ? (
+                    <span className="ml-1.5 font-normal normal-case tracking-normal text-amber-100/90">
+                      · {formatWeaponAttackTypeLabel(activeItem.weaponInstance.attackType)}
+                    </span>
+                  ) : null}
                 </p>
                 {(() => {
                   const roll = activeItem.weaponInstance ?? activeItem.equipmentInstance;

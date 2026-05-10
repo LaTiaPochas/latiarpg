@@ -35,6 +35,7 @@ type WeaponInstanceRow = {
   item_id: string;
   rarity: string | null;
   rarity_color: string | null;
+  attack_type: string | null;
   attack_damage_min: number | null;
   attack_damage_max: number | null;
   magic_damage_min: number | null;
@@ -134,6 +135,7 @@ function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null):
   return {
     rarity: row.rarity,
     rarityColor: row.rarity_color,
+    attackType: row.attack_type ?? null,
     attackDamageMin: row.attack_damage_min,
     attackDamageMax: row.attack_damage_max,
     magicDamageMin: row.magic_damage_min,
@@ -157,6 +159,7 @@ function mapEquipmentInstanceForTooltip(
   return {
     rarity: row.rarity,
     rarityColor: row.rarity_color,
+    attackType: null,
     attackDamageMin: null,
     attackDamageMax: null,
     magicDamageMin: null,
@@ -273,7 +276,7 @@ export default async function CharacterProfilePage() {
       ? await supabase
           .from("weapon_instance")
           .select(
-            "id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
           )
           .in("id", weaponInstanceIds)
       : { data: [] };
@@ -790,6 +793,10 @@ export default async function CharacterProfilePage() {
             dex: dexEffective,
             int: intEffective,
             wis: wisEffective,
+            weaponDamageMin: weaponMin,
+            weaponDamageMax: weaponMax,
+            magicDamageMin: magicSheetMin,
+            magicDamageMax: magicSheetMax,
           }}
         />
       </main>

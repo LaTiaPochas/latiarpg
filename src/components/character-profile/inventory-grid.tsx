@@ -21,7 +21,11 @@ import {
   discardInventoryItems,
   equipInventoryItem,
 } from "@/app/(main)/character_profile/actions";
-import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/components/character-profile/inventory-types";
+import {
+  formatWeaponAttackTypeLabel,
+  type EquipmentInstanceTooltip,
+  type WeaponInstanceTooltip,
+} from "@/components/character-profile/inventory-types";
 
 type InventoryItem = {
   id: number;
@@ -69,6 +73,11 @@ type AbilityStatSnapshot = {
   dex: number;
   int: number;
   wis: number;
+  /** Base de perfil (arma equipada); sin buffs de combate. */
+  weaponDamageMin: number;
+  weaponDamageMax: number;
+  magicDamageMin: number;
+  magicDamageMax: number;
 };
 type MobileAbilityTooltipPos = {
   x: number;
@@ -268,8 +277,20 @@ function abilityDamageRange(
     const rec = scaling as Record<string, unknown>;
     const stat = typeof rec.stat === "string" ? rec.stat.trim().toUpperCase() : "";
     const ratio = effectNum(rec.ratio, Number.NaN);
-    const statValue =
-      stat === "STR" ? stats.str : stat === "DEX" ? stats.dex : stat === "INT" ? stats.int : stat === "WIS" ? stats.wis : 0;
+    let statValue = 0;
+    if (stat === "STR") statValue = stats.str;
+    else if (stat === "DEX") statValue = stats.dex;
+    else if (stat === "INT") statValue = stats.int;
+    else if (stat === "WIS") statValue = stats.wis;
+    else if (stat === "ATTACK_DAMAGE" || stat === "WEAPON_DAMAGE") {
+      const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
+      const wmax = Math.max(wmin, Math.floor(stats.weaponDamageMax));
+      statValue = Math.floor((wmin + wmax) / 2);
+    } else if (stat === "MAGIC_DAMAGE") {
+      const mmin = Math.max(0, Math.floor(stats.magicDamageMin));
+      const mmax = Math.max(mmin, Math.floor(stats.magicDamageMax));
+      statValue = Math.floor((mmin + mmax) / 2);
+    }
     if (Number.isFinite(ratio)) bonus = Math.floor(Math.max(0, statValue) * ratio);
   }
   return { min: Math.max(0, minV + bonus), max: Math.max(0, maxV + bonus) };
@@ -1356,8 +1377,14 @@ export function InventoryGrid({
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <p className="text-sm font-semibold text-amber-100">
-                            {ability.name} ({ability.manaCost} MP) - {targetKind}
+                          <p className="text-sm font-semibold">
+                            <span className="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.25)]">
+                              {ability.name}
+                            </span>
+                            <span className="text-amber-200/88">
+                              {" "}
+                              ({ability.manaCost} MP) - {targetKind}
+                            </span>
                           </p>
                           <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
                             <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
@@ -1401,8 +1428,14 @@ export function InventoryGrid({
                               onClick={(event) => event.stopPropagation()}
                             >
                               <div className="flex items-start justify-between gap-3">
-                                <p className="text-sm font-semibold text-amber-100">
-                                  {ability.name} ({ability.manaCost} MP) - {targetKind}
+                                <p className="text-sm font-semibold">
+                                  <span className="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.25)]">
+                                    {ability.name}
+                                  </span>
+                                  <span className="text-amber-200/88">
+                                    {" "}
+                                    ({ability.manaCost} MP) - {targetKind}
+                                  </span>
                                 </p>
                                 <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
                                   <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
@@ -1489,7 +1522,12 @@ export function InventoryGrid({
                 ) : null}
                 <div className="mt-2 h-px w-full bg-gradient-to-r from-transparent via-amber-400/45 to-transparent" />
                 <p className="mt-1.5 text-[11px] uppercase tracking-wide text-amber-200/90">
-                  {(activeItem.equipSlot ?? "Sin slot").toUpperCase()}
+                  <span>{(activeItem.equipSlot ?? "Sin slot").toUpperCase()}</span>
+                  {activeItem.weaponInstance?.attackType ? (
+                    <span className="ml-1.5 font-normal normal-case tracking-normal text-amber-100/90">
+                      · {formatWeaponAttackTypeLabel(activeItem.weaponInstance.attackType)}
+                    </span>
+                  ) : null}
                 </p>
                 {(() => {
                   const roll = activeItem.weaponInstance ?? activeItem.equipmentInstance;
