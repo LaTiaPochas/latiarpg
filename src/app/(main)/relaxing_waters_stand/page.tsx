@@ -399,8 +399,8 @@ export default async function RelaxingWatersStandPage() {
                     disabled={isCharacterAlreadyFull || isNoBottleAvailable}
                     className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
                       isCharacterAlreadyFull || isNoBottleAvailable
-                        ? "cursor-not-allowed border-amber-700/40 bg-amber-950/40 text-amber-200/60"
-                        : "cursor-pointer border-amber-500/80 bg-amber-700/85 text-amber-50 hover:bg-amber-600/90"
+                        ? "cursor-not-allowed border-cyan-700/40 bg-cyan-950/40 text-cyan-200/60"
+                        : "cursor-pointer border-cyan-500/80 bg-cyan-700/85 text-cyan-50 hover:bg-cyan-600/90"
                     }`}
                   >
                     TOMAR 1 BOTELLA
@@ -418,7 +418,7 @@ export default async function RelaxingWatersStandPage() {
               </div>
               <Link
                 href="/garrison"
-                className="rounded-md border border-cyan-500/80 bg-cyan-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-cyan-50 transition hover:bg-cyan-700/90 sm:text-sm"
+                className="rounded-md border border-amber-500/80 bg-amber-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-50 transition hover:bg-amber-700/90 sm:text-sm"
               >
                 VOLVER AL CAMPAMENTO
               </Link>

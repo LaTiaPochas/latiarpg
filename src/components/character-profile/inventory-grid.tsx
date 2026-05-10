@@ -26,6 +26,12 @@ import {
   type EquipmentInstanceTooltip,
   type WeaponInstanceTooltip,
 } from "@/components/character-profile/inventory-types";
+import {
+  abilityTooltipStatGetterFromSheet,
+  formatAbilityTooltipStatExpressions,
+  formatAbilityTooltipTotalDamageRange,
+  sumAbilityDescriptionStatExpressionBonuses,
+} from "@/lib/ability-tooltip-description";
 
 type InventoryItem = {
   id: number;
@@ -678,6 +684,8 @@ export function InventoryGrid({
 
   const equippedBySlotId = useMemo(() => buildEquippedBySlotId(equippedItems), [equippedItems]);
 
+  const abilityTooltipGetStat = abilityTooltipStatGetterFromSheet(abilityStats);
+
   const activeItem = useMemo(() => {
     if (tooltip.equippedSlotId) {
       return equippedBySlotId.get(tooltip.equippedSlotId) ?? null;
@@ -1288,6 +1296,10 @@ export function InventoryGrid({
                   const subtype = abilitySubtype(ability.effect);
                   const targetKind = abilityTargetKind(ability.effect);
                   const dmg = abilityDamageRange(ability.effect, abilityStats);
+                  const descPlaceholdersBonus = sumAbilityDescriptionStatExpressionBonuses(
+                    ability.description,
+                    abilityTooltipGetStat,
+                  );
                   const isMobileTooltipOpen = mobileAbilityTooltipId === ability.id;
                   const shouldOpenUpDesktop = desktopTooltipUpById[ability.id] === true;
                   return (
@@ -1394,7 +1406,12 @@ export function InventoryGrid({
                         {dmg ? (
                           <>
                             <p className="mt-1 text-xs font-semibold text-amber-100/90">
-                              Daño: {dmg.min}-{dmg.max}
+                              Daño:{" "}
+                              {formatAbilityTooltipTotalDamageRange(
+                                dmg.min,
+                                dmg.max,
+                                descPlaceholdersBonus,
+                              )}
                             </p>
                             <div
                               className="mt-1 h-px w-full bg-gradient-to-r from-transparent via-amber-300/50 to-transparent"
@@ -1403,7 +1420,7 @@ export function InventoryGrid({
                           </>
                         ) : null}
                         <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                          {ability.description}
+                          {formatAbilityTooltipStatExpressions(ability.description, abilityTooltipGetStat)}
                         </p>
                       </div>
                       {isMobileTooltipOpen &&
@@ -1445,7 +1462,12 @@ export function InventoryGrid({
                               {dmg ? (
                                 <>
                                   <p className="mt-1 text-xs font-semibold text-amber-100/90">
-                                    Daño: {dmg.min}-{dmg.max}
+                                    Daño:{" "}
+                                    {formatAbilityTooltipTotalDamageRange(
+                                      dmg.min,
+                                      dmg.max,
+                                      descPlaceholdersBonus,
+                                    )}
                                   </p>
                                   <div
                                     className="mt-1 h-px w-full bg-gradient-to-r from-transparent via-amber-300/50 to-transparent"
@@ -1454,7 +1476,7 @@ export function InventoryGrid({
                                 </>
                               ) : null}
                               <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                                {ability.description}
+                                {formatAbilityTooltipStatExpressions(ability.description, abilityTooltipGetStat)}
                               </p>
                             </div>,
                             document.body,

@@ -6,6 +6,13 @@ import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import {
+  abilityTooltipStatGetterFromCombat,
+  formatAbilityTooltipStatExpressions,
+  formatAbilityTooltipTotalDamageRange,
+  sumAbilityDescriptionStatExpressionBonuses,
+} from "@/lib/ability-tooltip-description";
+
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
 const PJ_FEDE_RPG_FIGHT_STICK =
   "/img/resources/characters/pj_fede_rpg_fight_stick.png";
@@ -3187,44 +3194,6 @@ export function CombatEncounterShell({
           <div className={`my-1 h-px w-full ${skillTooltipStyles.tooltipDivider}`} aria-hidden />
           {(() => {
             const cdRem = playerSkillCooldownTurnsRemaining(skillTooltipEntry);
-            const getStat = (key: string) => {
-              const k = key.toUpperCase();
-              switch (k) {
-                case "STR":
-                  return Math.max(0, Math.floor(playerStatStr));
-                case "DEX":
-                  return Math.max(0, Math.floor(playerStatDex));
-                case "INT":
-                  return Math.max(0, Math.floor(playerStatInt));
-                case "WIS":
-                  return Math.max(0, Math.floor(playerStatWis));
-                case "ATTACK_DAMAGE":
-                case "WEAPON_DAMAGE": {
-                  const wmin = Math.max(
-                    1,
-                    Math.floor(playerWeaponDamageMin + playerCombatWeaponDamageMinBonus),
-                  );
-                  const wmax = Math.max(
-                    wmin,
-                    Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
-                  );
-                  return Math.floor((wmin + wmax) / 2);
-                }
-                case "MAGIC_DAMAGE": {
-                  const mmin = Math.max(
-                    0,
-                    Math.floor(playerMagicDamageMin + playerCombatMagicDamageMinBonus),
-                  );
-                  const mmax = Math.max(
-                    mmin,
-                    Math.floor(playerMagicDamageMax + playerCombatMagicDamageMaxBonus),
-                  );
-                  return Math.floor((mmin + mmax) / 2);
-                }
-                default:
-                  return 0;
-              }
-            };
             const magicalBonusFlatTooltip = Math.max(
               0,
               Math.trunc(playerCombatMagicDamageMinBonus + playerCombatMagicDamageMaxBonus),
@@ -3237,6 +3206,18 @@ export function CombatEncounterShell({
               tooltipWeaponMin,
               Math.floor(playerWeaponDamageMax + playerCombatWeaponDamageMaxBonus),
             );
+            const getStat = abilityTooltipStatGetterFromCombat({
+              str: playerStatStr,
+              dex: playerStatDex,
+              int: playerStatInt,
+              wis: playerStatWis,
+              weaponDamageMinEffective: tooltipWeaponMin,
+              weaponDamageMaxEffective: tooltipWeaponMax,
+              magicDamageMinSheet: playerMagicDamageMin,
+              magicDamageMaxSheet: playerMagicDamageMax,
+              magicCombatMinBonus: playerCombatMagicDamageMinBonus,
+              magicCombatMaxBonus: playerCombatMagicDamageMaxBonus,
+            });
             const dmgRange = computePlayerSkillDamageRangeBeforeArmor(
               skillTooltipEntry.skill.effect,
               getStat,
@@ -3248,6 +3229,9 @@ export function CombatEncounterShell({
                 magicMax: playerMagicDamageMax,
               },
             );
+            const skillDescRaw = getPlayerSkillTooltipDescription(skillTooltipEntry.skill);
+            const descPlaceholdersBonus = sumAbilityDescriptionStatExpressionBonuses(skillDescRaw, getStat);
+            const descFormatted = formatAbilityTooltipStatExpressions(skillDescRaw, getStat);
             return (
               <>
                 {dmgRange != null ? (
@@ -3258,7 +3242,11 @@ export function CombatEncounterShell({
                     <span>
                       <span className="font-semibold">Daño</span>{" "}
                       <span className="font-semibold tabular-nums">
-                        {dmgRange.min}–{dmgRange.max}
+                        {formatAbilityTooltipTotalDamageRange(
+                          dmgRange.min,
+                          dmgRange.max,
+                          descPlaceholdersBonus,
+                        )}
                       </span>
                     </span>
                   </div>
@@ -3275,13 +3263,11 @@ export function CombatEncounterShell({
                     ) : null}
                   </span>
                 </div>
+                <div className={`my-2 h-px w-full ${skillTooltipStyles.tooltipDivider}`} aria-hidden />
+                <p className={skillTooltipStyles.tooltipBody}>{descFormatted}</p>
               </>
             );
           })()}
-          <div className={`my-2 h-px w-full ${skillTooltipStyles.tooltipDivider}`} aria-hidden />
-          <p className={skillTooltipStyles.tooltipBody}>
-            {getPlayerSkillTooltipDescription(skillTooltipEntry.skill)}
-          </p>
         </div>
       ) : null}
       {consumableInfoTooltip.open && consumableTooltipEntry ? (
