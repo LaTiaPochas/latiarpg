@@ -1676,7 +1676,7 @@ export function InventoryGrid({
             {(() => {
               if (!activeItem.equipSlot || tooltip.slotNumber == null) return null;
               const equipSlot = (activeItem.equipSlot ?? "").trim().toLowerCase();
-              const hideEquipButton = ["material", "consumable", "resource"].includes(equipSlot);
+              const hideEquipButton = ["material", "consumable", "resource", "recipe"].includes(equipSlot);
               if (hideEquipButton) return null;
               return (
               <button
