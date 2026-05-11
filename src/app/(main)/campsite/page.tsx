@@ -3,6 +3,7 @@ import { GarrisonCompleteDialogue } from "@/components/campsite/garrison-complet
 import { MilestoneCompletePanel } from "@/components/campsite/milestone-complete-panel";
 import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
 import { createClient } from "@/lib/supabase/server";
+import { insertWorldEventLog } from "@/lib/world-event-log";
 import { Libre_Baskerville } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
@@ -298,12 +299,12 @@ export default async function CampsitePage() {
     const safeMemberName = escapeHtml(memberName);
     const eventHtml = `<span style="color:${memberColor}">${safeMemberName}</span> aportó ${amountToApply} de Madera para construir el campamento base.`;
 
-    await supabaseClient.from("global_world_event_log").insert({
+    await insertWorldEventLog(supabaseClient, currentUser.id, {
       member_name: memberName,
       event_html: eventHtml,
     });
     if (shouldMarkCompleted && !alreadyCompleted) {
-      await supabaseClient.from("global_world_event_log").insert({
+      await insertWorldEventLog(supabaseClient, currentUser.id, {
         member_name: "world",
         event_html:
           '<span style="color:#22c55e;font-weight:700;">¡Objetivo completado: Campamento Construido!</span>',

@@ -16,6 +16,7 @@ import {
 import { mapPathByZoneCode } from "@/lib/game-zones";
 import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
+import { insertWorldEventLog } from "@/lib/world-event-log";
 
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
@@ -1851,7 +1852,7 @@ export default async function CombatEncounterPage({
     const safeMapName = escapeHtml(mapDisplayName);
     const eventHtml = `<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> ha caido en combate en ${safeMapName}. Prendemos una vela por él.`;
 
-    await supabaseAction.from("global_world_event_log").insert({
+    await insertWorldEventLog(supabaseAction, actionUser.id, {
       member_name: playerLogName,
       event_html: eventHtml,
     });
@@ -1871,7 +1872,7 @@ export default async function CombatEncounterPage({
     const safeLevel = Math.max(1, Math.trunc(Number.isFinite(Number(newLevel)) ? Number(newLevel) : 1));
     const eventHtml = `¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
 
-    await supabaseAction.from("global_world_event_log").insert({
+    await insertWorldEventLog(supabaseAction, actionUser.id, {
       member_name: playerLogName,
       event_html: eventHtml,
     });

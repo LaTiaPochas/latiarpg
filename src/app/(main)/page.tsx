@@ -119,7 +119,7 @@ export default async function Home({ searchParams }: HomePageProps) {
     .from("global_world_event_log")
     .select("id, happened_at, event_html")
     .order("happened_at", { ascending: false })
-    .limit(100);
+    .limit(50);
   const { data: garrisonMilestone } = await supabase
     .from("global_milestones")
     .select("id, title, is_completed")

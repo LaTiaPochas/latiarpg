@@ -654,7 +654,7 @@ export function InventoryGrid({
   equippedItems: EquippedEntry[];
   currentClassName: string;
   currentLevel: number;
-  currentStats: { str: number; dex: number; int: number; wis: number };
+  currentStats: { str: number; dex: number; int: number; wis: number; speed: number };
   abilities: PlayerAbilityEntry[];
   abilityStats: AbilityStatSnapshot;
 }) {
@@ -1606,6 +1606,9 @@ export function InventoryGrid({
                     if (k === "dex") return currentStats.dex;
                     if (k === "int") return currentStats.int;
                     if (k === "wis") return currentStats.wis;
+                    if (k === "spd" || k === "speed" || k === "vel" || k === "velocidad") {
+                      return currentStats.speed;
+                    }
                     return 0;
                   };
 

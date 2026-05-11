@@ -38,7 +38,7 @@ export function WorldEventJournal({ events }: WorldEventJournalProps) {
   return (
     <div
       ref={containerRef}
-      className="mt-2 max-h-[280px] space-y-1 overflow-y-auto rounded-md border border-amber-900/70 bg-[#d8c7a2]/92 p-2 lg:p-3"
+      className="journal-amber-scrollbar mt-2 max-h-[280px] space-y-1 overflow-y-auto rounded-md border border-amber-900/70 bg-[#d8c7a2]/92 p-2 lg:p-3"
     >
       {events.length > 0 ? (
         events.map((event) => (

@@ -15,6 +15,9 @@ const uiFont = Montserrat({
   weight: ["500", "600", "700"],
 });
 
+// Mantener sincronizado con `HEAL_COST_GOLD` en src/app/(main)/relaxing-waters/page.tsx.
+const HEAL_COST_GOLD = 1;
+
 type RelaxingWatersStoryProps = {
   shouldPlayIntro: boolean;
   playerFaceSrc: string;
@@ -89,7 +92,7 @@ export function RelaxingWatersStory({
       const nextGold =
         typeof result.goldAmount === "number" && Number.isFinite(result.goldAmount)
           ? Math.max(0, Math.trunc(result.goldAmount))
-          : Math.max(0, goldAmount - 2);
+          : Math.max(0, goldAmount - HEAL_COST_GOLD);
       setGoldAmount(nextGold);
       setPayFeedback("Te sentís renovado. Vida y mana recuperados por completo.");
     } finally {
@@ -167,15 +170,15 @@ export function RelaxingWatersStory({
             <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
-                disabled={goldAmount < 2 || isPaying || isCharacterAlreadyFull}
+                disabled={goldAmount < HEAL_COST_GOLD || isPaying || isCharacterAlreadyFull}
                 onClick={() => void handlePayToHeal()}
                 className={`rounded-md border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
-                  goldAmount < 2 || isPaying || isCharacterAlreadyFull
+                  goldAmount < HEAL_COST_GOLD || isPaying || isCharacterAlreadyFull
                     ? "cursor-not-allowed border-amber-700/40 bg-amber-950/40 text-amber-200/60"
                     : "cursor-pointer border-amber-500/80 bg-amber-700/85 text-amber-50 hover:bg-amber-600/90"
                 }`}
               >
-                {isPaying ? "Procesando..." : "Pagar 2 Oro"}
+                {isPaying ? "Procesando..." : `Pagar ${HEAL_COST_GOLD} Oro`}
               </button>
               <Link
                 href="/"

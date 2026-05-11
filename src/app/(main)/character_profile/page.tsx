@@ -786,6 +786,7 @@ export default async function CharacterProfilePage() {
             dex: dexEffective,
             int: intEffective,
             wis: wisEffective,
+            speed: Math.max(0, Math.trunc(Number(character?.speed_total ?? 0))),
           }}
           abilities={abilities}
           abilityStats={{

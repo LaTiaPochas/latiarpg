@@ -102,3 +102,43 @@ body {
     animation: none;
   }
 }
+
+/*
+ * Scrollbar discreta de tono ámbar usada en el Journal de La Tia.
+ *
+ * Importante: en Chromium >= 121, cuando se declaran las propiedades
+ * estándar `scrollbar-width` / `scrollbar-color`, los pseudo-elementos
+ * `::-webkit-scrollbar*` se ignoran. Por eso usamos `@supports` para
+ * separar ambos caminos: WebKit (Chrome/Edge/Safari) por un lado y
+ * Gecko (Firefox) por el otro.
+ */
+.journal-amber-scrollbar::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.journal-amber-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+  border-radius: 9999px;
+}
+
+.journal-amber-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #c89a4a, #8a5a1f) !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(60, 30, 8, 0.55);
+}
+
+.journal-amber-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #d8ad5e, #9a6726) !important;
+}
+
+.journal-amber-scrollbar::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .journal-amber-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #c89a4a transparent;
+  }
+}

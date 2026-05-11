@@ -54,7 +54,23 @@ export async function TopNav() {
 
         <div className="ml-auto flex items-center gap-2">
           <Link
+            href="/garrison"
+            aria-label="Campamento"
+            className="inline-flex items-center gap-2 rounded-md border border-amber-800/70 bg-[#2a1812]/85 px-2 py-1 text-amber-100 transition hover:bg-[#3a2219]"
+          >
+            <Image
+              src="/img/resources/iconos/icon_campfire.png"
+              alt="Campamento"
+              width={18}
+              height={18}
+              className="h-[18px] w-[18px]"
+            />
+            <span className="hidden text-sm font-semibold tracking-wide sm:inline">Campamento</span>
+          </Link>
+
+          <Link
             href="/character_profile"
+            aria-label="Perfil"
             className="inline-flex items-center gap-2 rounded-md border border-amber-800/70 bg-[#2a1812]/85 px-2 py-1 text-amber-100 transition hover:bg-[#3a2219]"
           >
             <Image
@@ -64,7 +80,7 @@ export async function TopNav() {
               height={18}
               className="h-[18px] w-[18px]"
             />
-            <span className="text-sm font-semibold">Perfíl</span>
+            <span className="hidden text-sm font-semibold sm:inline">Perfíl</span>
           </Link>
 
           <div className="flex items-center gap-2 rounded-md border border-amber-800/70 bg-[#2a1812]/85 px-2 py-1 text-amber-100">
@@ -77,6 +93,29 @@ export async function TopNav() {
             />
             <span className="text-sm font-semibold tabular-nums">{gold}</span>
           </div>
+
+          <Link
+            href="/logout"
+            className="inline-flex items-center gap-1.5 rounded-md border border-red-800/70 bg-[#4f0404]/85 px-2 py-1 text-red-100 transition hover:bg-[#3a2219]"
+            aria-label="Cerrar sesion"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-[18px] w-[18px] sm:hidden"
+              aria-hidden="true"
+            >
+              <path d="M15 17l5-5-5-5" />
+              <path d="M20 12H9" />
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            </svg>
+            <span className="hidden text-sm font-semibold tracking-wide sm:inline">Logout</span>
+          </Link>
         </div>
       </nav>
     </header>
