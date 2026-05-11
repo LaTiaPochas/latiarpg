@@ -30,7 +30,6 @@ import {
   abilityTooltipStatGetterFromSheet,
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
-  sumAbilityDescriptionStatExpressionBonuses,
 } from "@/lib/ability-tooltip-description";
 
 type InventoryItem = {
@@ -269,6 +268,39 @@ function effectNum(value: unknown, fallback: number): number {
   }
   return fallback;
 }
+function abilityScalingStatValue(stat: string, stats: AbilityStatSnapshot): number {
+  if (stat === "STR") return stats.str;
+  if (stat === "DEX") return stats.dex;
+  if (stat === "INT") return stats.int;
+  if (stat === "WIS") return stats.wis;
+  if (stat === "ATTACK_DAMAGE" || stat === "WEAPON_DAMAGE") {
+    const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
+    const wmax = Math.max(wmin, Math.floor(stats.weaponDamageMax));
+    return Math.floor((wmin + wmax) / 2);
+  }
+  if (stat === "MAGIC_DAMAGE") {
+    const mmin = Math.max(0, Math.floor(stats.magicDamageMin));
+    const mmax = Math.max(mmin, Math.floor(stats.magicDamageMax));
+    return Math.floor((mmin + mmax) / 2);
+  }
+  return 0;
+}
+function abilityScalingEntryBonus(entry: unknown, stats: AbilityStatSnapshot): number {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
+  const rec = entry as Record<string, unknown>;
+  const stat = typeof rec.stat === "string" ? rec.stat.trim().toUpperCase() : "";
+  const ratio = effectNum(rec.ratio, Number.NaN);
+  if (stat === "" || !Number.isFinite(ratio)) return 0;
+  return Math.floor(Math.max(0, abilityScalingStatValue(stat, stats)) * ratio);
+}
+function abilityScalingBonus(scaling: unknown, stats: AbilityStatSnapshot): number {
+  if (scaling == null) return 0;
+  if (Array.isArray(scaling)) {
+    return scaling.reduce((sum, entry) => sum + abilityScalingEntryBonus(entry, stats), 0);
+  }
+  if (typeof scaling === "object") return abilityScalingEntryBonus(scaling, stats);
+  return 0;
+}
 function abilityDamageRange(
   effect: Record<string, unknown>,
   stats: AbilityStatSnapshot,
@@ -277,28 +309,7 @@ function abilityDamageRange(
   if (typeRaw !== "damage") return null;
   const minV = Math.max(0, effectNum(effect.min, 0));
   const maxV = Math.max(minV, effectNum(effect.max, minV));
-  let bonus = 0;
-  const scaling = effect.scaling;
-  if (scaling && typeof scaling === "object" && !Array.isArray(scaling)) {
-    const rec = scaling as Record<string, unknown>;
-    const stat = typeof rec.stat === "string" ? rec.stat.trim().toUpperCase() : "";
-    const ratio = effectNum(rec.ratio, Number.NaN);
-    let statValue = 0;
-    if (stat === "STR") statValue = stats.str;
-    else if (stat === "DEX") statValue = stats.dex;
-    else if (stat === "INT") statValue = stats.int;
-    else if (stat === "WIS") statValue = stats.wis;
-    else if (stat === "ATTACK_DAMAGE" || stat === "WEAPON_DAMAGE") {
-      const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
-      const wmax = Math.max(wmin, Math.floor(stats.weaponDamageMax));
-      statValue = Math.floor((wmin + wmax) / 2);
-    } else if (stat === "MAGIC_DAMAGE") {
-      const mmin = Math.max(0, Math.floor(stats.magicDamageMin));
-      const mmax = Math.max(mmin, Math.floor(stats.magicDamageMax));
-      statValue = Math.floor((mmin + mmax) / 2);
-    }
-    if (Number.isFinite(ratio)) bonus = Math.floor(Math.max(0, statValue) * ratio);
-  }
+  const bonus = abilityScalingBonus(effect.scaling, stats);
   return { min: Math.max(0, minV + bonus), max: Math.max(0, maxV + bonus) };
 }
 function abilityCardClass(subtype: AbilitySubtype): string {
@@ -1296,10 +1307,6 @@ export function InventoryGrid({
                   const subtype = abilitySubtype(ability.effect);
                   const targetKind = abilityTargetKind(ability.effect);
                   const dmg = abilityDamageRange(ability.effect, abilityStats);
-                  const descPlaceholdersBonus = sumAbilityDescriptionStatExpressionBonuses(
-                    ability.description,
-                    abilityTooltipGetStat,
-                  );
                   const isMobileTooltipOpen = mobileAbilityTooltipId === ability.id;
                   const shouldOpenUpDesktop = desktopTooltipUpById[ability.id] === true;
                   return (
@@ -1410,7 +1417,7 @@ export function InventoryGrid({
                               {formatAbilityTooltipTotalDamageRange(
                                 dmg.min,
                                 dmg.max,
-                                descPlaceholdersBonus,
+                                0,
                               )}
                             </p>
                             <div
@@ -1466,7 +1473,7 @@ export function InventoryGrid({
                                     {formatAbilityTooltipTotalDamageRange(
                                       dmg.min,
                                       dmg.max,
-                                      descPlaceholdersBonus,
+                                      0,
                                     )}
                                   </p>
                                   <div
