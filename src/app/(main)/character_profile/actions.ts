@@ -156,7 +156,8 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
     .filter((name): name is string => name !== null);
 
   const loadCharacterForRequirements = async () => {
-    const selectWithMods = "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod";
+    const selectWithMods =
+      "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod, speed_total";
     const selectFallback = "class_name, level, str, dex, int, wis";
 
     const byProfileWithMods = await supabase
@@ -239,6 +240,9 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
       Math.trunc(Number(userCharacterForReq?.wis ?? 0)) +
         Math.trunc(Number(userCharacterForReq?.wis_mod ?? 0)),
     ),
+    // `speed_total` ya viene agregada (base + mods de equipo) desde user_character.
+    // Si la columna no existe en este entorno, el fallback del SELECT la omite y queda en 0.
+    speed: Math.max(0, Math.trunc(Number(userCharacterForReq?.speed_total ?? 0))),
   };
   const statValueFor = (key: string): number => {
     const k = key.trim().toLowerCase();
@@ -246,6 +250,9 @@ export async function equipInventoryItem(inventoryId: number, targetSlot?: strin
     if (k === "dex") return playerStats.dex;
     if (k === "int") return playerStats.int;
     if (k === "wis") return playerStats.wis;
+    if (k === "spd" || k === "speed" || k === "vel" || k === "velocidad") {
+      return playerStats.speed;
+    }
     return 0;
   };
   for (const row of (classReqRows ?? []) as Array<Record<string, unknown>>) {

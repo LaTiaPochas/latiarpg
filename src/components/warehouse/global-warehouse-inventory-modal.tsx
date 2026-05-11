@@ -320,7 +320,7 @@ type GlobalWarehouseInventoryModalProps = {
   playerInventorySlots?: GlobalWarehouseInventorySlotPayload[] | null;
   playerClassName: string;
   playerLevel: number;
-  playerStats: { str: number; dex: number; int: number; wis: number };
+  playerStats: { str: number; dex: number; int: number; wis: number; speed: number };
 };
 
 export function GlobalWarehouseInventoryModal({
@@ -1369,6 +1369,9 @@ export function GlobalWarehouseInventoryModal({
                     if (k === "dex") return playerStats.dex;
                     if (k === "int") return playerStats.int;
                     if (k === "wis") return playerStats.wis;
+                    if (k === "spd" || k === "speed" || k === "vel" || k === "velocidad") {
+                      return playerStats.speed;
+                    }
                     return 0;
                   };
                   return (

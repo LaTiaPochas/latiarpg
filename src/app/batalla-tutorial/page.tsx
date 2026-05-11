@@ -82,11 +82,18 @@ export default function BatallaTutorialPage() {
   const [playerClassName, setPlayerClassName] = useState<string>("");
   const [woodenStickAllowedClasses, setWoodenStickAllowedClasses] = useState<string[]>([]);
   const [playerLevel, setPlayerLevel] = useState<number>(0);
-  const [playerStats, setPlayerStats] = useState<{ str: number; dex: number; int: number; wis: number }>({
+  const [playerStats, setPlayerStats] = useState<{
+    str: number;
+    dex: number;
+    int: number;
+    wis: number;
+    speed: number;
+  }>({
     str: 0,
     dex: 0,
     int: 0,
     wis: 0,
+    speed: 0,
   });
   const [woodenStickMinLevel, setWoodenStickMinLevel] = useState<number>(0);
   const [woodenStickRequiredStats, setWoodenStickRequiredStats] = useState<
@@ -404,14 +411,14 @@ export default function BatallaTutorialPage() {
 
         const { data: ucByProfile } = await supabase
           .from("user_character")
-          .select("class_name, level, str, dex, int, wis")
+          .select("class_name, level, str, dex, int, wis, speed_total")
           .eq("profile_id", user.id)
           .maybeSingle();
         const { data: ucByUser } = ucByProfile
           ? { data: null }
           : await supabase
               .from("user_character")
-              .select("class_name, level, str, dex, int, wis")
+              .select("class_name, level, str, dex, int, wis, speed_total")
               .eq("user_id", user.id)
               .maybeSingle();
         const classRaw = (ucByProfile ?? ucByUser)?.class_name;
@@ -427,7 +434,14 @@ export default function BatallaTutorialPage() {
         }
         if (alive) setPlayerClassName(classNameResolved);
         const uc = (ucByProfile ?? ucByUser) as
-          | { level?: number | null; str?: number | null; dex?: number | null; int?: number | null; wis?: number | null }
+          | {
+              level?: number | null;
+              str?: number | null;
+              dex?: number | null;
+              int?: number | null;
+              wis?: number | null;
+              speed_total?: number | null;
+            }
           | null;
         if (alive) {
           setPlayerLevel(Math.max(0, Math.trunc(Number(uc?.level ?? 0))));
@@ -436,6 +450,7 @@ export default function BatallaTutorialPage() {
             dex: Math.max(0, Math.trunc(Number(uc?.dex ?? 0))),
             int: Math.max(0, Math.trunc(Number(uc?.int ?? 0))),
             wis: Math.max(0, Math.trunc(Number(uc?.wis ?? 0))),
+            speed: Math.max(0, Math.trunc(Number(uc?.speed_total ?? 0))),
           });
         }
 
@@ -1265,16 +1280,22 @@ export default function BatallaTutorialPage() {
                                 </span>
                               ) : null}
                               {woodenStickRequiredStats.map((req, idx) => {
+                                const reqKey = req.key.trim().toLowerCase();
                                 const current =
-                                  req.key === "str"
+                                  reqKey === "str"
                                     ? playerStats.str
-                                    : req.key === "dex"
+                                    : reqKey === "dex"
                                       ? playerStats.dex
-                                      : req.key === "int"
+                                      : reqKey === "int"
                                         ? playerStats.int
-                                        : req.key === "wis"
+                                        : reqKey === "wis"
                                           ? playerStats.wis
-                                          : 0;
+                                          : reqKey === "spd" ||
+                                              reqKey === "speed" ||
+                                              reqKey === "vel" ||
+                                              reqKey === "velocidad"
+                                            ? playerStats.speed
+                                            : 0;
                                 const met = current >= req.value;
                                 return (
                                   <span

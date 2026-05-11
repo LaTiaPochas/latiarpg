@@ -10,7 +10,6 @@ import {
   abilityTooltipStatGetterFromCombat,
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
-  sumAbilityDescriptionStatExpressionBonuses,
 } from "@/lib/ability-tooltip-description";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
@@ -3230,7 +3229,6 @@ export function CombatEncounterShell({
               },
             );
             const skillDescRaw = getPlayerSkillTooltipDescription(skillTooltipEntry.skill);
-            const descPlaceholdersBonus = sumAbilityDescriptionStatExpressionBonuses(skillDescRaw, getStat);
             const descFormatted = formatAbilityTooltipStatExpressions(skillDescRaw, getStat);
             return (
               <>
@@ -3245,7 +3243,7 @@ export function CombatEncounterShell({
                         {formatAbilityTooltipTotalDamageRange(
                           dmgRange.min,
                           dmgRange.max,
-                          descPlaceholdersBonus,
+                          0,
                         )}
                       </span>
                     </span>

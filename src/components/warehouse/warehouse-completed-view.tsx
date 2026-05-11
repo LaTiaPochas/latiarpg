@@ -15,7 +15,7 @@ type WarehouseCompletedViewProps = {
   playerInventorySlots: GlobalWarehouseInventorySlotPayload[];
   playerClassName: string;
   playerLevel: number;
-  playerStats: { str: number; dex: number; int: number; wis: number };
+  playerStats: { str: number; dex: number; int: number; wis: number; speed: number };
 };
 
 export function WarehouseCompletedView({

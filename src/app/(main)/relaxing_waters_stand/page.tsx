@@ -1,6 +1,7 @@
 import { RelaxingWatersStandStory } from "@/components/relaxing-waters-stand/relaxing-waters-stand-story";
 import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
 import { createClient } from "@/lib/supabase/server";
+import { insertWorldEventLog } from "@/lib/world-event-log";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
@@ -264,7 +265,7 @@ export default async function RelaxingWatersStandPage() {
       .eq("id", 3)
       .eq("title", "aguas_termales_completadas");
     if (shouldMarkCompleted && !alreadyCompleted) {
-      await supabaseAction.from("global_world_event_log").insert({
+      await insertWorldEventLog(supabaseAction, currentUser.id, {
         happened_at: new Date().toISOString(),
         member_name: "world",
         event_html:
@@ -297,7 +298,7 @@ export default async function RelaxingWatersStandPage() {
     const memberColor = currentProfile?.color?.trim() || "#f8fafc";
     const safeMemberName = escapeHtml(memberName);
     const eventHtml = `<span style="color:${memberColor}">${safeMemberName}</span> aportó ${amountToApply} de madera para la contrucción del <strong>Puesto de Aguas Relajantes</strong>.`;
-    await supabaseAction.from("global_world_event_log").insert({
+    await insertWorldEventLog(supabaseAction, currentUser.id, {
       happened_at: new Date().toISOString(),
       member_name: memberName,
       event_html: eventHtml,

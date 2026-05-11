@@ -6,6 +6,7 @@ import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/componen
 import type { GlobalWarehouseInventorySlotPayload } from "@/components/warehouse/global-warehouse-inventory-modal";
 import { createClient } from "@/lib/supabase/server";
 import { resolveInventoryIconPath } from "@/lib/inventory-icon-path";
+import { insertWorldEventLog } from "@/lib/world-event-log";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
@@ -331,7 +332,7 @@ export default async function WarehousePage() {
       .eq("title", "warehouse_construido");
 
     if (shouldMarkCompleted && !alreadyCompleted) {
-      await supabaseAction.from("global_world_event_log").insert({
+      await insertWorldEventLog(supabaseAction, currentUser.id, {
         happened_at: new Date().toISOString(),
         member_name: "world",
         event_html:
@@ -381,7 +382,7 @@ export default async function WarehousePage() {
     const safeMemberName = escapeHtml(memberName);
     const eventHtml = `<span style="color:${memberColor}">${safeMemberName}</span> aportó ${amountToApply} de madera para la contrucción del <strong>Warehouse</strong>.`;
 
-    await supabaseAction.from("global_world_event_log").insert({
+    await insertWorldEventLog(supabaseAction, currentUser.id, {
       happened_at: new Date().toISOString(),
       member_name: memberName,
       event_html: eventHtml,
@@ -397,7 +398,7 @@ export default async function WarehousePage() {
     warehouseInventorySlotNumbers.map((slotNumber) => ({ slotNumber, item: null }));
   let warehousePlayerClass = "Aventurero";
   let warehousePlayerLevel = 1;
-  let warehousePlayerStats = { str: 0, dex: 0, int: 0, wis: 0 };
+  let warehousePlayerStats = { str: 0, dex: 0, int: 0, wis: 0, speed: 0 };
 
   if (shouldShowWarehouseModal && isWarehouseCompleted) {
     const { data: gwRows } = await supabase
@@ -409,7 +410,7 @@ export default async function WarehousePage() {
     const { data: userCharacterByProfileId } = await supabase
       .from("user_character")
       .select(
-        "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod",
+        "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod, speed_total",
       )
       .eq("profile_id", user.id)
       .maybeSingle();
@@ -419,7 +420,7 @@ export default async function WarehousePage() {
       : await supabase
           .from("user_character")
           .select(
-            "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod",
+            "class_name, level, str, dex, int, wis, str_mod, dex_mod, int_mod, wis_mod, speed_total",
           )
           .eq("user_id", user.id)
           .maybeSingle();
@@ -454,6 +455,7 @@ export default async function WarehousePage() {
       dex: Math.trunc(Number(uc?.dex ?? 0)) + Math.trunc(Number(uc?.dex_mod ?? 0)),
       int: Math.trunc(Number(uc?.int ?? 0)) + Math.trunc(Number(uc?.int_mod ?? 0)),
       wis: Math.trunc(Number(uc?.wis ?? 0)) + Math.trunc(Number(uc?.wis_mod ?? 0)),
+      speed: Math.max(0, Math.trunc(Number(uc?.speed_total ?? 0))),
     };
 
     const visibleGw = (gwRows ?? [])
