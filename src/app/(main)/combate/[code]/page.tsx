@@ -2177,7 +2177,7 @@ export default async function CombatEncounterPage({
     }
 
     const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
-    const shouldGrantRelaxingWaterOnWin = Math.random() < 0.3;
+    const shouldGrantRelaxingWaterOnWin = Math.random() < 0.15;
     if (shouldGrantRelaxingWaterOnWin) {
       const { data: globalWarehouseRow } = await supabaseAction
         .from("global_warehouse")
