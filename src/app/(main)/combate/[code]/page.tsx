@@ -310,7 +310,38 @@ function templatePortraitRaw(t: EnemyTemplateRow): string | null {
   );
 }
 
-function enemySkillDamageSubtype(effect: Record<string, unknown>): "physical" | "magical" | "buff" | "neutral" {
+function normalizeDamageTypeLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function getEffectDamageTypes(effect: Record<string, unknown>): string[] {
+  const raw = effect.damage_type ?? effect.damage_types;
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/[,|/]+/)
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeDamageTypeLabel(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function getEffectStateIcon(effect: Record<string, unknown>): string | null {
+  const raw = effect.state_icon ?? effect.stateIcon;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function enemySkillDamageSubtype(
+  effect: Record<string, unknown>,
+): "physical" | "magical" | "buff" | "neutral" {
   const raw = effect.subtype;
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (s === "physical") return "physical";
@@ -340,6 +371,8 @@ function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
     if (effect.type !== "damage" || effect.target !== "player") continue;
     const min = Math.max(0, num(effect.min, 0));
     const max = Math.max(min, num(effect.max, min));
+    const damageTypes = getEffectDamageTypes(effect);
+    const stateIcon = getEffectStateIcon(effect);
 
     result.push({
       id: skillId,
@@ -363,6 +396,8 @@ function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
         min,
         max,
         subtype: enemySkillDamageSubtype(effect),
+        damageTypes,
+        stateIcon,
         chance: Math.max(0, Math.min(1, num(effect.chance, 1))),
       },
     });
