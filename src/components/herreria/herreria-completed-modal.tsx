@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { HerreriaHelpButton } from "@/components/herreria/herreria-help-button";
 
 export type HerreriaRecipeInventoryItem = {
   inventoryId: number;
@@ -272,8 +273,9 @@ export function HerreriaCompletedModal({
   return (
     <>
       <div
-        className={`rounded-lg border border-[#9f8352]/80 bg-[#ddccaa]/94 p-4 text-center lg:p-4 ${className}`}
+        className={`relative rounded-lg border border-[#9f8352]/80 bg-[#ddccaa]/94 p-4 text-center lg:p-4 ${className}`}
       >
+        <HerreriaHelpButton />
         {mode === "give-recipe" ? (
           <>
             <p className="text-xl font-bold leading-relaxed text-slate-900 sm:text-xl">

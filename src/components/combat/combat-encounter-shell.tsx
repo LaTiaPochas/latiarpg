@@ -1486,6 +1486,16 @@ export function CombatEncounterShell({
   }, [playerCurrentHp, onPlayerDefeatedGlobalLog]);
   const hasAnyEnemy = displayEnemies.length > 0;
   const hasAliveEnemies = displayEnemies.some((enemy) => enemy.hp > 0);
+  const totalEnemyHpMax = displayEnemies.reduce(
+    (sum, enemy) => sum + Math.max(1, Math.trunc(enemy.hpMax)),
+    0,
+  );
+  const totalEnemyHp = displayEnemies.reduce(
+    (sum, enemy) => sum + Math.max(0, Math.trunc(enemy.hp)),
+    0,
+  );
+  const isEscapeDisabledByEnemyHp =
+    totalEnemyHpMax > 0 && totalEnemyHp / totalEnemyHpMax <= 0.6;
   const recordPlayerDamageDealt = (amount: number) => {
     const safe = Math.max(0, Math.trunc(amount));
     if (safe <= 0) return;
@@ -2479,6 +2489,10 @@ export function CombatEncounterShell({
   }
 
   function handleEscapeClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (isEscapeDisabledByEnemyHp) {
+      event.preventDefault();
+      return;
+    }
     if (!onEscapePersistState) return;
     event.preventDefault();
     if (isEscaping) return;
@@ -2685,7 +2699,17 @@ export function CombatEncounterShell({
             <Link
               href={escapeHref}
               onClick={handleEscapeClick}
-              className="shrink-0 rounded-full border border-red-700/60 bg-red-900/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-200/90 transition hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50 sm:px-3"
+              aria-disabled={isEscapeDisabledByEnemyHp || isEscaping}
+              title={
+                isEscapeDisabledByEnemyHp
+                  ? "No podés huir cuando la vida total de los enemigos es 60% o menos."
+                  : undefined
+              }
+              className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition sm:px-3 ${
+                isEscapeDisabledByEnemyHp
+                  ? "cursor-not-allowed border-slate-700/70 bg-slate-900/35 text-slate-500"
+                  : "border-red-700/60 bg-red-900/15 text-amber-200/90 hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50"
+              }`}
             >
               {isEscaping ? "Escapando..." : "Escapar"}
             </Link>

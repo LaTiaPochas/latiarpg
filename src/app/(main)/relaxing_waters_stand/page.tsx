@@ -1,4 +1,5 @@
 import { RelaxingWatersStandStory } from "@/components/relaxing-waters-stand/relaxing-waters-stand-story";
+import { RelaxingWatersHelpButton } from "@/components/relaxing-waters-stand/relaxing-waters-help-button";
 import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
 import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
@@ -378,7 +379,8 @@ export default async function RelaxingWatersStandPage() {
         </div>
 
         <div className="absolute inset-x-0 bottom-0 z-30 p-2 sm:p-5">
-          <div className="mx-auto w-full max-w-3xl rounded-lg border border-cyan-700/70 bg-[#0f1e2a]/92 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-4">
+          <div className="relative mx-auto w-full max-w-3xl rounded-lg border border-cyan-700/70 bg-[#0f1e2a]/92 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm sm:px-6 sm:py-4">
+            <RelaxingWatersHelpButton />
             <p className="text-center text-xs leading-relaxed text-cyan-50 sm:text-sm">
               Nacho se está encargando de embotellar y traer agua del río para que puedan recuperar fuerzas.
             </p>
@@ -453,8 +455,9 @@ export default async function RelaxingWatersStandPage() {
         <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-6xl items-center justify-center p-4 lg:p-8">
           <section className="w-full max-w-3xl rounded-xl border border-[#9f8352]/80 bg-[#d8c7a2]/92 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-sm lg:p-6">
             <div
-              className={`rounded-lg border border-[#9f8352]/80 bg-[#ddccaa]/94 p-4 text-center lg:p-5 ${dialogueFont.className}`}
+              className={`relative rounded-lg border border-[#9f8352]/80 bg-[#ddccaa]/94 p-4 text-center lg:p-5 ${dialogueFont.className}`}
             >
+              <RelaxingWatersHelpButton />
               <p className="text-center text-[11px] leading-relaxed text-slate-800 lg:text-base">
                 Nacho tiene la idea de levantar un puesto de aguas del río para tener más a mano la recuperación. <br /> Él
                 se va a encargar de embotellarla y traerla hasta acá, pero tenemos que ayudarlo a construir el
