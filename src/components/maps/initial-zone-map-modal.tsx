@@ -162,6 +162,8 @@ export function InitialZoneMapModal({
             alt="Mapa zona inicial campamento"
             fill
             sizes="(max-width: 1024px) 100vw, 1024px"
+            loading="eager"
+            fetchPriority="high"
             className="object-contain select-none"
             onLoad={(event) => {
               const imageElement = event.currentTarget;

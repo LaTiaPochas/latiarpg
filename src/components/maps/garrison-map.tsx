@@ -21,6 +21,8 @@ type MapSprite = {
   height: number;
   xPercent: number;
   yPercent: number;
+  className?: string;
+  completedClassName?: string;
 };
 
 const HOTSPOTS: Hotspot[] = [
@@ -83,18 +85,32 @@ const MAP_SPRITES: MapSprite[] = [
     xPercent: 76,
     yPercent: 48,
   },
+  {
+    id: "crafting-table-sprite",
+    hotspotId: "crafting-table",
+    src: "/img/resources/characters/pj_chane_rpg_standing_stick.png",
+    alt: "Chane en la mesa de trabajo",
+    width: 170,
+    height: 170,
+    xPercent: 13,
+    yPercent: 78,
+    className: "w-[65px] sm:w-[82px] lg:w-[110px]",
+    completedClassName: "w-[74px] sm:w-[112px] lg:w-[140px]",
+  },
 ];
 
 type GarrisonMapProps = {
   showWarehouseSprite?: boolean;
   showRelaxingWatersSprite?: boolean;
   showAdvancedHotspots?: boolean;
+  isCraftingBenchCompleted?: boolean;
 };
 
 export function GarrisonMap({
   showWarehouseSprite = false,
   showRelaxingWatersSprite = false,
   showAdvancedHotspots = false,
+  isCraftingBenchCompleted = false,
 }: GarrisonMapProps) {
   const router = useRouter();
   const [selectedHotspotId, setSelectedHotspotId] = useState(HOTSPOTS[0].id);
@@ -122,9 +138,10 @@ export function GarrisonMap({
       MAP_SPRITES.filter(
         (sprite) =>
           (sprite.id !== "warehouse-spot-sprite" || showWarehouseSprite) &&
-          (sprite.id !== "relaxing-waters-tent-sprite" || showRelaxingWatersSprite),
+          (sprite.id !== "relaxing-waters-tent-sprite" || showRelaxingWatersSprite) &&
+          (sprite.id !== "crafting-table-sprite" || showAdvancedHotspots),
       ),
-    [showRelaxingWatersSprite, showWarehouseSprite],
+    [showAdvancedHotspots, showRelaxingWatersSprite, showWarehouseSprite],
   );
 
   return (
@@ -168,12 +185,22 @@ export function GarrisonMap({
             }}
           >
             <Image
-              src={sprite.src}
-              alt={sprite.alt}
+              src={
+                sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted
+                  ? "/img/resources/maps/garrison_anvil_completed.png"
+                  : sprite.src
+              }
+              alt={
+                sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted
+                  ? "Yunque de herrería completado"
+                  : sprite.alt
+              }
               width={sprite.width}
               height={sprite.height}
-              className={`h-auto object-contain sm:w-[110px] lg:w-[130px] ${
-                sprite.id === "warehouse-spot-sprite" ? "w-[70px]" : "w-[70px]"
+              className={`h-auto object-contain ${
+                sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted
+                  ? (sprite.completedClassName ?? sprite.className)
+                  : (sprite.className ?? "w-[70px] sm:w-[110px] lg:w-[130px]")
               }`}
             />
           </div>
@@ -228,6 +255,10 @@ export function GarrisonMap({
               }
               if (selectedHotspot.id === "relaxing-waters-tent") {
                 router.push("/relaxing_waters_stand");
+                return;
+              }
+              if (selectedHotspot.id === "crafting-table") {
+                router.push("/herreria");
                 return;
               }
               router.push(`/?destino=${encodeURIComponent(selectedHotspot.id)}`);

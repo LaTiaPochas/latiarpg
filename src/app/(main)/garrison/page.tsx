@@ -98,6 +98,15 @@ export default async function GarrisonPage() {
     typeof relaxingWatersMilestone?.title === "string" &&
     relaxingWatersMilestone.title.trim().toLowerCase() === "aguas_termales_completadas" &&
     relaxingWatersMilestone.is_completed === true;
+  const { data: craftingBenchMilestone } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed")
+    .eq("title", "crafting_bench_completed")
+    .maybeSingle();
+  const isCraftingBenchCompleted =
+    typeof craftingBenchMilestone?.title === "string" &&
+    craftingBenchMilestone.title.trim().toLowerCase() === "crafting_bench_completed" &&
+    craftingBenchMilestone.is_completed === true;
   const showAdvancedHotspots = showWarehouseSprite && showRelaxingWatersSprite;
   const randomQuote = GARRISON_QUOTES[Math.floor(Math.random() * GARRISON_QUOTES.length)];
 
@@ -149,6 +158,7 @@ export default async function GarrisonPage() {
             showWarehouseSprite={showWarehouseSprite}
             showRelaxingWatersSprite={showRelaxingWatersSprite}
             showAdvancedHotspots={showAdvancedHotspots}
+            isCraftingBenchCompleted={isCraftingBenchCompleted}
           />
         </section>
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
