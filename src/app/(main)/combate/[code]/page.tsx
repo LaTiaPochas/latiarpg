@@ -636,10 +636,38 @@ async function loadCombatUserCharacter(
   return { character, steps, profileCandidates: [...profileCandidates] };
 }
 
+/**
+ * `gap = playerLevel - enemyLevel` (positivo = enemigo más débil).
+ * Misma exp base (`enemy_templates.xp_reward`): 100% si el enemigo es de tu nivel o superior.
+ */
+function xpRewardMultiplierByEnemyVsPlayer(enemyLevel: number, playerLevel: number): number {
+  const e = Math.trunc(enemyLevel);
+  const p = Math.max(1, Math.trunc(playerLevel));
+  const gap = p - e;
+  if (gap <= 0) return 1;
+  if (gap === 1) return 0.9;
+  if (gap === 2) return 0.8;
+  if (gap === 3) return 0.5;
+  if (gap === 4) return 0.25;
+  return 0.05;
+}
+
+function dropChanceMultiplierByEncounterVsPlayer(recommendedLevel: number, playerLevel: number): number {
+  const encounterLevel = Math.max(1, Math.trunc(recommendedLevel));
+  const p = Math.max(1, Math.trunc(playerLevel));
+  const gap = p - encounterLevel;
+
+  if (gap <= 1) return 1;
+  if (gap <= 3) return 0.4;
+  if (gap === 4) return 0.2;
+  return 0.01;
+}
+
 function mapRowToEnemyView(
   encounterId: string,
   row: EncounterEnemyRow,
   index: number,
+  playerLevel: number,
 ): CombatEncounterEnemyView | null {
   const t = pickTemplate(row.enemy_templates);
   const name = t ? templateName(t) : null;
@@ -652,6 +680,8 @@ function mapRowToEnemyView(
       : hpMax;
   const mana = row.mana_override != null ? num(row.mana_override, 0) : num(t.mana, 0);
   const spawn = num(row.spawn_index, index + 1);
+  const enemyLevel = optionalNum(t.enemy_level) ?? optionalNum(t.level);
+  const enemyLevelForXp = enemyLevel ?? playerLevel;
 
   return {
     id: `${encounterId}-${spawn}-${index}`,
@@ -661,6 +691,7 @@ function mapRowToEnemyView(
         : null,
     spawnIndex: spawn,
     name,
+    enemyLevel,
     portraitSrc: normalizeEnemyTemplateAssetUrl(templatePortraitRaw(t), "portrait"),
     spriteSrc: normalizeEnemyTemplateAssetUrl(templateSpriteRaw(t), "sprite"),
     spriteOffsetX: spriteOffsetNum(
@@ -707,7 +738,11 @@ function mapRowToEnemyView(
         index + 1,
       ),
     ),
-    xpReward: Math.max(0, num(t.xp_reward, 0)),
+    xpReward: (() => {
+      const baseXp = Math.max(0, num(t.xp_reward, 0));
+      const mult = xpRewardMultiplierByEnemyVsPlayer(enemyLevelForXp, playerLevel);
+      return Math.max(0, Math.round(baseXp * mult));
+    })(),
     goldRewards: Math.max(0, num(t.gold_rewards, 0)),
     hp,
     hpMax,
@@ -805,6 +840,8 @@ export default async function CombatEncounterPage({
     redirect("/character_profile");
   }
 
+  const playerLevel = Math.max(1, Math.trunc(num(userCharacter.level, 1)));
+
   let encounterZoneId: string | null = null;
   if (zoneCode) {
     const { data: zoneRow, error: zoneError } = await supabase
@@ -836,6 +873,16 @@ export default async function CombatEncounterPage({
   if (encounterError || !encounter) {
     notFound();
   }
+  const encounterRecommendedLevel = Math.max(
+    1,
+    Math.trunc(
+      encounter.recommended_level != null ? num(encounter.recommended_level, playerLevel) : playerLevel,
+    ),
+  );
+  const dropChanceMultiplier = dropChanceMultiplierByEncounterVsPlayer(
+    encounterRecommendedLevel,
+    playerLevel,
+  );
   const encounterZoneRefId =
     typeof encounter.zone_id === "string" && encounter.zone_id.trim().length > 0
       ? encounter.zone_id.trim()
@@ -969,7 +1016,7 @@ export default async function CombatEncounterPage({
   const enemyRows: EncounterEnemyRow[] = rowsError ? [] : ((rows ?? []) as EncounterEnemyRow[]);
 
   const enemies: CombatEncounterEnemyView[] = enemyRows
-    .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i))
+    .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i, playerLevel))
     .filter((e): e is CombatEncounterEnemyView => e !== null);
 
   const { data: enemyDropRows } = await supabase
@@ -1385,9 +1432,13 @@ export default async function CombatEncounterPage({
   };
 
   const lootRollContextId = code;
+  const adjustedDropChance = (row: EnemyDropTableRow): number => {
+    const baseChance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+    return Math.max(0, Math.min(1, baseChance * dropChanceMultiplier));
+  };
 
   const rollRow = (row: EnemyDropTableRow, traceId: string, source: "ungrouped" | "grouped") => {
-    const chance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+    const chance = adjustedDropChance(row);
     const roll = Math.random();
     if (roll > chance) {
       lootRollTrace.push({
@@ -1441,7 +1492,7 @@ export default async function CombatEncounterPage({
 
     for (const [groupKey, groupRows] of grouped) {
       const passed = groupRows.filter((row) => {
-        const chance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+        const chance = adjustedDropChance(row);
         const roll = Math.random();
         const ok = roll <= chance;
         lootRollTrace.push({
@@ -1517,6 +1568,9 @@ export default async function CombatEncounterPage({
         })),
         lootDebug: {
           combatEncounterLootKey: code,
+          recommendedLevel: encounterRecommendedLevel,
+          playerLevel,
+          dropChanceMultiplier,
           dropTableRows: dropRowsSafe.map((row) => ({
             combat_encounter_id: row.combat_encounter_id,
             enemy_template_id: row.enemy_template_id,
@@ -1526,6 +1580,7 @@ export default async function CombatEncounterPage({
             item_id: rowItemId(row),
             item_name: rowItemName(row),
             drop_chance: num(row.drop_chance, 0),
+            adjusted_drop_chance: adjustedDropChance(row),
             drop_group: row.drop_group,
             min_qty: Math.max(0, Math.trunc(num(row.min_qty, 0))),
             max_qty: Math.max(0, Math.trunc(num(row.max_qty, num(row.min_qty, 0)))),
@@ -1599,7 +1654,6 @@ export default async function CombatEncounterPage({
   const playerArmor = Math.max(0, num(userCharacter.armor_total, 0));
   const playerMr = Math.max(0, num(userCharacter.mr_total, 0));
   const playerExperienceToNext = Math.max(0, Math.trunc(num(userCharacter.experience_to_next, 0)));
-  const playerLevel = Math.max(1, Math.trunc(num(userCharacter.level, 1)));
   const rawPlayerClassName =
     typeof userCharacter.class_name === "string" && userCharacter.class_name.trim().length > 0
       ? userCharacter.class_name.trim()
@@ -2082,6 +2136,25 @@ export default async function CombatEncounterPage({
     if (!didLevelUpOnVictory) {
       // Persistir HP/Mana al final de la rama de victoria (después de update de XP/triggeres).
       await persistCharacterVitals();
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        "[combate][loot]",
+        JSON.stringify(
+          {
+            encounterCode: code,
+            recommendedLevel: encounterRecommendedLevel,
+            playerLevel,
+            dropChanceMultiplier,
+            rollTrace: lootRollTrace,
+            finalLoot: victoryLootItems,
+            victoryGoldFromLoot,
+          },
+          null,
+          2,
+        ),
+      );
     }
 
     const lootItemIds = Array.from(

@@ -745,6 +745,7 @@ export type CombatEncounterEnemyView = {
   templateId: string | null;
   spawnIndex: number;
   name: string;
+  enemyLevel: number | null;
   portraitSrc: string | null;
   spriteSrc: string | null;
   /** Ajustes visuales opcionales del sprite en el escenario. */
@@ -1052,8 +1053,22 @@ function enemyHpPercent(enemy: CombatEncounterEnemyView) {
   return Math.round((enemy.hp / Math.max(1, enemy.hpMax)) * 100);
 }
 
+function enemyNameLevelColorClass(recommendedLevel: number | null, playerLevel: number) {
+  if (recommendedLevel == null) return "text-white";
+
+  const levelDiff = Math.trunc(recommendedLevel) - Math.max(1, Math.trunc(playerLevel));
+
+  if (levelDiff >= 3) return "text-red-400";
+  if (levelDiff >= 1) return "text-yellow-200/85";
+  if (levelDiff == -3) return "text-blue-300";
+  if (levelDiff <= -4) return "text-blue-500";
+  if (levelDiff <= -1) return "text-green-300/90";
+  return "text-white";
+}
+
 function PlayerStatusModal({
   displayName,
+  level,
   portraitSrc,
   hp,
   hpMax,
@@ -1063,6 +1078,7 @@ function PlayerStatusModal({
   manaPercent,
 }: {
   displayName: string;
+  level: number;
   portraitSrc: string | null;
   hp: number;
   hpMax: number;
@@ -1094,8 +1110,11 @@ function PlayerStatusModal({
               </span>
             )}
           </div>
-          <p className="w-full truncate text-center text-[10px] font-semibold leading-tight text-emerald-50 sm:text-[11px]">
-            {displayName}
+          <p className="w-full text-center text-[10px] leading-tight sm:text-[11px]">
+            <span className="block truncate font-semibold text-emerald-50">{displayName}</span>
+            <span className="block truncate font-normal text-amber-100/85">
+              Lv. {Math.max(1, Math.trunc(level))}
+            </span>
           </p>
         </div>
         <div className="min-w-0 flex-1 pt-0.5">
@@ -1128,11 +1147,13 @@ function EnemyStatusModal({
   isSelected,
   onSelect,
   isDefeated,
+  nameColorClass,
 }: {
   enemy: CombatEncounterEnemyView;
   isSelected: boolean;
   onSelect: () => void;
   isDefeated: boolean;
+  nameColorClass: string;
 }) {
   const pct = enemyHpPercent(enemy);
   return (
@@ -1168,8 +1189,13 @@ function EnemyStatusModal({
           )}
         </div>
         <div className="min-w-0 w-full flex-1 sm:w-auto">
-          <p className="truncate text-center text-[10px] font-semibold leading-tight text-amber-100 sm:text-left sm:text-xs">
-            {enemy.name}
+          <p className="truncate text-center text-[10px] leading-tight sm:text-left sm:text-xs">
+            {enemy.enemyLevel != null ? (
+              <span className="font-normal text-amber-100/85">
+                Lv. {Math.max(1, Math.trunc(enemy.enemyLevel))}{" "}
+              </span>
+            ) : null}
+            <span className={`font-semibold ${nameColorClass}`}>{enemy.name}</span>
           </p>
           <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-black/50 sm:h-2.5">
             <div
@@ -1277,6 +1303,7 @@ export function CombatEncounterShell({
   }, [displayEnemies, selectedEnemyId]);
   const enemyCount = displayEnemies.length;
   const spriteClass = enemySpriteHeightClass(enemyCount);
+  const enemyNameColorClass = enemyNameLevelColorClass(recommendedLevel, playerLevelCurrent);
 
   const [isActionsPanelOpen, setIsActionsPanelOpen] = useState(false);
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
@@ -2728,6 +2755,7 @@ export function CombatEncounterShell({
                       isSelected={enemy.id === selectedEnemyId && enemy.hp > 0}
                       onSelect={() => setSelectedEnemyId(enemy.id)}
                       isDefeated={enemy.hp <= 0}
+                      nameColorClass={enemyNameColorClass}
                     />
                   ))
                 : null}
@@ -2736,6 +2764,7 @@ export function CombatEncounterShell({
               <div className="pointer-events-auto flex w-full justify-start">
                 <PlayerStatusModal
                   displayName={playerDisplayName}
+                  level={playerLevelCurrent}
                   portraitSrc={portraitResolved}
                   hp={playerCurrentHp}
                   hpMax={playerHpMax}
@@ -2820,6 +2849,7 @@ export function CombatEncounterShell({
               <div className="pointer-events-none flex w-full justify-start">
                 <PlayerStatusModal
                   displayName={playerDisplayName}
+                  level={playerLevelCurrent}
                   portraitSrc={portraitResolved}
                   hp={playerCurrentHp}
                   hpMax={playerHpMax}
@@ -3050,6 +3080,7 @@ export function CombatEncounterShell({
                   >
                     <PlayerStatusModal
                       displayName={playerDisplayName}
+                      level={playerLevelCurrent}
                       portraitSrc={portraitResolved}
                       hp={playerCurrentHp}
                       hpMax={playerHpMax}
