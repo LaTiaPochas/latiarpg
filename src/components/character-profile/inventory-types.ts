@@ -30,3 +30,47 @@ export function formatWeaponAttackTypeLabel(raw: string | null | undefined): str
 
 /** Misma forma que instancia de arma (rareza, daños, stats por filas). */
 export type EquipmentInstanceTooltip = WeaponInstanceTooltip;
+
+function capitalizeWord(value: string): string {
+  const v = value.trim();
+  if (!v) return v;
+  return `${v.charAt(0).toUpperCase()}${v.slice(1).toLowerCase()}`;
+}
+
+/** Etiqueta legible tipo "Key Items", "Recipe" a partir de `equip_slot`. */
+export function formatEquipSlotLabelForTooltip(raw: string | null | undefined): string {
+  const s = raw?.trim() ?? "";
+  if (!s) return "";
+  return s
+    .replace(/_/g, " ")
+    .split(/\s+/u)
+    .filter(Boolean)
+    .map(capitalizeWord)
+    .join(" ");
+}
+
+/**
+ * Subtítulo bajo el nombre en tooltips compactos (no `item_type_id === 1`):
+ * oro/madera siguen mostrando el código de tipo (p. ej. "Resource"); el resto usa `equip_slot` si existe.
+ */
+export function inventoryTooltipSubtitleUnderName(args: {
+  itemTypeId: number | null;
+  itemTypeCode?: string | null;
+  equipSlot?: string | null;
+}): string | null {
+  const typeId = args.itemTypeId;
+  const code = args.itemTypeCode?.trim() ?? "";
+  const slot = args.equipSlot?.trim() ?? "";
+
+  const isResourceStyle = (typeId === 2 || typeId === 3) && code.length > 0;
+  if (isResourceStyle) {
+    return formatEquipSlotLabelForTooltip(code);
+  }
+  if (slot.length > 0) {
+    return formatEquipSlotLabelForTooltip(slot);
+  }
+  if (code.length > 0) {
+    return formatEquipSlotLabelForTooltip(code);
+  }
+  return null;
+}

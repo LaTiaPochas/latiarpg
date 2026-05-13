@@ -11,6 +11,7 @@ import {
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
+import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
 const PJ_FEDE_RPG_FIGHT_STICK =
@@ -134,6 +135,7 @@ type PlayerTimedSelfBuff = {
   stat: Exclude<PlayerSelfBuffAffectedStat, "hp" | "mana">;
   amount: number;
   remainingTurns: number;
+  /** Último valor del contador de ronda `turn` en el que ya se descontó `duration_turns`. */
   lastTickTurn: number;
   skillName: string;
   stateIcon: string | null;
@@ -1066,6 +1068,25 @@ function enemyNameLevelColorClass(recommendedLevel: number | null, playerLevel: 
   return "text-white";
 }
 
+function PlayerBuffStateIconStrip({ srcs }: { srcs: string[] }) {
+  if (srcs.length === 0) return null;
+  return (
+    <div
+      className="flex flex-wrap justify-start gap-0.5 px-2 sm:px-2"
+      aria-label="Estados activos"
+    >
+      {srcs.map((src) => (
+        <div
+          key={src}
+          className="relative h-6 w-6 shrink-0 overflow-hidden rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
+        >
+          <Image src={src} alt="" fill className="object-contain p-px" sizes="16px" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PlayerStatusModal({
   displayName,
   level,
@@ -1469,6 +1490,7 @@ export function CombatEncounterShell({
     setPlayerCombatMagicDamageMinBonus(0);
     setPlayerCombatMagicDamageMaxBonus(0);
     setPlayerTimedSelfBuffs([]);
+    setTurn(1);
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
       defeatModalDelayRef.current = null;
@@ -1841,6 +1863,19 @@ export function CombatEncounterShell({
   const playerManaPercent = Math.round(
     (displayPlayerMana / Math.max(1, playerManaMax)) * 100,
   );
+  const playerActiveBuffStateIconSrcs = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const buff of playerTimedSelfBuffs) {
+      const raw = buff.stateIcon;
+      if (typeof raw !== "string" || raw.trim().length === 0) continue;
+      const url = normalizePublicAssetUrl(raw);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      out.push(url);
+    }
+    return out;
+  }, [playerTimedSelfBuffs]);
 
   /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
   const floatPlayerStatusOverActionsMobile = isActionsPanelOpen && isMobileViewport;
@@ -2416,16 +2451,16 @@ export function CombatEncounterShell({
       ? getPlayerSkillSubtypeStyles(getPlayerSkillEffectSubtype(skillTooltipEntry.skill.effect))
       : null;
 
-  function tickPlayerTimedBuffs(turnToTick: number) {
+  function tickPlayerTimedBuffs(roundTurn: number) {
     setPlayerTimedSelfBuffs((prev) => {
       if (prev.length === 0) return prev;
       let changed = false;
       const next = prev.flatMap((buff) => {
-        if (buff.lastTickTurn >= turnToTick) return [buff];
+        if (buff.lastTickTurn >= roundTurn) return [buff];
         const remainingTurns = buff.remainingTurns - 1;
         changed = true;
         if (remainingTurns <= 0) return [];
-        return [{ ...buff, remainingTurns, lastTickTurn: turnToTick }];
+        return [{ ...buff, remainingTurns, lastTickTurn: roundTurn }];
       });
       return changed ? next : prev;
     });
@@ -2434,13 +2469,13 @@ export function CombatEncounterShell({
   function advanceTurn() {
     if (turnOrder.length === 0) return;
     const nextIndex = (effectiveTurnIndex + 1) % turnOrder.length;
-    const wrapped = turnOrder.length > 1 && effectiveTurnIndex === turnOrder.length - 1 && nextIndex === 0;
-    const nextTurn = wrapped ? turn + 1 : turn;
-    if (turnOrder[nextIndex]?.type === "player") {
-      tickPlayerTimedBuffs(nextTurn);
-    }
     setCurrentTurnIndex(nextIndex);
   }
+
+  useEffect(() => {
+    tickPlayerTimedBuffs(turn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick solo debe alinearse al contador de ronda `turn`
+  }, [turn]);
 
   function scheduleAdvanceTurn() {
     if (advanceTurnTimeoutRef.current) {
@@ -2762,17 +2797,20 @@ export function CombatEncounterShell({
             </div>
             {!floatPlayerStatusOverActionsMobile && !isMobileViewport ? (
               <div className="pointer-events-auto flex w-full justify-start">
-                <PlayerStatusModal
-                  displayName={playerDisplayName}
-                  level={playerLevelCurrent}
-                  portraitSrc={portraitResolved}
-                  hp={playerCurrentHp}
-                  hpMax={playerHpMax}
-                  mana={displayPlayerMana}
-                  manaMax={playerManaMax}
-                  hpPercent={playerHpPercent}
-                  manaPercent={playerManaPercent}
-                />
+                <div className="flex flex-col items-start gap-1">
+                  <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                  <PlayerStatusModal
+                    displayName={playerDisplayName}
+                    level={playerLevelCurrent}
+                    portraitSrc={portraitResolved}
+                    hp={playerCurrentHp}
+                    hpMax={playerHpMax}
+                    mana={displayPlayerMana}
+                    manaMax={playerManaMax}
+                    hpPercent={playerHpPercent}
+                    manaPercent={playerManaPercent}
+                  />
+                </div>
               </div>
             ) : null}
           </div>
@@ -2847,17 +2885,20 @@ export function CombatEncounterShell({
           <div className="pointer-events-auto flex w-full max-w-6xl flex-col gap-2">
             {!isActionsPanelOpen && isMobileViewport ? (
               <div className="pointer-events-none flex w-full justify-start">
-                <PlayerStatusModal
-                  displayName={playerDisplayName}
-                  level={playerLevelCurrent}
-                  portraitSrc={portraitResolved}
-                  hp={playerCurrentHp}
-                  hpMax={playerHpMax}
-                  mana={displayPlayerMana}
-                  manaMax={playerManaMax}
-                  hpPercent={playerHpPercent}
-                  manaPercent={playerManaPercent}
-                />
+                <div className="pointer-events-auto flex flex-col items-start gap-1">
+                  <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                  <PlayerStatusModal
+                    displayName={playerDisplayName}
+                    level={playerLevelCurrent}
+                    portraitSrc={portraitResolved}
+                    hp={playerCurrentHp}
+                    hpMax={playerHpMax}
+                    mana={displayPlayerMana}
+                    manaMax={playerManaMax}
+                    hpPercent={playerHpPercent}
+                    manaPercent={playerManaPercent}
+                  />
+                </div>
               </div>
             ) : null}
             {isActionsPanelOpen ? (
@@ -3078,17 +3119,20 @@ export function CombatEncounterShell({
                     className="pointer-events-none w-[min(100vw,12rem)] max-w-[min(92vw,11.5rem)] shrink-0 self-start px-1 drop-shadow-[0_6px_16px_rgba(0,0,0,0.55)]"
                     role="presentation"
                   >
-                    <PlayerStatusModal
-                      displayName={playerDisplayName}
-                      level={playerLevelCurrent}
-                      portraitSrc={portraitResolved}
-                      hp={playerCurrentHp}
-                      hpMax={playerHpMax}
-                      mana={displayPlayerMana}
-                      manaMax={playerManaMax}
-                      hpPercent={playerHpPercent}
-                      manaPercent={playerManaPercent}
-                    />
+                    <div className="pointer-events-auto flex flex-col items-start gap-1">
+                      <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                      <PlayerStatusModal
+                        displayName={playerDisplayName}
+                        level={playerLevelCurrent}
+                        portraitSrc={portraitResolved}
+                        hp={playerCurrentHp}
+                        hpMax={playerHpMax}
+                        mana={displayPlayerMana}
+                        manaMax={playerManaMax}
+                        hpPercent={playerHpPercent}
+                        manaPercent={playerManaPercent}
+                      />
+                    </div>
                   </div>
                 ) : null}
             </div>

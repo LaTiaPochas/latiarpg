@@ -764,11 +764,61 @@ function mapRowToEnemyView(
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: CombatEncounterPageProps): Promise<Metadata> {
   const { code: raw } = await params;
   const code = decodeURIComponent(raw);
+  const { zone: zoneQuery } = await searchParams;
+  const zoneCode =
+    typeof zoneQuery === "string" && zoneQuery.trim().length > 0
+      ? zoneQuery.trim()
+      : "";
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { title: `Combate - ${code}` };
+  }
+
+  let encounterZoneId: string | null = null;
+  if (zoneCode) {
+    const { data: zoneRow, error: zoneError } = await supabase
+      .from("zones")
+      .select("id")
+      .eq("code", zoneCode)
+      .maybeSingle();
+
+    if (zoneError || !zoneRow || zoneRow.id == null) {
+      notFound();
+    }
+    encounterZoneId = String(zoneRow.id);
+  }
+
+  let encounterQuery = supabase
+    .from("combat_encounters")
+    .select("name")
+    .eq("code", code)
+    .eq("is_active", true);
+
+  if (encounterZoneId) {
+    encounterQuery = encounterQuery.eq("zone_id", encounterZoneId);
+  }
+
+  const { data: encounter, error: encounterError } = await encounterQuery.maybeSingle();
+
+  if (encounterError || !encounter) {
+    notFound();
+  }
+
+  const name =
+    encounter.name != null && String(encounter.name).trim().length > 0
+      ? String(encounter.name).trim()
+      : code;
+
   return {
-    title: `Combate — ${code}`,
+    title: `Combate - ${name}`,
   };
 }
 

@@ -495,9 +495,9 @@ export function HerreriaCompletedModal({
               Componentes necesarios
             </p>
             {selectedAvailableRecipe && selectedAvailableRecipe.components.length > 0 ? (
-              <div className="mx-auto mt-6 grid max-w-sm grid-cols-4 gap-3">
+              <div className="mx-auto mt-6 flex max-w-md flex-wrap justify-center gap-4">
                 {selectedAvailableRecipe.components.map((component) => (
-                  <div key={component.itemId} className="text-center">
+                  <div key={component.itemId} className="w-[4.5rem] shrink-0 text-center sm:w-20">
                     <button
                       type="button"
                       className="relative aspect-square rounded-md border-2 border-amber-900/70 bg-[#1f120e]/85 shadow-inner shadow-black/40"

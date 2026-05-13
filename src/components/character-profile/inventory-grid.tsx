@@ -23,6 +23,7 @@ import {
 } from "@/app/(main)/character_profile/actions";
 import {
   formatWeaponAttackTypeLabel,
+  inventoryTooltipSubtitleUnderName,
   type EquipmentInstanceTooltip,
   type WeaponInstanceTooltip,
 } from "@/components/character-profile/inventory-types";
@@ -128,12 +129,6 @@ const abilitiesFont = Montserrat({
 });
 const MOBILE_ABILITY_TOOLTIP_WIDTH = 240;
 const MOBILE_ABILITY_TOOLTIP_EDGE_GAP = 8;
-
-function capitalizeFirst(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
-}
 
 function consumableInventoryFlag(effect: Record<string, unknown>): boolean {
   const v = effect.inventory;
@@ -1665,12 +1660,20 @@ export function InventoryGrid({
                     </div>
                   ) : null}
                 </div>
-                {activeItem.itemTypeCode && (activeItem.itemTypeId === 2 || activeItem.itemTypeId === 3) ? (
-                  <p className={`${abilitiesFont.className} mt-0.5 text-[11px] font-semibold text-amber-300/85`}>
-                    {capitalizeFirst(activeItem.itemTypeCode)}
-                  </p>
-                ) : null}
-                <p className={`${itemTooltipFont.className} mt-2 italic leading-relaxed text-amber-50/90`}>
+                {(() => {
+                  const subtitle = inventoryTooltipSubtitleUnderName({
+                    itemTypeId: activeItem.itemTypeId,
+                    itemTypeCode: activeItem.itemTypeCode,
+                    equipSlot: activeItem.equipSlot,
+                  });
+                  if (!subtitle) return null;
+                  return (
+                    <p className={`${abilitiesFont.className} mt-0 text-[11px] font-semibold text-amber-300/85`}>
+                      {subtitle}
+                    </p>
+                  );
+                })()}
+                <p className={`${itemTooltipFont.className} text-[12px] mt-2 italic leading-relaxed text-amber-50/90`}>
                   {activeItem.description}
                 </p>
                 {activeItem.quoteText ? (
@@ -1686,7 +1689,15 @@ export function InventoryGrid({
             {(() => {
               if (!activeItem.equipSlot || tooltip.slotNumber == null) return null;
               const equipSlot = (activeItem.equipSlot ?? "").trim().toLowerCase();
-              const hideEquipButton = ["material", "consumable", "resource", "recipe"].includes(equipSlot);
+              const hideEquipButton = [
+                "material",
+                "consumable",
+                "resource",
+                "recipe",
+                "key items",
+                "key_items",
+                "keyitems",
+              ].includes(equipSlot);
               if (hideEquipButton) return null;
               return (
               <button

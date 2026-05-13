@@ -8,6 +8,7 @@ import {
 } from "@/app/(main)/warehouse/actions";
 import {
   formatWeaponAttackTypeLabel,
+  inventoryTooltipSubtitleUnderName,
   type EquipmentInstanceTooltip,
   type WeaponInstanceTooltip,
 } from "@/components/character-profile/inventory-types";
@@ -76,12 +77,6 @@ const INITIAL_TOOLTIP: TooltipState = {
   panel: null,
   slotNumber: null,
 };
-
-function capitalizeFirst(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
-}
 
 function isDesktopViewport(): boolean {
   if (typeof window === "undefined") return false;
@@ -1431,11 +1426,19 @@ export function GlobalWarehouseInventoryModal({
                     </div>
                   ) : null}
                 </div>
-                {activeItem.itemTypeCode && (activeItem.itemTypeId === 2 || activeItem.itemTypeId === 3) ? (
-                  <p className={`${abilitiesFont.className} mt-0.5 text-[11px] font-semibold text-amber-300/85`}>
-                    {capitalizeFirst(activeItem.itemTypeCode)}
-                  </p>
-                ) : null}
+                {(() => {
+                  const subtitle = inventoryTooltipSubtitleUnderName({
+                    itemTypeId: activeItem.itemTypeId,
+                    itemTypeCode: activeItem.itemTypeCode,
+                    equipSlot: activeItem.equipSlot,
+                  });
+                  if (!subtitle) return null;
+                  return (
+                    <p className={`${abilitiesFont.className} mt-0.5 text-[11px] font-semibold text-amber-300/85`}>
+                      {subtitle}
+                    </p>
+                  );
+                })()}
                 <p className={`${itemTooltipFont.className} mt-2 italic leading-relaxed text-amber-50/90`}>
                   {activeItem.description}
                 </p>
