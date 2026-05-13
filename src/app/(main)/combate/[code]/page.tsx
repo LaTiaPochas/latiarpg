@@ -18,6 +18,8 @@ import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/n
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 
+const LEVEL_UP_WORLD_EVENT_ICON_SRC = "/img/resources/iconos/icon_lvlup.png";
+
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
   searchParams: Promise<{ debug?: string; zone?: string; hotspot?: string }>;
@@ -1604,6 +1606,10 @@ export default async function CombatEncounterPage({
       : encounter.name != null && String(encounter.name).trim().length > 0
         ? String(encounter.name).trim()
         : "Mapa desconocido";
+  const combatDisplayName =
+    encounter.name != null && String(encounter.name).trim().length > 0
+      ? String(encounter.name).trim()
+      : String(encounter.code ?? code);
   const escapeToMapHref =
     hotspotId && mapBaseHref.startsWith("/")
       ? `${mapBaseHref}?hotspot=${encodeURIComponent(hotspotId)}`
@@ -1938,8 +1944,8 @@ export default async function CombatEncounterPage({
 
     const safePlayerName = escapeHtml(playerLogName);
     const safePlayerColor = escapeHtml(playerLogColor);
-    const safeMapName = escapeHtml(mapDisplayName);
-    const eventHtml = `<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> ha caido en combate en ${safeMapName}. Prendemos una vela por él.`;
+    const safeCombatName = escapeHtml(combatDisplayName);
+    const eventHtml = `<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> ha caido en combate en ${safeCombatName}. Prendemos una vela por él.`;
 
     await insertWorldEventLog(supabaseAction, actionUser.id, {
       member_name: playerLogName,
@@ -1959,7 +1965,7 @@ export default async function CombatEncounterPage({
     const safePlayerName = escapeHtml(playerLogName);
     const safePlayerColor = escapeHtml(playerLogColor);
     const safeLevel = Math.max(1, Math.trunc(Number.isFinite(Number(newLevel)) ? Number(newLevel) : 1));
-    const eventHtml = `¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
+    const eventHtml = `<img src="${LEVEL_UP_WORLD_EVENT_ICON_SRC}" alt="" width="18" height="18" style="display:inline-block;vertical-align:text-bottom;margin-right:4px;" />¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
 
     await insertWorldEventLog(supabaseAction, actionUser.id, {
       member_name: playerLogName,

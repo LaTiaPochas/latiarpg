@@ -22,6 +22,8 @@ type MapSprite = {
   xPercent: number;
   yPercent: number;
   className?: string;
+  completedSrc?: string;
+  completedAlt?: string;
   completedClassName?: string;
 };
 
@@ -48,11 +50,11 @@ const HOTSPOTS: Hotspot[] = [
     description: "¿Tomar materiales y crear nuevos objetos? ¿Dónde me anoto?",
   },
   {
-    id: "lesser-shop",
-    label: "Trueque Fenicio",
+    id: "soul-altar",
+    label: "Roca Extraña",
     xPercent: 83,
     yPercent: 87,
-    description: "La mano invisible del mercado (negro) en su máximo esplendor.",
+    description: "Una piedra misteriosa, con gran energía mágica.",
   },
   /*
   {
@@ -97,6 +99,20 @@ const MAP_SPRITES: MapSprite[] = [
     className: "w-[65px] sm:w-[82px] lg:w-[110px]",
     completedClassName: "w-[74px] sm:w-[112px] lg:w-[140px]",
   },
+  {
+    id: "soul-altar-sprite",
+    hotspotId: "soul-altar",
+    src: "/img/resources/maps/garrison_altar_construction.png",
+    alt: "Leo escondido",
+    width: 170,
+    height: 170,
+    xPercent: 83,
+    yPercent: 82,
+    className: "w-[65px] sm:w-[82px] lg:w-[100px]",
+    completedSrc: "/img/resources/maps/garrison_altar_completed.png",
+    completedAlt: "Altar de almas",
+    completedClassName: "w-[84px] sm:w-[112px] lg:w-[160px]",
+  },
 ];
 
 type GarrisonMapProps = {
@@ -104,6 +120,7 @@ type GarrisonMapProps = {
   showRelaxingWatersSprite?: boolean;
   showAdvancedHotspots?: boolean;
   isCraftingBenchCompleted?: boolean;
+  isSoulAltarCompleted?: boolean;
 };
 
 export function GarrisonMap({
@@ -111,17 +128,22 @@ export function GarrisonMap({
   showRelaxingWatersSprite = false,
   showAdvancedHotspots = false,
   isCraftingBenchCompleted = false,
+  isSoulAltarCompleted = false,
 }: GarrisonMapProps) {
   const router = useRouter();
   const [selectedHotspotId, setSelectedHotspotId] = useState(HOTSPOTS[0].id);
   const availableHotspots = useMemo(
     () =>
-      HOTSPOTS.filter(
+      HOTSPOTS.map((spot) =>
+        spot.id === "soul-altar" && isSoulAltarCompleted
+          ? { ...spot, label: "Altar de Almas" }
+          : spot,
+      ).filter(
         (spot) =>
           showAdvancedHotspots ||
           (spot.id !== "crafting-table" && spot.id !== "lesser-shop"),
       ),
-    [showAdvancedHotspots],
+    [isSoulAltarCompleted, showAdvancedHotspots],
   );
   const selectedHotspot = useMemo(
     () =>
@@ -175,7 +197,25 @@ export function GarrisonMap({
           priority
           className="h-auto w-full object-contain select-none lg:h-full"
         />
-        {visibleSprites.map((sprite) => (
+        {visibleSprites.map((sprite) => {
+          const isCraftingCompleted =
+            sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted;
+          const isSoulAltarSpriteCompleted =
+            sprite.id === "soul-altar-sprite" && isSoulAltarCompleted;
+          const imageSrc =
+            isCraftingCompleted
+              ? "/img/resources/maps/garrison_anvil_completed.png"
+              : isSoulAltarSpriteCompleted && sprite.completedSrc
+                ? sprite.completedSrc
+                : sprite.src;
+          const imageAlt =
+            isCraftingCompleted
+              ? "Yunque de herrería completado"
+              : isSoulAltarSpriteCompleted && sprite.completedAlt
+                ? sprite.completedAlt
+                : sprite.alt;
+          const defaultSpriteWidthClass = "w-[70px] sm:w-[110px] lg:w-[130px]";
+          return (
           <div
             key={sprite.id}
             className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
@@ -184,27 +224,38 @@ export function GarrisonMap({
               top: `${sprite.yPercent}%`,
             }}
           >
-            <Image
-              src={
-                sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted
-                  ? "/img/resources/maps/garrison_anvil_completed.png"
-                  : sprite.src
-              }
-              alt={
-                sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted
-                  ? "Yunque de herrería completado"
-                  : sprite.alt
-              }
-              width={sprite.width}
-              height={sprite.height}
-              className={`h-auto object-contain ${
-                sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted
-                  ? (sprite.completedClassName ?? sprite.className)
-                  : (sprite.className ?? "w-[70px] sm:w-[110px] lg:w-[130px]")
-              }`}
-            />
+            {isSoulAltarSpriteCompleted && sprite.completedSrc ? (
+              <div
+                className={
+                  sprite.completedClassName ??
+                  sprite.className ??
+                  defaultSpriteWidthClass
+                }
+              >
+                <Image
+                  src={imageSrc}
+                  alt={imageAlt}
+                  width={sprite.width}
+                  height={sprite.height}
+                  className="h-auto w-full max-w-full object-contain"
+                />
+              </div>
+            ) : (
+              <Image
+                src={imageSrc}
+                alt={imageAlt}
+                width={sprite.width}
+                height={sprite.height}
+                className={`h-auto object-contain ${
+                  isCraftingCompleted
+                    ? (sprite.completedClassName ?? sprite.className ?? defaultSpriteWidthClass)
+                    : (sprite.className ?? defaultSpriteWidthClass)
+                }`}
+              />
+            )}
           </div>
-        ))}
+          );
+        })}
         {availableHotspots.map((hotspot) => {
           const isSelected = hotspot.id === selectedHotspot.id;
           return (
@@ -259,6 +310,10 @@ export function GarrisonMap({
               }
               if (selectedHotspot.id === "crafting-table") {
                 router.push("/herreria");
+                return;
+              }
+              if (selectedHotspot.id === "soul-altar") {
+                router.push("/soul-altar");
                 return;
               }
               router.push(`/?destino=${encodeURIComponent(selectedHotspot.id)}`);
