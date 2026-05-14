@@ -49,6 +49,10 @@ type WeaponInstanceRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 
 type EquipmentInstanceRow = {
@@ -65,6 +69,10 @@ type EquipmentInstanceRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 
 type CharacterAbilityView = {
@@ -149,6 +157,12 @@ function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null):
     statKey3: row.stat_key_3,
     valueFlat3: row.value_flat_3,
     valuePct3: row.value_pct_3,
+    statKey4: row.stat_key_4,
+    valueFlat4: row.value_flat_4,
+    valuePct4: null,
+    statKey5: row.stat_key_5,
+    valueFlat5: row.value_flat_5,
+    valuePct5: null,
   };
 }
 
@@ -173,6 +187,12 @@ function mapEquipmentInstanceForTooltip(
     statKey3: row.stat_key_3,
     valueFlat3: row.value_flat_3,
     valuePct3: row.value_pct_3,
+    statKey4: row.stat_key_4,
+    valueFlat4: row.value_flat_4,
+    valuePct4: null,
+    statKey5: row.stat_key_5,
+    valueFlat5: row.value_flat_5,
+    valuePct5: null,
   };
 }
 
@@ -276,7 +296,7 @@ export default async function CharacterProfilePage() {
       ? await supabase
           .from("weapon_instance")
           .select(
-            "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("id", weaponInstanceIds)
       : { data: [] };
@@ -285,7 +305,7 @@ export default async function CharacterProfilePage() {
       ? await supabase
           .from("equipment_instances")
           .select(
-            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("id", equipmentInstanceIds)
       : { data: [] };

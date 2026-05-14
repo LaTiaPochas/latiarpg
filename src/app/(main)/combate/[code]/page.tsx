@@ -13,7 +13,11 @@ import {
   type CombatPlayerSkillView,
   type CombatDefeatLostItem,
 } from "@/components/combat/combat-encounter-shell";
-import { mapPathByZoneCode } from "@/lib/game-zones";
+import {
+  mapPathByZoneCode,
+  normalizeZoneCodeKey,
+  zoneLookupCodeCandidates,
+} from "@/lib/game-zones";
 import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
@@ -180,6 +184,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }
     | Array<{
         id: number;
@@ -199,6 +207,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }>
     | null;
   equipment_instances:
@@ -216,6 +228,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }
     | Array<{
         id: number;
@@ -231,6 +247,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }>
     | null;
 };
@@ -253,6 +273,10 @@ type WeaponInstancePoolRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 
 type EquipmentInstancePoolRow = {
@@ -269,6 +293,10 @@ type EquipmentInstancePoolRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 
 function pickTemplate(raw: EncounterEnemyRow["enemy_templates"]): EnemyTemplateRow | null {
@@ -552,6 +580,24 @@ type CombatCharacterLoadStep = {
 
 type CombatPageSupabase = Awaited<ReturnType<typeof createClient>>;
 
+async function resolveEncounterZoneId(
+  supabase: CombatPageSupabase,
+  zoneQuery: string,
+): Promise<string | null> {
+  const trimmed = zoneQuery.trim();
+  if (!trimmed) return null;
+  const candidates = zoneLookupCodeCandidates(trimmed);
+  if (candidates.length === 0) return null;
+  const { data: rows, error } = await supabase
+    .from("zones")
+    .select("id")
+    .in("code", candidates)
+    .limit(1);
+  if (error || !rows?.length) return null;
+  const id = rows[0]?.id;
+  return id != null ? String(id) : null;
+}
+
 /**
  * Resuelve `user_character` probando varias claves reales en distintas instalaciones de Supabase:
  * - `profile_id` = `auth.uid()` (lo que usa `class-selection`)
@@ -784,16 +830,10 @@ export async function generateMetadata({
 
   let encounterZoneId: string | null = null;
   if (zoneCode) {
-    const { data: zoneRow, error: zoneError } = await supabase
-      .from("zones")
-      .select("id")
-      .eq("code", zoneCode)
-      .maybeSingle();
-
-    if (zoneError || !zoneRow || zoneRow.id == null) {
+    encounterZoneId = await resolveEncounterZoneId(supabase, zoneCode);
+    if (!encounterZoneId) {
       notFound();
     }
-    encounterZoneId = String(zoneRow.id);
   }
 
   let encounterQuery = supabase
@@ -896,16 +936,10 @@ export default async function CombatEncounterPage({
 
   let encounterZoneId: string | null = null;
   if (zoneCode) {
-    const { data: zoneRow, error: zoneError } = await supabase
-      .from("zones")
-      .select("id")
-      .eq("code", zoneCode)
-      .maybeSingle();
-
-    if (zoneError || !zoneRow || zoneRow.id == null) {
+    encounterZoneId = await resolveEncounterZoneId(supabase, zoneCode);
+    if (!encounterZoneId) {
       notFound();
     }
-    encounterZoneId = String(zoneRow.id);
   }
 
   let encounterQuery = supabase
@@ -1074,7 +1108,7 @@ export default async function CombatEncounterPage({
   const { data: enemyDropRows } = await supabase
     .from("enemy_drop_tables")
     .select(
-      "combat_encounter_id, enemy_template_id, item_id, weapon_instance_id, equipment_instance_id, drop_chance, drop_group, min_qty, max_qty, items(id, name, description, quote_text, icon_path, sell_value, item_type_id, equip_slot, rarity, rarity_color, item_types(code)), weapon_instance(id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3), equipment_instances(id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3)",
+      "combat_encounter_id, enemy_template_id, item_id, weapon_instance_id, equipment_instance_id, drop_chance, drop_group, min_qty, max_qty, items(id, name, description, quote_text, icon_path, sell_value, item_type_id, equip_slot, rarity, rarity_color, item_types(code)), weapon_instance(id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5), equipment_instances(id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5)",
     )
     .eq("combat_encounter_id", code);
 
@@ -1118,7 +1152,7 @@ export default async function CombatEncounterPage({
       ? await lootInstancePoolClient
           .from("weapon_instance")
           .select(
-            "id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", dropResolvedItemIds)
       : { data: [] };
@@ -1127,7 +1161,7 @@ export default async function CombatEncounterPage({
       ? await lootInstancePoolClient
           .from("equipment_instances")
           .select(
-            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", dropResolvedItemIds)
       : { data: [] };
@@ -1235,6 +1269,12 @@ export default async function CombatEncounterPage({
         statKey3: string | null;
         valueFlat3: number | null;
         valuePct3: number | null;
+        statKey4: string | null;
+        valueFlat4: number | null;
+        valuePct4: number | null;
+        statKey5: string | null;
+        valueFlat5: number | null;
+        valuePct5: number | null;
       } | null;
       equipmentInstance?: {
         rarity: string | null;
@@ -1248,6 +1288,12 @@ export default async function CombatEncounterPage({
         statKey3: string | null;
         valueFlat3: number | null;
         valuePct3: number | null;
+        statKey4: string | null;
+        valueFlat4: number | null;
+        valuePct4: number | null;
+        statKey5: string | null;
+        valueFlat5: number | null;
+        valuePct5: number | null;
       } | null;
     }
   >();
@@ -1445,6 +1491,12 @@ export default async function CombatEncounterPage({
             statKey3: typeof weaponJoin.stat_key_3 === "string" ? weaponJoin.stat_key_3 : null,
             valueFlat3: weaponJoin.value_flat_3 != null ? Number(weaponJoin.value_flat_3) : null,
             valuePct3: weaponJoin.value_pct_3 != null ? Number(weaponJoin.value_pct_3) : null,
+            statKey4: typeof weaponJoin.stat_key_4 === "string" ? weaponJoin.stat_key_4 : null,
+            valueFlat4: weaponJoin.value_flat_4 != null ? Number(weaponJoin.value_flat_4) : null,
+            valuePct4: null,
+            statKey5: typeof weaponJoin.stat_key_5 === "string" ? weaponJoin.stat_key_5 : null,
+            valueFlat5: weaponJoin.value_flat_5 != null ? Number(weaponJoin.value_flat_5) : null,
+            valuePct5: null,
           }
         : null,
       equipmentInstance: equipmentJoin
@@ -1467,6 +1519,16 @@ export default async function CombatEncounterPage({
             valueFlat3:
               equipmentJoin.value_flat_3 != null ? Number(equipmentJoin.value_flat_3) : null,
             valuePct3: equipmentJoin.value_pct_3 != null ? Number(equipmentJoin.value_pct_3) : null,
+            statKey4:
+              typeof equipmentJoin.stat_key_4 === "string" ? equipmentJoin.stat_key_4 : null,
+            valueFlat4:
+              equipmentJoin.value_flat_4 != null ? Number(equipmentJoin.value_flat_4) : null,
+            valuePct4: null,
+            statKey5:
+              typeof equipmentJoin.stat_key_5 === "string" ? equipmentJoin.stat_key_5 : null,
+            valueFlat5:
+              equipmentJoin.value_flat_5 != null ? Number(equipmentJoin.value_flat_5) : null,
+            valuePct5: null,
           }
         : null,
     });
@@ -1649,13 +1711,19 @@ export default async function CombatEncounterPage({
     typeof backgroundRaw === "string" && backgroundRaw.trim().length > 0
       ? backgroundRaw.trim()
       : null;
-  const mapBaseHref = mapPathByZoneCode(zoneCode || null) ?? "/";
+  const zoneForMapHref = zoneCode || combatProgressZoneCode || null;
+  const mapBaseHref = mapPathByZoneCode(zoneForMapHref) ?? "/";
+  const zoneKeyForMapUi = normalizeZoneCodeKey(zoneForMapHref);
   const mapDisplayName =
-    zoneCode === "hidden_forest"
+    zoneKeyForMapUi === "hidden_forest"
       ? "Bosque Inexplorado"
-      : encounter.name != null && String(encounter.name).trim().length > 0
-        ? String(encounter.name).trim()
-        : "Mapa desconocido";
+      : zoneKeyForMapUi === "near_woods" || zoneKeyForMapUi === "nearwoods"
+        ? "Cercanías del bosque"
+        : zoneKeyForMapUi === "magic_forest" || zoneKeyForMapUi === "magicforest"
+          ? "Bosque mágico"
+          : encounter.name != null && String(encounter.name).trim().length > 0
+            ? String(encounter.name).trim()
+            : "Mapa desconocido";
   const combatDisplayName =
     encounter.name != null && String(encounter.name).trim().length > 0
       ? String(encounter.name).trim()

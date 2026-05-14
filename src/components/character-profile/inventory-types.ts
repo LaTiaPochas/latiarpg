@@ -16,6 +16,12 @@ export type WeaponInstanceTooltip = {
   statKey3: string | null;
   valueFlat3: number | null;
   valuePct3: number | null;
+  statKey4: string | null;
+  valueFlat4: number | null;
+  valuePct4: number | null;
+  statKey5: string | null;
+  valueFlat5: number | null;
+  valuePct5: number | null;
 };
 
 /** Etiqueta legible para el tooltip (al lado de WEAPON). */

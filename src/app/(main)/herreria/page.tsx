@@ -107,6 +107,10 @@ type CraftedWeaponInstanceRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 type CraftedEquipmentInstanceRow = Omit<
   CraftedWeaponInstanceRow,
@@ -578,7 +582,7 @@ export default async function HerreriaPage() {
       ? await supabase
           .from("weapon_instance")
           .select(
-            "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", craftedItemIds)
       : { data: [] };
@@ -587,7 +591,7 @@ export default async function HerreriaPage() {
       ? await supabase
           .from("equipment_instances")
           .select(
-            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", craftedItemIds)
       : { data: [] };
@@ -794,6 +798,8 @@ export default async function HerreriaPage() {
           formatCraftedStatLine(roll.stat_key_1, roll.value_flat_1, roll.value_pct_1),
           formatCraftedStatLine(roll.stat_key_2, roll.value_flat_2, roll.value_pct_2),
           formatCraftedStatLine(roll.stat_key_3, roll.value_flat_3, roll.value_pct_3),
+          formatCraftedStatLine(roll.stat_key_4, roll.value_flat_4, null),
+          formatCraftedStatLine(roll.stat_key_5, roll.value_flat_5, null),
         ].find((line): line is string => Boolean(line)) ?? null
       : null;
     const requirements = craftedItemId

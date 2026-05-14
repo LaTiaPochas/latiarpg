@@ -1578,6 +1578,8 @@ export function InventoryGrid({
                         formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
                         formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
                         formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                        formatWeaponStatLine(roll.statKey4, roll.valueFlat4, roll.valuePct4),
+                        formatWeaponStatLine(roll.statKey5, roll.valueFlat5, roll.valuePct5),
                       ]
                         .filter(Boolean)
                         .map((line, index) => (

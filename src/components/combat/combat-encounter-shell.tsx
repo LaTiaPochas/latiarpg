@@ -803,6 +803,12 @@ export type CombatVictoryLootItem = {
     statKey3: string | null;
     valueFlat3: number | null;
     valuePct3: number | null;
+    statKey4: string | null;
+    valueFlat4: number | null;
+    valuePct4: number | null;
+    statKey5: string | null;
+    valueFlat5: number | null;
+    valuePct5: number | null;
   } | null;
   equipmentInstance?: {
     rarity: string | null;
@@ -816,6 +822,12 @@ export type CombatVictoryLootItem = {
     statKey3: string | null;
     valueFlat3: number | null;
     valuePct3: number | null;
+    statKey4: string | null;
+    valueFlat4: number | null;
+    valuePct4: number | null;
+    statKey5: string | null;
+    valueFlat5: number | null;
+    valuePct5: number | null;
   } | null;
 };
 export type CombatDefeatLostItem = {
@@ -3869,6 +3881,8 @@ export function CombatEncounterShell({
                               formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
                               formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
                               formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                              formatWeaponStatLine(roll.statKey4, roll.valueFlat4, roll.valuePct4),
+                              formatWeaponStatLine(roll.statKey5, roll.valueFlat5, roll.valuePct5),
                             ].filter(Boolean);
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
@@ -3988,6 +4002,8 @@ export function CombatEncounterShell({
                               formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
                               formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
                               formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
+                              formatWeaponStatLine(roll.statKey4, roll.valueFlat4, roll.valuePct4),
+                              formatWeaponStatLine(roll.statKey5, roll.valueFlat5, roll.valuePct5),
                             ].filter(Boolean);
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
