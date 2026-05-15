@@ -1,8 +1,13 @@
+import {
+  sumPlayerSelfBuffScalingFromEffect,
+  type AbilityScalingStatGetter,
+} from "@/lib/ability-effect-scaling";
+
 /**
  * Placeholders estilo `{INT*0.1}` en descripciones de habilidades (tooltip).
  * Misma idea que el escalado de skills: floor(max(0, valorStat) × ratio).
  */
-export type AbilityTooltipStatGetter = (statKeyUpper: string) => number;
+export type AbilityTooltipStatGetter = AbilityScalingStatGetter;
 
 const STAT_TIMES_RATIO_SOURCE =
   /\{\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*\*\s*([+-]?[\d.]+(?:[eE][+-]?\d+)?))?\s*\}/.source;
@@ -37,6 +42,17 @@ export function formatAbilityTooltipStatExpressions(
   );
 }
 
+/** Reemplaza `{amount}` con el total de `scaling` y luego `{STAT*ratio}` en la descripción. */
+export function formatAbilityTooltipDescription(
+  description: string,
+  effect: Record<string, unknown>,
+  getStat: AbilityTooltipStatGetter,
+): string {
+  const amountTotal = sumPlayerSelfBuffScalingFromEffect(effect, getStat);
+  const withAmount = description.replaceAll("{amount}", String(amountTotal));
+  return formatAbilityTooltipStatExpressions(withAmount, getStat);
+}
+
 /** Suma de todos los `{STAT*ratio}` en el texto (cada ocurrencia suma igual que el reemplazo en tooltip). */
 export function sumAbilityDescriptionStatExpressionBonuses(
   description: string,
@@ -68,6 +84,7 @@ export function formatAbilityTooltipTotalDamageRange(
 
 /** Stats de ficha (perfil): sin buffs temporales de combate. */
 export type AbilityTooltipSheetSnapshot = {
+  level: number;
   str: number;
   dex: number;
   int: number;
@@ -90,6 +107,8 @@ export function abilityTooltipStatGetterFromSheet(stats: AbilityTooltipSheetSnap
         return Math.max(0, Math.floor(stats.int));
       case "WIS":
         return Math.max(0, Math.floor(stats.wis));
+      case "LEVEL":
+        return Math.max(1, Math.floor(stats.level));
       case "ATTACK_DAMAGE":
       case "WEAPON_DAMAGE": {
         const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
@@ -109,6 +128,7 @@ export function abilityTooltipStatGetterFromSheet(stats: AbilityTooltipSheetSnap
 
 /** Tooltip en combate: arma/magia ya incluyen buffs aplicables al cálculo de daño del PJ. */
 export type AbilityTooltipCombatSnapshot = {
+  level: number;
   str: number;
   dex: number;
   int: number;
@@ -136,6 +156,8 @@ export function abilityTooltipStatGetterFromCombat(snapshot: AbilityTooltipComba
         return Math.max(0, Math.floor(snapshot.int));
       case "WIS":
         return Math.max(0, Math.floor(snapshot.wis));
+      case "LEVEL":
+        return Math.max(1, Math.floor(snapshot.level));
       case "ATTACK_DAMAGE":
       case "WEAPON_DAMAGE": {
         const wmin = Math.max(

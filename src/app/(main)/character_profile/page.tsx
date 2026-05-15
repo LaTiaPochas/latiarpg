@@ -823,6 +823,7 @@ export default async function CharacterProfilePage() {
           }}
           abilities={abilities}
           abilityStats={{
+            level: Math.max(1, Math.trunc(level)),
             str: strEffective,
             dex: dexEffective,
             int: intEffective,

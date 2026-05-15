@@ -6,6 +6,7 @@ import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { sumAbilityEffectScalingTotals } from "@/lib/ability-effect-scaling";
 import {
   abilityTooltipStatGetterFromCombat,
   formatAbilityTooltipStatExpressions,
@@ -503,6 +504,11 @@ function formatEnemySkillCombatLogDescription(
     .replaceAll("{damage_types}", damageTypeLabel);
 }
 
+function buffEffectTargetIsSelf(effect: Record<string, unknown>): boolean {
+  const raw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
+  return raw === "self" || raw === "player";
+}
+
 /** Un término `{ stat, ratio }` → `floor(stat × ratio)` (ratio puede ser decimal). */
 function playerSkillScalingEntryBonus(
   entry: unknown,
@@ -540,11 +546,6 @@ function sumPlayerSkillScalingBonus(
     return playerSkillScalingEntryBonus(scalingRaw, getCombatStatValue);
   }
   return 0;
-}
-
-function buffEffectTargetIsSelf(effect: Record<string, unknown>): boolean {
-  const raw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
-  return raw === "self" || raw === "player";
 }
 
 function isPlayerSelfBuffEffect(effect: Record<string, unknown>): boolean {
@@ -694,7 +695,7 @@ function resolvePlayerSelfBuffParts(
       const kind = parseScalingBuffDebuffType(entry["scaling-type"] ?? entry.scaling_type);
       const stat = parseAffectedStatFromRaw(entry["affected-stat"] ?? entry.affected_stat);
       const modifiersRaw = entry.modifiers ?? entry.modifier ?? entry.scaling;
-      const sum = Math.trunc(sumSelfBuffScalingTotals(modifiersRaw, getCombatStatValue));
+      const sum = Math.trunc(sumAbilityEffectScalingTotals(modifiersRaw, getCombatStatValue));
       const magnitude = Math.abs(sum);
       if (!stat || magnitude === 0) continue;
       const signed = kind === "debuff" ? -magnitude : magnitude;
@@ -705,7 +706,7 @@ function resolvePlayerSelfBuffParts(
 
   const stat = parsePlayerSelfAffectedStat(effect);
   if (!stat) return [];
-  const sum = Math.trunc(sumSelfBuffScalingTotals(effect.scaling, getCombatStatValue));
+  const sum = Math.trunc(sumAbilityEffectScalingTotals(effect.scaling, getCombatStatValue));
   const gain = Math.max(0, sum);
   if (gain === 0) return [];
   return mirrorWeaponAndMagicDamageBuffParts([{ stat, amount: gain }]);
@@ -1038,50 +1039,6 @@ function computePlayerSkillMitigatedDamageToEnemy(
     enemy.resistances,
     opts.weaknessesResolved,
   );
-}
-
-/**
- * Contribución de una línea de `scaling`:
- * - `stat: Fixed` → `amount` entero ≥ 0
- * - `stat: STR|DEX|INT|WIS` → `floor(amount + stat × ratio)`
- */
-function selfBuffScalingLineValue(
-  entry: unknown,
-  getCombatStatValue: (statKeyUpper: string) => number,
-): number {
-  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
-  const o = entry as Record<string, unknown>;
-  const statRaw = typeof o.stat === "string" ? o.stat.trim() : "";
-  if (statRaw === "") return 0;
-  const upper = statRaw.toUpperCase();
-  const amount = coerceEffectNumber(o.amount, 0);
-  const ratio = buffScalingRatioParsed(o.ratio);
-
-  if (upper === "FIXED") {
-    return Math.max(0, Math.floor(amount));
-  }
-  if (["STR", "DEX", "INT", "WIS"].includes(upper)) {
-    const fromStat = Math.max(0, getCombatStatValue(upper)) * ratio;
-    return Math.max(0, Math.floor(amount + fromStat));
-  }
-  return 0;
-}
-
-function sumSelfBuffScalingTotals(
-  scalingRaw: unknown,
-  getCombatStatValue: (statKeyUpper: string) => number,
-): number {
-  if (scalingRaw == null) return 0;
-  if (Array.isArray(scalingRaw)) {
-    return scalingRaw.reduce(
-      (sum, item) => sum + selfBuffScalingLineValue(item, getCombatStatValue),
-      0,
-    );
-  }
-  if (typeof scalingRaw === "object") {
-    return selfBuffScalingLineValue(scalingRaw, getCombatStatValue);
-  }
-  return 0;
 }
 
 function formatPlayerSelfBuffCombatLog(
@@ -2139,6 +2096,8 @@ export function CombatEncounterShell({
           return Math.max(0, Math.floor(playerStatInt));
         case "WIS":
           return Math.max(0, Math.floor(playerStatWis));
+        case "LEVEL":
+          return Math.max(1, Math.trunc(playerLevelCurrent));
         case "ATTACK_DAMAGE":
         case "WEAPON_DAMAGE": {
           const wmin = Math.max(
@@ -2199,6 +2158,7 @@ export function CombatEncounterShell({
       playerCombatMagicDamageMaxBonus,
       timedBuffBonusByStat.magic_damage_min,
       timedBuffBonusByStat.magic_damage_max,
+      playerLevelCurrent,
     ],
   );
 
@@ -4530,6 +4490,7 @@ export function CombatEncounterShell({
               ),
             );
             const getStat = abilityTooltipStatGetterFromCombat({
+              level: playerLevelCurrent,
               str: playerStatStr,
               dex: playerStatDex,
               int: playerStatInt,

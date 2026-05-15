@@ -32,7 +32,7 @@ import {
 import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 import {
   abilityTooltipStatGetterFromSheet,
-  formatAbilityTooltipStatExpressions,
+  formatAbilityTooltipDescription,
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
 
@@ -78,6 +78,7 @@ type PlayerAbilityEntry = {
   effect: Record<string, unknown>;
 };
 type AbilityStatSnapshot = {
+  level: number;
   str: number;
   dex: number;
   int: number;
@@ -250,48 +251,39 @@ function effectNum(value: unknown, fallback: number): number {
   }
   return fallback;
 }
-function abilityScalingStatValue(stat: string, stats: AbilityStatSnapshot): number {
-  if (stat === "STR") return stats.str;
-  if (stat === "DEX") return stats.dex;
-  if (stat === "INT") return stats.int;
-  if (stat === "WIS") return stats.wis;
-  if (stat === "ATTACK_DAMAGE" || stat === "WEAPON_DAMAGE") {
-    const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
-    const wmax = Math.max(wmin, Math.floor(stats.weaponDamageMax));
-    return Math.floor((wmin + wmax) / 2);
-  }
-  if (stat === "MAGIC_DAMAGE") {
-    const mmin = Math.max(0, Math.floor(stats.magicDamageMin));
-    const mmax = Math.max(mmin, Math.floor(stats.magicDamageMax));
-    return Math.floor((mmin + mmax) / 2);
-  }
-  return 0;
-}
-function abilityScalingEntryBonus(entry: unknown, stats: AbilityStatSnapshot): number {
+function abilityScalingEntryBonus(
+  entry: unknown,
+  getStat: ReturnType<typeof abilityTooltipStatGetterFromSheet>,
+): number {
   if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
   const rec = entry as Record<string, unknown>;
   const stat = typeof rec.stat === "string" ? rec.stat.trim().toUpperCase() : "";
   const ratio = effectNum(rec.ratio, Number.NaN);
   if (stat === "" || !Number.isFinite(ratio)) return 0;
-  return Math.floor(Math.max(0, abilityScalingStatValue(stat, stats)) * ratio);
+  return Math.floor(Math.max(0, getStat(stat)) * ratio);
 }
-function abilityScalingBonus(scaling: unknown, stats: AbilityStatSnapshot): number {
+
+function abilityScalingBonus(
+  scaling: unknown,
+  getStat: ReturnType<typeof abilityTooltipStatGetterFromSheet>,
+): number {
   if (scaling == null) return 0;
   if (Array.isArray(scaling)) {
-    return scaling.reduce((sum, entry) => sum + abilityScalingEntryBonus(entry, stats), 0);
+    return scaling.reduce((sum, entry) => sum + abilityScalingEntryBonus(entry, getStat), 0);
   }
-  if (typeof scaling === "object") return abilityScalingEntryBonus(scaling, stats);
+  if (typeof scaling === "object") return abilityScalingEntryBonus(scaling, getStat);
   return 0;
 }
+
 function abilityDamageRange(
   effect: Record<string, unknown>,
-  stats: AbilityStatSnapshot,
+  getStat: ReturnType<typeof abilityTooltipStatGetterFromSheet>,
 ): { min: number; max: number } | null {
   const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
   if (typeRaw !== "damage") return null;
   const minV = Math.max(0, effectNum(effect.min, 0));
   const maxV = Math.max(minV, effectNum(effect.max, minV));
-  const bonus = abilityScalingBonus(effect.scaling, stats);
+  const bonus = abilityScalingBonus(effect.scaling, getStat);
   return { min: Math.max(0, minV + bonus), max: Math.max(0, maxV + bonus) };
 }
 function abilityCardClass(subtype: AbilitySubtype): string {
@@ -1288,7 +1280,7 @@ export function InventoryGrid({
                 {abilities.map((ability) => {
                   const subtype = abilitySubtype(ability.effect);
                   const targetKind = abilityTargetKind(ability.effect);
-                  const dmg = abilityDamageRange(ability.effect, abilityStats);
+                  const dmg = abilityDamageRange(ability.effect, abilityTooltipGetStat);
                   const isMobileTooltipOpen = mobileAbilityTooltipId === ability.id;
                   const shouldOpenUpDesktop = desktopTooltipUpById[ability.id] === true;
                   return (
@@ -1409,7 +1401,11 @@ export function InventoryGrid({
                           </>
                         ) : null}
                         <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                          {formatAbilityTooltipStatExpressions(ability.description, abilityTooltipGetStat)}
+                          {formatAbilityTooltipDescription(
+                            ability.description,
+                            ability.effect,
+                            abilityTooltipGetStat,
+                          )}
                         </p>
                       </div>
                       {isMobileTooltipOpen &&
@@ -1465,7 +1461,11 @@ export function InventoryGrid({
                                 </>
                               ) : null}
                               <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                                {formatAbilityTooltipStatExpressions(ability.description, abilityTooltipGetStat)}
+                                {formatAbilityTooltipDescription(
+                            ability.description,
+                            ability.effect,
+                            abilityTooltipGetStat,
+                          )}
                               </p>
                             </div>,
                             document.body,
