@@ -369,9 +369,23 @@ function getEffectDamageTypes(effect: Record<string, unknown>): string[] {
   return out;
 }
 
+function getEffectStateIcons(effect: Record<string, unknown>): string[] {
+  const arrRaw = effect.state_icons ?? effect.stateIcons;
+  if (Array.isArray(arrRaw)) {
+    const out: string[] = [];
+    for (const item of arrRaw) {
+      if (typeof item === "string" && item.trim().length > 0) out.push(item.trim());
+    }
+    return out;
+  }
+  const one = effect.state_icon ?? effect.stateIcon;
+  if (typeof one === "string" && one.trim().length > 0) return [one.trim()];
+  return [];
+}
+
 function getEffectStateIcon(effect: Record<string, unknown>): string | null {
-  const raw = effect.state_icon ?? effect.stateIcon;
-  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+  const xs = getEffectStateIcons(effect);
+  return xs[0] ?? null;
 }
 
 function enemySkillDamageSubtype(
@@ -2760,6 +2774,7 @@ export default async function CombatEncounterPage({
       playerWeaknesses={playerWeaknesses}
       playerWeaponAttackFamily={playerWeaponAttackFamily}
       combatResistWeakDebug={showCombatDebug}
+      combatBuffStatDebug={showCombatDebug}
     />
   );
 }
