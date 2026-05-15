@@ -58,6 +58,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             width={320}
             height={140}
             className="h-auto w-auto max-w-[220px] transition duration-300 hover:scale-105 hover:drop-shadow-[0_0_18px_rgba(251,191,36,0.55)] sm:max-w-[320px]"
+            style={{ width: "auto", height: "auto" }}
             priority
           />
         </div>

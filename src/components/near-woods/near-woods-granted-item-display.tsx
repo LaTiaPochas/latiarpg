@@ -103,7 +103,7 @@ export function NearWoodsGrantedItemDisplay({ item }: { item: NearWoodsGrantedIt
       </div>
 
       <p className={`${abilitiesFont.className} mt-3 max-w-[min(20rem,calc(100vw-2.5rem))] text-center text-xs font-bold uppercase text-amber-200/95 sm:text-xs`}>
-        {item.name.trim().toUpperCase()} x 1
+        {item.name.trim().toUpperCase()} x {item.grantedQuantity}
       </p>
     </div>
   );

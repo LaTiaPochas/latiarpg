@@ -32,6 +32,7 @@ export default function LogoutPage() {
             width={320}
             height={140}
             className="h-auto w-auto max-w-[180px] sm:max-w-[240px]"
+            style={{ width: "auto", height: "auto" }}
             priority
           />
         </div>

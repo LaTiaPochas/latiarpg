@@ -13,10 +13,16 @@ import {
   type CombatPlayerSkillView,
   type CombatDefeatLostItem,
 } from "@/components/combat/combat-encounter-shell";
-import { mapPathByZoneCode } from "@/lib/game-zones";
+import {
+  mapPathByZoneCode,
+  normalizeZoneCodeKey,
+  zoneLookupCodeCandidates,
+} from "@/lib/game-zones";
 import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
+
+const LEVEL_UP_WORLD_EVENT_ICON_SRC = "/img/resources/iconos/icon_lvlup.png";
 
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
@@ -63,6 +69,8 @@ type UserCharacterRow = {
   armor_total: number | null;
   mr_total: number | null;
   active_combat_sprite: string | null;
+  resistances?: unknown;
+  weaknesses?: unknown;
 };
 
 type CombatConsumableInventoryRow = {
@@ -165,6 +173,7 @@ type EnemyDropTableRow = {
         item_id: string | null;
         rarity_color: string | null;
         rarity: string | null;
+        attack_family: string | null;
         attack_damage_min: number | null;
         attack_damage_max: number | null;
         magic_damage_min: number | null;
@@ -178,12 +187,17 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }
     | Array<{
         id: number;
         item_id: string | null;
         rarity_color: string | null;
         rarity: string | null;
+        attack_family: string | null;
         attack_damage_min: number | null;
         attack_damage_max: number | null;
         magic_damage_min: number | null;
@@ -197,6 +211,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }>
     | null;
   equipment_instances:
@@ -214,6 +232,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }
     | Array<{
         id: number;
@@ -229,6 +251,10 @@ type EnemyDropTableRow = {
         stat_key_3: string | null;
         value_flat_3: number | null;
         value_pct_3: number | null;
+        stat_key_4: string | null;
+        value_flat_4: number | null;
+        stat_key_5: string | null;
+        value_flat_5: number | null;
       }>
     | null;
 };
@@ -238,6 +264,7 @@ type WeaponInstancePoolRow = {
   item_id: string | null;
   rarity: string | null;
   rarity_color: string | null;
+  attack_family: string | null;
   attack_damage_min: number | null;
   attack_damage_max: number | null;
   magic_damage_min: number | null;
@@ -251,6 +278,10 @@ type WeaponInstancePoolRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 
 type EquipmentInstancePoolRow = {
@@ -267,6 +298,10 @@ type EquipmentInstancePoolRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: number | null;
+  stat_key_5: string | null;
+  value_flat_5: number | null;
 };
 
 function pickTemplate(raw: EncounterEnemyRow["enemy_templates"]): EnemyTemplateRow | null {
@@ -310,7 +345,52 @@ function templatePortraitRaw(t: EnemyTemplateRow): string | null {
   );
 }
 
-function enemySkillDamageSubtype(effect: Record<string, unknown>): "physical" | "magical" | "buff" | "neutral" {
+function normalizeDamageTypeLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function getEffectDamageTypes(effect: Record<string, unknown>): string[] {
+  const raw = effect.damage_type ?? effect.damage_types;
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/[,|/]+/)
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeDamageTypeLabel(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function getEffectStateIcons(effect: Record<string, unknown>): string[] {
+  const arrRaw = effect.state_icons ?? effect.stateIcons;
+  if (Array.isArray(arrRaw)) {
+    const out: string[] = [];
+    for (const item of arrRaw) {
+      if (typeof item === "string" && item.trim().length > 0) out.push(item.trim());
+    }
+    return out;
+  }
+  const one = effect.state_icon ?? effect.stateIcon;
+  if (typeof one === "string" && one.trim().length > 0) return [one.trim()];
+  return [];
+}
+
+function getEffectStateIcon(effect: Record<string, unknown>): string | null {
+  const xs = getEffectStateIcons(effect);
+  return xs[0] ?? null;
+}
+
+function enemySkillDamageSubtype(
+  effect: Record<string, unknown>,
+): "physical" | "magical" | "buff" | "neutral" {
   const raw = effect.subtype;
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (s === "physical") return "physical";
@@ -340,6 +420,8 @@ function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
     if (effect.type !== "damage" || effect.target !== "player") continue;
     const min = Math.max(0, num(effect.min, 0));
     const max = Math.max(min, num(effect.max, min));
+    const damageTypes = getEffectDamageTypes(effect);
+    const stateIcon = getEffectStateIcon(effect);
 
     result.push({
       id: skillId,
@@ -363,6 +445,8 @@ function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
         min,
         max,
         subtype: enemySkillDamageSubtype(effect),
+        damageTypes,
+        stateIcon,
         chance: Math.max(0, Math.min(1, num(effect.chance, 1))),
       },
     });
@@ -391,6 +475,40 @@ function num(value: unknown, fallback: number): number {
     if (Number.isFinite(n)) return n;
   }
   return fallback;
+}
+
+/** `value_flat_4` / `value_flat_5` para tooltip: conserva texto (ej. fire) o número. */
+function lootInstanceStatFlatForTooltip(v: unknown): string | number | null {
+  if (v == null) return null;
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t.length > 0 ? t : null;
+  }
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v).trim();
+  return s.length > 0 ? s : null;
+}
+
+/** `text[]` / JSON desde PostgREST → lista de strings para combate. */
+function normalizeCombatResistWeakArray(raw: unknown): string[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((x) => (x == null ? "" : String(x).trim()))
+      .filter((s) => s.length > 0);
+  }
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (!t) return [];
+    try {
+      const parsed = JSON.parse(t) as unknown;
+      if (Array.isArray(parsed)) return normalizeCombatResistWeakArray(parsed);
+    } catch {
+      return [t];
+    }
+    return [t];
+  }
+  return [];
 }
 
 function escapeHtml(value: string): string {
@@ -515,6 +633,24 @@ type CombatCharacterLoadStep = {
 
 type CombatPageSupabase = Awaited<ReturnType<typeof createClient>>;
 
+async function resolveEncounterZoneId(
+  supabase: CombatPageSupabase,
+  zoneQuery: string,
+): Promise<string | null> {
+  const trimmed = zoneQuery.trim();
+  if (!trimmed) return null;
+  const candidates = zoneLookupCodeCandidates(trimmed);
+  if (candidates.length === 0) return null;
+  const { data: rows, error } = await supabase
+    .from("zones")
+    .select("id")
+    .in("code", candidates)
+    .limit(1);
+  if (error || !rows?.length) return null;
+  const id = rows[0]?.id;
+  return id != null ? String(id) : null;
+}
+
 /**
  * Resuelve `user_character` probando varias claves reales en distintas instalaciones de Supabase:
  * - `profile_id` = `auth.uid()` (lo que usa `class-selection`)
@@ -601,10 +737,38 @@ async function loadCombatUserCharacter(
   return { character, steps, profileCandidates: [...profileCandidates] };
 }
 
+/**
+ * `gap = playerLevel - enemyLevel` (positivo = enemigo más débil).
+ * Misma exp base (`enemy_templates.xp_reward`): 100% si el enemigo es de tu nivel o superior.
+ */
+function xpRewardMultiplierByEnemyVsPlayer(enemyLevel: number, playerLevel: number): number {
+  const e = Math.trunc(enemyLevel);
+  const p = Math.max(1, Math.trunc(playerLevel));
+  const gap = p - e;
+  if (gap <= 0) return 1;
+  if (gap === 1) return 0.9;
+  if (gap === 2) return 0.8;
+  if (gap === 3) return 0.5;
+  if (gap === 4) return 0.25;
+  return 0.05;
+}
+
+function dropChanceMultiplierByEncounterVsPlayer(recommendedLevel: number, playerLevel: number): number {
+  const encounterLevel = Math.max(1, Math.trunc(recommendedLevel));
+  const p = Math.max(1, Math.trunc(playerLevel));
+  const gap = p - encounterLevel;
+
+  if (gap <= 1) return 1;
+  if (gap <= 3) return 0.4;
+  if (gap === 4) return 0.2;
+  return 0.01;
+}
+
 function mapRowToEnemyView(
   encounterId: string,
   row: EncounterEnemyRow,
   index: number,
+  playerLevel: number,
 ): CombatEncounterEnemyView | null {
   const t = pickTemplate(row.enemy_templates);
   const name = t ? templateName(t) : null;
@@ -617,6 +781,8 @@ function mapRowToEnemyView(
       : hpMax;
   const mana = row.mana_override != null ? num(row.mana_override, 0) : num(t.mana, 0);
   const spawn = num(row.spawn_index, index + 1);
+  const enemyLevel = optionalNum(t.enemy_level) ?? optionalNum(t.level);
+  const enemyLevelForXp = enemyLevel ?? playerLevel;
 
   return {
     id: `${encounterId}-${spawn}-${index}`,
@@ -626,6 +792,7 @@ function mapRowToEnemyView(
         : null,
     spawnIndex: spawn,
     name,
+    enemyLevel,
     portraitSrc: normalizeEnemyTemplateAssetUrl(templatePortraitRaw(t), "portrait"),
     spriteSrc: normalizeEnemyTemplateAssetUrl(templateSpriteRaw(t), "sprite"),
     spriteOffsetX: spriteOffsetNum(
@@ -672,7 +839,11 @@ function mapRowToEnemyView(
         index + 1,
       ),
     ),
-    xpReward: Math.max(0, num(t.xp_reward, 0)),
+    xpReward: (() => {
+      const baseXp = Math.max(0, num(t.xp_reward, 0));
+      const mult = xpRewardMultiplierByEnemyVsPlayer(enemyLevelForXp, playerLevel);
+      return Math.max(0, Math.round(baseXp * mult));
+    })(),
     goldRewards: Math.max(0, num(t.gold_rewards, 0)),
     hp,
     hpMax,
@@ -687,16 +858,62 @@ function mapRowToEnemyView(
     skills: parseEnemySkills(t),
     levelOverride: optionalNum(t.level),
     aiProfile: row.ai_profile,
+    resistances: normalizeCombatResistWeakArray(t.resistances),
+    weaknesses: normalizeCombatResistWeakArray(t.weaknesses),
   };
 }
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: CombatEncounterPageProps): Promise<Metadata> {
   const { code: raw } = await params;
   const code = decodeURIComponent(raw);
+  const { zone: zoneQuery } = await searchParams;
+  const zoneCode =
+    typeof zoneQuery === "string" && zoneQuery.trim().length > 0
+      ? zoneQuery.trim()
+      : "";
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { title: `Combate - ${code}` };
+  }
+
+  let encounterZoneId: string | null = null;
+  if (zoneCode) {
+    encounterZoneId = await resolveEncounterZoneId(supabase, zoneCode);
+    if (!encounterZoneId) {
+      notFound();
+    }
+  }
+
+  let encounterQuery = supabase
+    .from("combat_encounters")
+    .select("name")
+    .eq("code", code)
+    .eq("is_active", true);
+
+  if (encounterZoneId) {
+    encounterQuery = encounterQuery.eq("zone_id", encounterZoneId);
+  }
+
+  const { data: encounter, error: encounterError } = await encounterQuery.maybeSingle();
+
+  if (encounterError || !encounter) {
+    notFound();
+  }
+
+  const name =
+    encounter.name != null && String(encounter.name).trim().length > 0
+      ? String(encounter.name).trim()
+      : code;
+
   return {
-    title: `Combate — ${code}`,
+    title: `Combate - ${name}`,
   };
 }
 
@@ -745,7 +962,7 @@ export default async function CombatEncounterPage({
 
   /** Sin `id`: en tu esquema `user_character` puede no tener PK `id` y PostgREST devuelve 42703 si se pide. */
   const userCharacterSelect =
-    "profile_id, character_name, level, class_name, experience_to_next, experience_current, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite";
+    "profile_id, character_name, level, class_name, experience_to_next, experience_current, hp_total, hp_actual, mana_total, mana_actual, speed_total, weapon_damage_min, weapon_damage_max, magic_damage_min, magic_damage_max, str, dex, int, wis, armor_total, mr_total, active_combat_sprite, resistances, weaknesses";
   const {
     character: userCharacter,
     steps: combatCharacterLoadSteps,
@@ -770,18 +987,16 @@ export default async function CombatEncounterPage({
     redirect("/character_profile");
   }
 
+  const playerLevel = Math.max(1, Math.trunc(num(userCharacter.level, 1)));
+  const playerResistances = normalizeCombatResistWeakArray(userCharacter.resistances);
+  const playerWeaknesses = normalizeCombatResistWeakArray(userCharacter.weaknesses);
+
   let encounterZoneId: string | null = null;
   if (zoneCode) {
-    const { data: zoneRow, error: zoneError } = await supabase
-      .from("zones")
-      .select("id")
-      .eq("code", zoneCode)
-      .maybeSingle();
-
-    if (zoneError || !zoneRow || zoneRow.id == null) {
+    encounterZoneId = await resolveEncounterZoneId(supabase, zoneCode);
+    if (!encounterZoneId) {
       notFound();
     }
-    encounterZoneId = String(zoneRow.id);
   }
 
   let encounterQuery = supabase
@@ -801,6 +1016,16 @@ export default async function CombatEncounterPage({
   if (encounterError || !encounter) {
     notFound();
   }
+  const encounterRecommendedLevel = Math.max(
+    1,
+    Math.trunc(
+      encounter.recommended_level != null ? num(encounter.recommended_level, playerLevel) : playerLevel,
+    ),
+  );
+  const dropChanceMultiplier = dropChanceMultiplierByEncounterVsPlayer(
+    encounterRecommendedLevel,
+    playerLevel,
+  );
   const encounterZoneRefId =
     typeof encounter.zone_id === "string" && encounter.zone_id.trim().length > 0
       ? encounter.zone_id.trim()
@@ -934,13 +1159,27 @@ export default async function CombatEncounterPage({
   const enemyRows: EncounterEnemyRow[] = rowsError ? [] : ((rows ?? []) as EncounterEnemyRow[]);
 
   const enemies: CombatEncounterEnemyView[] = enemyRows
-    .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i))
+    .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i, playerLevel))
     .filter((e): e is CombatEncounterEnemyView => e !== null);
+
+  if (showCombatDebug) {
+    console.log("[combate][resist-weak][server] PJ", {
+      resistances: playerResistances,
+      weaknesses: playerWeaknesses,
+    });
+    enemies.forEach((e, i) => {
+      console.log(`[combate][resist-weak][server] enemigo[${i}]`, e.name, {
+        templateId: e.templateId,
+        resistances: e.resistances,
+        weaknesses: e.weaknesses,
+      });
+    });
+  }
 
   const { data: enemyDropRows } = await supabase
     .from("enemy_drop_tables")
     .select(
-      "combat_encounter_id, enemy_template_id, item_id, weapon_instance_id, equipment_instance_id, drop_chance, drop_group, min_qty, max_qty, items(id, name, description, quote_text, icon_path, sell_value, item_type_id, equip_slot, rarity, rarity_color, item_types(code)), weapon_instance(id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3), equipment_instances(id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3)",
+      "combat_encounter_id, enemy_template_id, item_id, weapon_instance_id, equipment_instance_id, drop_chance, drop_group, min_qty, max_qty, items(id, name, description, quote_text, icon_path, sell_value, item_type_id, equip_slot, rarity, rarity_color, item_types(code)), weapon_instance(id, item_id, rarity, rarity_color, attack_family, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5), equipment_instances(id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5)",
     )
     .eq("combat_encounter_id", code);
 
@@ -984,7 +1223,7 @@ export default async function CombatEncounterPage({
       ? await lootInstancePoolClient
           .from("weapon_instance")
           .select(
-            "id, item_id, rarity, rarity_color, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, attack_family, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", dropResolvedItemIds)
       : { data: [] };
@@ -993,7 +1232,7 @@ export default async function CombatEncounterPage({
       ? await lootInstancePoolClient
           .from("equipment_instances")
           .select(
-            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+            "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", dropResolvedItemIds)
       : { data: [] };
@@ -1088,6 +1327,7 @@ export default async function CombatEncounterPage({
       weaponInstance?: {
         rarity: string | null;
         rarityColor: string | null;
+        attackFamily: string | null;
         attackDamageMin: number | null;
         attackDamageMax: number | null;
         magicDamageMin: number | null;
@@ -1101,6 +1341,12 @@ export default async function CombatEncounterPage({
         statKey3: string | null;
         valueFlat3: number | null;
         valuePct3: number | null;
+        statKey4: string | null;
+        valueFlat4: string | number | null;
+        valuePct4: number | null;
+        statKey5: string | null;
+        valueFlat5: string | number | null;
+        valuePct5: number | null;
       } | null;
       equipmentInstance?: {
         rarity: string | null;
@@ -1114,6 +1360,12 @@ export default async function CombatEncounterPage({
         statKey3: string | null;
         valueFlat3: number | null;
         valuePct3: number | null;
+        statKey4: string | null;
+        valueFlat4: string | number | null;
+        valuePct4: number | null;
+        statKey5: string | null;
+        valueFlat5: string | number | null;
+        valuePct5: number | null;
       } | null;
     }
   >();
@@ -1294,6 +1546,10 @@ export default async function CombatEncounterPage({
         ? {
             rarity: typeof weaponJoin.rarity === "string" ? weaponJoin.rarity : null,
             rarityColor: typeof weaponJoin.rarity_color === "string" ? weaponJoin.rarity_color : null,
+            attackFamily:
+              typeof weaponJoin.attack_family === "string" && weaponJoin.attack_family.trim().length > 0
+                ? weaponJoin.attack_family.trim()
+                : null,
             attackDamageMin:
               weaponJoin.attack_damage_min != null ? Number(weaponJoin.attack_damage_min) : null,
             attackDamageMax:
@@ -1311,6 +1567,12 @@ export default async function CombatEncounterPage({
             statKey3: typeof weaponJoin.stat_key_3 === "string" ? weaponJoin.stat_key_3 : null,
             valueFlat3: weaponJoin.value_flat_3 != null ? Number(weaponJoin.value_flat_3) : null,
             valuePct3: weaponJoin.value_pct_3 != null ? Number(weaponJoin.value_pct_3) : null,
+            statKey4: typeof weaponJoin.stat_key_4 === "string" ? weaponJoin.stat_key_4 : null,
+            valueFlat4: lootInstanceStatFlatForTooltip(weaponJoin.value_flat_4),
+            valuePct4: null,
+            statKey5: typeof weaponJoin.stat_key_5 === "string" ? weaponJoin.stat_key_5 : null,
+            valueFlat5: lootInstanceStatFlatForTooltip(weaponJoin.value_flat_5),
+            valuePct5: null,
           }
         : null,
       equipmentInstance: equipmentJoin
@@ -1333,6 +1595,14 @@ export default async function CombatEncounterPage({
             valueFlat3:
               equipmentJoin.value_flat_3 != null ? Number(equipmentJoin.value_flat_3) : null,
             valuePct3: equipmentJoin.value_pct_3 != null ? Number(equipmentJoin.value_pct_3) : null,
+            statKey4:
+              typeof equipmentJoin.stat_key_4 === "string" ? equipmentJoin.stat_key_4 : null,
+            valueFlat4: lootInstanceStatFlatForTooltip(equipmentJoin.value_flat_4),
+            valuePct4: null,
+            statKey5:
+              typeof equipmentJoin.stat_key_5 === "string" ? equipmentJoin.stat_key_5 : null,
+            valueFlat5: lootInstanceStatFlatForTooltip(equipmentJoin.value_flat_5),
+            valuePct5: null,
           }
         : null,
     });
@@ -1350,9 +1620,13 @@ export default async function CombatEncounterPage({
   };
 
   const lootRollContextId = code;
+  const adjustedDropChance = (row: EnemyDropTableRow): number => {
+    const baseChance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+    return Math.max(0, Math.min(1, baseChance * dropChanceMultiplier));
+  };
 
   const rollRow = (row: EnemyDropTableRow, traceId: string, source: "ungrouped" | "grouped") => {
-    const chance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+    const chance = adjustedDropChance(row);
     const roll = Math.random();
     if (roll > chance) {
       lootRollTrace.push({
@@ -1406,7 +1680,7 @@ export default async function CombatEncounterPage({
 
     for (const [groupKey, groupRows] of grouped) {
       const passed = groupRows.filter((row) => {
-        const chance = Math.max(0, Math.min(1, num(row.drop_chance, 0)));
+        const chance = adjustedDropChance(row);
         const roll = Math.random();
         const ok = roll <= chance;
         lootRollTrace.push({
@@ -1462,6 +1736,50 @@ export default async function CombatEncounterPage({
         }
       : null;
 
+  /**
+   * `user_character_skills.profile_id` y equipamiento referencian el personaje igual que `user_character.profile_id`.
+   * Solo si la fila no trae ese campo usamos auth.uid() (compatibilidad).
+   */
+  const characterSkillsProfileId =
+    typeof userCharacter.profile_id === "string" && userCharacter.profile_id.trim().length > 0
+      ? userCharacter.profile_id.trim()
+      : user.id;
+
+  let playerWeaponAttackFamily: string | null = null;
+  {
+    const { data: weaponSlotEquip } = await supabase
+      .from("user_equipment")
+      .select("inventory_id")
+      .eq("profile_id", characterSkillsProfileId)
+      .eq("slot", "weapon")
+      .maybeSingle();
+
+    const invRaw = weaponSlotEquip?.inventory_id;
+    const invId = typeof invRaw === "number" ? invRaw : Math.trunc(Number(invRaw));
+    if (Number.isFinite(invId) && invId > 0) {
+      const { data: invRow } = await supabase
+        .from("user_inventory")
+        .select("weapon_instance_id")
+        .eq("id", invId)
+        .eq("profile_id", characterSkillsProfileId)
+        .maybeSingle();
+
+      const widRaw = invRow?.weapon_instance_id;
+      const wiId = typeof widRaw === "number" ? widRaw : Math.trunc(Number(widRaw));
+      if (Number.isFinite(wiId) && wiId > 0) {
+        const { data: wiRow } = await supabase
+          .from("weapon_instance")
+          .select("attack_family")
+          .eq("id", wiId)
+          .maybeSingle();
+
+        const af = wiRow?.attack_family;
+        if (typeof af === "string" && af.trim().length > 0) {
+          playerWeaponAttackFamily = af.trim();
+        }
+      }
+    }
+  }
 
   const combatDebug: CombatEncounterDebugPayload | null = showCombatDebug
     ? {
@@ -1472,6 +1790,9 @@ export default async function CombatEncounterPage({
         rawRowCount: enemyRows.length,
         mappedEnemyCount: enemies.length,
         enemies,
+        playerResistances,
+        playerWeaknesses,
+        playerWeaponAttackFamily,
         rawRows: enemyRows.map((row, index) => ({
           index,
           spawn_index: row.spawn_index,
@@ -1482,6 +1803,9 @@ export default async function CombatEncounterPage({
         })),
         lootDebug: {
           combatEncounterLootKey: code,
+          recommendedLevel: encounterRecommendedLevel,
+          playerLevel,
+          dropChanceMultiplier,
           dropTableRows: dropRowsSafe.map((row) => ({
             combat_encounter_id: row.combat_encounter_id,
             enemy_template_id: row.enemy_template_id,
@@ -1491,6 +1815,7 @@ export default async function CombatEncounterPage({
             item_id: rowItemId(row),
             item_name: rowItemName(row),
             drop_chance: num(row.drop_chance, 0),
+            adjusted_drop_chance: adjustedDropChance(row),
             drop_group: row.drop_group,
             min_qty: Math.max(0, Math.trunc(num(row.min_qty, 0))),
             max_qty: Math.max(0, Math.trunc(num(row.max_qty, num(row.min_qty, 0)))),
@@ -1507,13 +1832,23 @@ export default async function CombatEncounterPage({
     typeof backgroundRaw === "string" && backgroundRaw.trim().length > 0
       ? backgroundRaw.trim()
       : null;
-  const mapBaseHref = mapPathByZoneCode(zoneCode || null) ?? "/";
+  const zoneForMapHref = zoneCode || combatProgressZoneCode || null;
+  const mapBaseHref = mapPathByZoneCode(zoneForMapHref) ?? "/";
+  const zoneKeyForMapUi = normalizeZoneCodeKey(zoneForMapHref);
   const mapDisplayName =
-    zoneCode === "hidden_forest"
+    zoneKeyForMapUi === "hidden_forest"
       ? "Bosque Inexplorado"
-      : encounter.name != null && String(encounter.name).trim().length > 0
-        ? String(encounter.name).trim()
-        : "Mapa desconocido";
+      : zoneKeyForMapUi === "near_woods" || zoneKeyForMapUi === "nearwoods"
+        ? "Cercanías del bosque"
+        : zoneKeyForMapUi === "magic_forest" || zoneKeyForMapUi === "magicforest"
+          ? "Bosque mágico"
+          : encounter.name != null && String(encounter.name).trim().length > 0
+            ? String(encounter.name).trim()
+            : "Mapa desconocido";
+  const combatDisplayName =
+    encounter.name != null && String(encounter.name).trim().length > 0
+      ? String(encounter.name).trim()
+      : String(encounter.code ?? code);
   const escapeToMapHref =
     hotspotId && mapBaseHref.startsWith("/")
       ? `${mapBaseHref}?hotspot=${encodeURIComponent(hotspotId)}`
@@ -1564,7 +1899,6 @@ export default async function CombatEncounterPage({
   const playerArmor = Math.max(0, num(userCharacter.armor_total, 0));
   const playerMr = Math.max(0, num(userCharacter.mr_total, 0));
   const playerExperienceToNext = Math.max(0, Math.trunc(num(userCharacter.experience_to_next, 0)));
-  const playerLevel = Math.max(1, Math.trunc(num(userCharacter.level, 1)));
   const rawPlayerClassName =
     typeof userCharacter.class_name === "string" && userCharacter.class_name.trim().length > 0
       ? userCharacter.class_name.trim()
@@ -1620,15 +1954,6 @@ export default async function CombatEncounterPage({
     playerLevel,
     Math.max(1, Math.trunc(Number(projectedLevelProgress?.level ?? playerLevel))),
   );
-
-  /**
-   * `user_character_skills.profile_id` referencia el personaje igual que `user_character.profile_id`.
-   * Solo si la fila no trae ese campo usamos auth.uid() (compatibilidad).
-   */
-  const characterSkillsProfileId =
-    typeof userCharacter.profile_id === "string" && userCharacter.profile_id.trim().length > 0
-      ? userCharacter.profile_id.trim()
-      : user.id;
 
   /**
    * `user_character_skills`: id, profile_id, player_skill_id.
@@ -1849,8 +2174,8 @@ export default async function CombatEncounterPage({
 
     const safePlayerName = escapeHtml(playerLogName);
     const safePlayerColor = escapeHtml(playerLogColor);
-    const safeMapName = escapeHtml(mapDisplayName);
-    const eventHtml = `<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> ha caido en combate en ${safeMapName}. Prendemos una vela por él.`;
+    const safeCombatName = escapeHtml(combatDisplayName);
+    const eventHtml = `<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> ha caido en combate en ${safeCombatName}. Prendemos una vela por él.`;
 
     await insertWorldEventLog(supabaseAction, actionUser.id, {
       member_name: playerLogName,
@@ -1870,7 +2195,7 @@ export default async function CombatEncounterPage({
     const safePlayerName = escapeHtml(playerLogName);
     const safePlayerColor = escapeHtml(playerLogColor);
     const safeLevel = Math.max(1, Math.trunc(Number.isFinite(Number(newLevel)) ? Number(newLevel) : 1));
-    const eventHtml = `¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
+    const eventHtml = `<img src="${LEVEL_UP_WORLD_EVENT_ICON_SRC}" alt="" width="18" height="18" style="display:inline-block;vertical-align:text-bottom;margin-right:4px;" />¡<span style=\"color:${safePlayerColor}\">${safePlayerName}</span> subió a Nivel <span style=\"color:#fbbf24\">${safeLevel}</span>!`;
 
     await insertWorldEventLog(supabaseAction, actionUser.id, {
       member_name: playerLogName,
@@ -2049,6 +2374,25 @@ export default async function CombatEncounterPage({
       await persistCharacterVitals();
     }
 
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        "[combate][loot]",
+        JSON.stringify(
+          {
+            encounterCode: code,
+            recommendedLevel: encounterRecommendedLevel,
+            playerLevel,
+            dropChanceMultiplier,
+            rollTrace: lootRollTrace,
+            finalLoot: victoryLootItems,
+            victoryGoldFromLoot,
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
     const lootItemIds = Array.from(
       new Set(
         victoryLootItems
@@ -2177,7 +2521,7 @@ export default async function CombatEncounterPage({
     }
 
     const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
-    const shouldGrantRelaxingWaterOnWin = Math.random() < 0.3;
+    const shouldGrantRelaxingWaterOnWin = Math.random() < 0.15;
     if (shouldGrantRelaxingWaterOnWin) {
       const { data: globalWarehouseRow } = await supabaseAction
         .from("global_warehouse")
@@ -2426,6 +2770,11 @@ export default async function CombatEncounterPage({
       onPlayerDefeatedGlobalLog={logPlayerDefeatedInGlobalLog}
       onPlayerLevelUpGlobalLog={logPlayerLevelUpInGlobalLog}
       onCombatFinishedStats={persistCombatStats}
+      playerResistances={playerResistances}
+      playerWeaknesses={playerWeaknesses}
+      playerWeaponAttackFamily={playerWeaponAttackFamily}
+      combatResistWeakDebug={showCombatDebug}
+      combatBuffStatDebug={showCombatDebug}
     />
   );
 }

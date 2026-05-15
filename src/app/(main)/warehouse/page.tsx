@@ -49,6 +49,7 @@ type WeaponInstanceRow = {
   rarity: string | null;
   rarity_color: string | null;
   attack_type: string | null;
+  attack_family: string | null;
   attack_damage_min: number | null;
   attack_damage_max: number | null;
   magic_damage_min: number | null;
@@ -62,6 +63,10 @@ type WeaponInstanceRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: unknown;
+  stat_key_5: string | null;
+  value_flat_5: unknown;
 };
 
 type EquipmentInstanceRow = {
@@ -78,7 +83,18 @@ type EquipmentInstanceRow = {
   stat_key_3: string | null;
   value_flat_3: number | null;
   value_pct_3: number | null;
+  stat_key_4: string | null;
+  value_flat_4: unknown;
+  stat_key_5: string | null;
+  value_flat_5: unknown;
 };
+
+function coerceInstanceStatFlatForTooltip(v: unknown): string | number | null {
+  if (v == null) return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") return v;
+  return String(v);
+}
 
 function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null): WeaponInstanceTooltip | null {
   if (!row) return null;
@@ -86,6 +102,10 @@ function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null):
     rarity: row.rarity,
     rarityColor: row.rarity_color,
     attackType: row.attack_type ?? null,
+    attackFamily:
+      typeof row.attack_family === "string" && row.attack_family.trim().length > 0
+        ? row.attack_family.trim()
+        : null,
     attackDamageMin: row.attack_damage_min,
     attackDamageMax: row.attack_damage_max,
     magicDamageMin: row.magic_damage_min,
@@ -99,6 +119,12 @@ function mapWeaponInstanceForTooltip(row: WeaponInstanceRow | undefined | null):
     statKey3: row.stat_key_3,
     valueFlat3: row.value_flat_3,
     valuePct3: row.value_pct_3,
+    statKey4: row.stat_key_4,
+    valueFlat4: coerceInstanceStatFlatForTooltip(row.value_flat_4),
+    valuePct4: null,
+    statKey5: row.stat_key_5,
+    valueFlat5: coerceInstanceStatFlatForTooltip(row.value_flat_5),
+    valuePct5: null,
   };
 }
 
@@ -110,6 +136,7 @@ function mapEquipmentInstanceForTooltip(
     rarity: row.rarity,
     rarityColor: row.rarity_color,
     attackType: null,
+    attackFamily: null,
     attackDamageMin: null,
     attackDamageMax: null,
     magicDamageMin: null,
@@ -123,6 +150,12 @@ function mapEquipmentInstanceForTooltip(
     statKey3: row.stat_key_3,
     valueFlat3: row.value_flat_3,
     valuePct3: row.value_pct_3,
+    statKey4: row.stat_key_4,
+    valueFlat4: coerceInstanceStatFlatForTooltip(row.value_flat_4),
+    valuePct4: null,
+    statKey5: row.stat_key_5,
+    valueFlat5: coerceInstanceStatFlatForTooltip(row.value_flat_5),
+    valuePct5: null,
   };
 }
 const BELOW_NAV = "h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden";
@@ -492,7 +525,7 @@ export default async function WarehousePage() {
         ? await supabase
             .from("weapon_instance")
             .select(
-              "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+              "id, item_id, rarity, rarity_color, attack_type, attack_family, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
             )
             .in("id", weaponInstanceIds)
         : { data: [] };
@@ -502,7 +535,7 @@ export default async function WarehousePage() {
         ? await supabase
             .from("equipment_instances")
             .select(
-              "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+              "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
             )
             .in("id", equipmentInstanceIds)
         : { data: [] };
@@ -693,7 +726,7 @@ export default async function WarehousePage() {
         ? await supabase
             .from("weapon_instance")
             .select(
-              "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+              "id, item_id, rarity, rarity_color, attack_type, attack_family, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
             )
             .in("id", bagWeaponIds)
         : { data: [] };
@@ -703,7 +736,7 @@ export default async function WarehousePage() {
         ? await supabase
             .from("equipment_instances")
             .select(
-              "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3",
+              "id, item_id, rarity, rarity_color, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
             )
             .in("id", bagEquipmentIds)
         : { data: [] };

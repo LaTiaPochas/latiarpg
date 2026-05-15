@@ -64,6 +64,18 @@ const GARRISON_QUOTES: GarrisonQuoteOption[] = [
   },
 ];
 
+function globalMilestoneLooksComplete(row: {
+  is_completed: boolean | null;
+  current_value?: unknown;
+  target_value?: unknown;
+} | null | undefined): boolean {
+  if (!row) return false;
+  if (row.is_completed === true) return true;
+  const current = Math.max(0, Math.trunc(Number(row.current_value ?? 0)));
+  const target = Math.max(1, Math.trunc(Number(row.target_value ?? 1)));
+  return current >= target;
+}
+
 export default async function GarrisonPage() {
   const supabase = await createClient();
   const {
@@ -98,6 +110,40 @@ export default async function GarrisonPage() {
     typeof relaxingWatersMilestone?.title === "string" &&
     relaxingWatersMilestone.title.trim().toLowerCase() === "aguas_termales_completadas" &&
     relaxingWatersMilestone.is_completed === true;
+  const { data: craftingBenchMilestone } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed")
+    .eq("title", "crafting_bench_completed")
+    .maybeSingle();
+  const isCraftingBenchCompleted =
+    typeof craftingBenchMilestone?.title === "string" &&
+    craftingBenchMilestone.title.trim().toLowerCase() === "crafting_bench_completed" &&
+    craftingBenchMilestone.is_completed === true;
+  const soulAltarMaterialTitles = ["soul_altar_piedra", "soul_altar_oro", "soul_altar_souls"];
+  const { data: soulAltarCompletedMilestone } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed, current_value, target_value")
+    .eq("title", "soul_altar_completed")
+    .maybeSingle();
+  const soulAltarCompletedTitleMatches =
+    typeof soulAltarCompletedMilestone?.title === "string" &&
+    soulAltarCompletedMilestone.title.trim().toLowerCase() === "soul_altar_completed";
+  const isSoulAltarCompletedByGlobalRow =
+    soulAltarCompletedTitleMatches &&
+    globalMilestoneLooksComplete(soulAltarCompletedMilestone);
+  const { data: soulAltarMilestones } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed, current_value, target_value")
+    .in("title", soulAltarMaterialTitles);
+  const areSoulAltarMaterialsCompleted =
+    soulAltarMaterialTitles.length > 0 &&
+    soulAltarMaterialTitles.every((title) => {
+      const row = (soulAltarMilestones ?? []).find(
+        (entry) => typeof entry.title === "string" && entry.title.trim().toLowerCase() === title,
+      );
+      return globalMilestoneLooksComplete(row);
+    });
+  const isSoulAltarCompleted = isSoulAltarCompletedByGlobalRow || areSoulAltarMaterialsCompleted;
   const showAdvancedHotspots = showWarehouseSprite && showRelaxingWatersSprite;
   const randomQuote = GARRISON_QUOTES[Math.floor(Math.random() * GARRISON_QUOTES.length)];
 
@@ -149,6 +195,8 @@ export default async function GarrisonPage() {
             showWarehouseSprite={showWarehouseSprite}
             showRelaxingWatersSprite={showRelaxingWatersSprite}
             showAdvancedHotspots={showAdvancedHotspots}
+            isCraftingBenchCompleted={isCraftingBenchCompleted}
+            isSoulAltarCompleted={isSoulAltarCompleted}
           />
         </section>
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
