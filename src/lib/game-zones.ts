@@ -3,6 +3,8 @@
  * Pasalos en `?zone=` al entrar a `/combate/[code]` para que el escape vuelva al mapa correcto.
  */
 export const HIDDEN_FOREST_ZONE_CODE = "hidden_forest";
+/** Debe coincidir con `user_combat_progress.zone_id` y `zones.code` en Supabase. */
+export const MYSTIC_CAVE_ZONE_CODE = "mystic-cave";
 /** Valor recomendado para `?zone=` desde cercanías del bosque. */
 export const NEAR_WOODS_ZONE_CODE = "near_woods";
 /** Valor recomendado para `?zone=` desde bosque mágico. Ajustá si en BD usás otro `zones.code`. */
@@ -33,6 +35,11 @@ export function zoneLookupCodeCandidates(zoneQueryParam: string): string[] {
     add(out, "hidden_forest");
     return out;
   }
+  if (key === "mystic_cave") {
+    add(out, "mystic-cave");
+    add(out, "mystic_cave");
+    return out;
+  }
   if (key === "near_woods" || key === "nearwoods") {
     add(out, "near_woods");
     add(out, "near-woods");
@@ -55,6 +62,9 @@ export function mapPathByZoneCode(zoneCode: string | null | undefined): string |
 
   if (key === "hidden_forest") {
     return "/bosque-inexplorado";
+  }
+  if (key === "mystic_cave") {
+    return "/mystic-cave";
   }
   if (key === "near_woods" || key === "nearwoods") {
     return "/near-woods";
