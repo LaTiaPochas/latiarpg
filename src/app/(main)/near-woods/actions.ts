@@ -350,7 +350,7 @@ export async function gatherMagicForest(): Promise<GatherMagicForestResult> {
     return { ok: false, error: "Resultado sin ítem configurado." };
   }
 
-  const grantQuantity = result === "madera" ? Math.floor(Math.random() * 6) + 3 : 1;
+  const grantQuantity = result === "madera" ? Math.floor(Math.random() * 5) + 3 : 1;
 
   const { data: existingRows, error: selectError } = await supabase
     .from("user_inventory")

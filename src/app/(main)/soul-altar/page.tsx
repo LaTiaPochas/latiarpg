@@ -786,11 +786,15 @@ export default async function SoulAltarPage() {
     redirect("/class-selection");
   }
 
+  const soulAltarPageBackgroundImage = isSoulAltarGloballyCompleted
+    ? "url('/img/resources/background/bg_altar_base.png')"
+    : "url('/img/resources/background/bg_second_base.png')";
+
   return (
     <div
       className="relative min-h-[calc(100dvh-3.5rem)] overflow-hidden bg-slate-950 text-amber-50"
       style={{
-        backgroundImage: "url('/img/resources/background/bg_altar_base.png')",
+        backgroundImage: soulAltarPageBackgroundImage,
         backgroundSize: "cover",
         backgroundPosition: "center",
       }}

@@ -12,6 +12,8 @@ import {
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
 import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
+import { formatInstanceStatRollTooltipLine, isInstanceStatWeakTooltipKey } from "@/components/character-profile/inventory-types";
+import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
 const PJ_FEDE_RPG_FIGHT_STICK =
@@ -614,6 +616,29 @@ function mitigateDamageByDefense(rawDamage: number, defense: number): number {
   return Math.max(0, raw - def);
 }
 
+/**
+ * Tras (daño - armadura): si el `attack_family` del arma está en resistencias del enemigo ×0.5;
+ * si está en debilidades ×2; si no coincide, sin cambio. Resistencia tiene prioridad si ambas listas coincidieran.
+ */
+function applyEnemyAttackFamilyToMitigatedDamage(
+  damageAfterArmor: number,
+  attackFamily: string | null | undefined,
+  resistances: string[],
+  weaknesses: string[],
+): number {
+  const base = Math.max(0, Math.trunc(damageAfterArmor));
+  const fam =
+    typeof attackFamily === "string" && attackFamily.trim().length > 0
+      ? attackFamily.trim().toLowerCase()
+      : "";
+  if (!fam) return base;
+  const norm = (arr: string[]) =>
+    arr.map((s) => String(s).trim().toLowerCase()).filter((s) => s.length > 0);
+  if (norm(resistances).includes(fam)) return Math.max(0, Math.floor(base * 0.5));
+  if (norm(weaknesses).includes(fam)) return Math.max(0, Math.floor(base * 2));
+  return base;
+}
+
 /** Daño del PJ al enemigo: físico/neutral/buff usa armor del monstruo; mágico usa MR. */
 function enemyDefenseStatForPlayerSkill(
   subtype: PlayerSkillEffectSubtype,
@@ -773,6 +798,9 @@ export type CombatEncounterEnemyView = {
   skills: CombatEncounterEnemySkill[];
   levelOverride: number | null;
   aiProfile: string | null;
+  /** Desde `enemy_template.resistances` (misma forma que `user_character.resistances`). */
+  resistances: string[];
+  weaknesses: string[];
 };
 
 export type CombatVictoryLootItem = {
@@ -790,6 +818,7 @@ export type CombatVictoryLootItem = {
   weaponInstance?: {
     rarity: string | null;
     rarityColor: string | null;
+    attackFamily: string | null;
     attackDamageMin: number | null;
     attackDamageMax: number | null;
     magicDamageMin: number | null;
@@ -804,10 +833,10 @@ export type CombatVictoryLootItem = {
     valueFlat3: number | null;
     valuePct3: number | null;
     statKey4: string | null;
-    valueFlat4: number | null;
+    valueFlat4: string | number | null;
     valuePct4: number | null;
     statKey5: string | null;
-    valueFlat5: number | null;
+    valueFlat5: string | number | null;
     valuePct5: number | null;
   } | null;
   equipmentInstance?: {
@@ -823,10 +852,10 @@ export type CombatVictoryLootItem = {
     valueFlat3: number | null;
     valuePct3: number | null;
     statKey4: string | null;
-    valueFlat4: number | null;
+    valueFlat4: string | number | null;
     valuePct4: number | null;
     statKey5: string | null;
-    valueFlat5: number | null;
+    valueFlat5: string | number | null;
     valuePct5: number | null;
   } | null;
 };
@@ -841,22 +870,6 @@ function capitalizeFirst(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
-}
-
-function formatWeaponStatLine(
-  statKey: string | null | undefined,
-  valueFlat: number | null | undefined,
-  valuePct: number | null | undefined,
-): string | null {
-  const key = statKey?.trim();
-  if (!key) return null;
-  if (valueFlat != null && Number.isFinite(Number(valueFlat))) {
-    return `+ ${valueFlat} ${key}`;
-  }
-  if (valuePct != null && Number.isFinite(Number(valuePct))) {
-    return `+ ${valuePct}% ${key}`;
-  }
-  return null;
 }
 
 function weaponDamageRange(
@@ -910,6 +923,11 @@ export type CombatEncounterDebugPayload = {
   rawRowCount: number;
   mappedEnemyCount: number;
   enemies: CombatEncounterEnemyView[];
+  /** Resistencias / debilidades del PJ al iniciar el encuentro (desde `user_character`). */
+  playerResistances?: string[];
+  playerWeaknesses?: string[];
+  /** `weapon_instance.attack_family` del arma equipada en slot `weapon` al iniciar el encuentro. */
+  playerWeaponAttackFamily?: string | null;
   rawRows: Array<{
     index: number;
     spawn_index: number | null;
@@ -952,6 +970,13 @@ export type CombatEncounterShellProps = {
   playerStatWis?: number;
   playerArmor?: number;
   playerMr?: number;
+  /** Copia en memoria para lógica de combate (`user_character.resistances`). */
+  playerResistances?: string[];
+  playerWeaknesses?: string[];
+  /** `weapon_instance.attack_family` del arma equipada (ataque normal). */
+  playerWeaponAttackFamily?: string | null;
+  /** Con `?debug=1`: `console.log` en cliente con resistencias PJ + enemigos al montar / al cambiar props. */
+  combatResistWeakDebug?: boolean;
   playerExperienceToNext?: number;
   playerLevelCurrent?: number;
   playerLevelAfterVictory?: number;
@@ -1283,6 +1308,10 @@ export function CombatEncounterShell({
   playerStatWis = 0,
   playerArmor = 0,
   playerMr = 0,
+  playerResistances = [],
+  playerWeaknesses = [],
+  playerWeaponAttackFamily = null,
+  combatResistWeakDebug = false,
   playerExperienceToNext = 0,
   playerLevelCurrent = 1,
   playerLevelAfterVictory = 1,
@@ -1300,6 +1329,32 @@ export function CombatEncounterShell({
 }: CombatEncounterShellProps) {
   const router = useRouter();
   const backgroundResolved = backgroundSrc?.trim() || BG_INTRO_FOREST;
+
+  const playerResistancesRef = useRef<string[]>([...playerResistances]);
+  const playerWeaknessesRef = useRef<string[]>([...playerWeaknesses]);
+  useEffect(() => {
+    playerResistancesRef.current = [...playerResistances];
+    playerWeaknessesRef.current = [...playerWeaknesses];
+  }, [playerResistances, playerWeaknesses]);
+
+  useEffect(() => {
+    if (!combatResistWeakDebug) return;
+    console.log("[combate][resist-weak][cliente] PJ (props + ref)", {
+      resistances: [...playerResistances],
+      weaknesses: [...playerWeaknesses],
+      weaponAttackFamily: playerWeaponAttackFamily,
+      refResistances: [...playerResistancesRef.current],
+      refWeaknesses: [...playerWeaknessesRef.current],
+    });
+    enemies.slice(0, MAX_ENEMIES_ON_FIELD).forEach((e, i) => {
+      console.log(`[combate][resist-weak][cliente] enemigo[${i}]`, e.name, {
+        templateId: e.templateId,
+        resistances: e.resistances,
+        weaknesses: e.weaknesses,
+      });
+    });
+  }, [combatResistWeakDebug, playerResistances, playerWeaknesses, playerWeaponAttackFamily, enemies]);
+
   /** Copia en memoria del combate para uso al activar habilidades del PJ. */
   const playerCombatSkills = useMemo(() => [...playerSkills], [playerSkills]);
   const playerCombatSkillsRef = useRef(playerCombatSkills);
@@ -2534,7 +2589,13 @@ export function CombatEncounterShell({
       ),
     );
     const rawDamage = randomIntInclusive(damageMin, damageMax);
-    const mitigated = mitigateDamageByDefense(rawDamage, target.armor);
+    const afterArmor = mitigateDamageByDefense(rawDamage, target.armor);
+    const mitigated = applyEnemyAttackFamilyToMitigatedDamage(
+      afterArmor,
+      playerWeaponAttackFamily,
+      target.resistances,
+      target.weaknesses,
+    );
     const updatedHp = Math.max(0, target.hp - mitigated);
     const damageDone = target.hp - updatedHp;
     recordPlayerDamageDealt(damageDone);
@@ -3877,13 +3938,15 @@ export function CombatEncounterShell({
                             const roll = loot.weaponInstance ?? loot.equipmentInstance ?? null;
                             if (!roll) return null;
                             const showDamage = Boolean(loot.weaponInstance);
-                            const statLines = [
-                              formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
-                              formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
-                              formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
-                              formatWeaponStatLine(roll.statKey4, roll.valueFlat4, roll.valuePct4),
-                              formatWeaponStatLine(roll.statKey5, roll.valueFlat5, roll.valuePct5),
-                            ].filter(Boolean);
+                            const statLineEntries = (
+                              [
+                                [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
+                                [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
+                                [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
+                                [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
+                                [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
+                              ] as const
+                            ).filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]));
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
                                 {roll.rarity ? (
@@ -3894,11 +3957,13 @@ export function CombatEncounterShell({
                                 {showDamage ? (
                                   <>
                                     <p>
-                                      {weaponDamageRange(
-                                        loot.weaponInstance?.attackDamageMin,
-                                        loot.weaponInstance?.attackDamageMax,
-                                      )}{" "}
-                                      Daño
+                                      <WeaponPhysicalDamageTooltipLine
+                                        damageRangeText={weaponDamageRange(
+                                          loot.weaponInstance?.attackDamageMin,
+                                          loot.weaponInstance?.attackDamageMax,
+                                        )}
+                                        attackFamily={loot.weaponInstance?.attackFamily}
+                                      />
                                     </p>
                                     <p>
                                       {weaponDamageRange(
@@ -3909,8 +3974,13 @@ export function CombatEncounterShell({
                                     </p>
                                   </>
                                 ) : null}
-                                {statLines.map((line, idx) => (
-                                  <p key={`${line}-${idx}`}>{line}</p>
+                                {statLineEntries.map(([statKey, line], idx) => (
+                                  <p
+                                    key={`${line}-${idx}`}
+                                    className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                                  >
+                                    {line}
+                                  </p>
                                 ))}
                               </div>
                             );
@@ -3998,13 +4068,15 @@ export function CombatEncounterShell({
                             const roll = entry.weaponInstance ?? entry.equipmentInstance ?? null;
                             if (!roll) return null;
                             const showDamage = Boolean(entry.weaponInstance);
-                            const statLines = [
-                              formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
-                              formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
-                              formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
-                              formatWeaponStatLine(roll.statKey4, roll.valueFlat4, roll.valuePct4),
-                              formatWeaponStatLine(roll.statKey5, roll.valueFlat5, roll.valuePct5),
-                            ].filter(Boolean);
+                            const statLineEntries = (
+                              [
+                                [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
+                                [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
+                                [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
+                                [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
+                                [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
+                              ] as const
+                            ).filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]));
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
                                 {roll.rarity ? (
@@ -4015,11 +4087,13 @@ export function CombatEncounterShell({
                                 {showDamage ? (
                                   <>
                                     <p>
-                                      {weaponDamageRange(
-                                        entry.weaponInstance?.attackDamageMin,
-                                        entry.weaponInstance?.attackDamageMax,
-                                      )}{" "}
-                                      Daño
+                                      <WeaponPhysicalDamageTooltipLine
+                                        damageRangeText={weaponDamageRange(
+                                          entry.weaponInstance?.attackDamageMin,
+                                          entry.weaponInstance?.attackDamageMax,
+                                        )}
+                                        attackFamily={entry.weaponInstance?.attackFamily}
+                                      />
                                     </p>
                                     <p>
                                       {weaponDamageRange(
@@ -4030,8 +4104,13 @@ export function CombatEncounterShell({
                                     </p>
                                   </>
                                 ) : null}
-                                {statLines.map((line, idx) => (
-                                  <p key={`${line}-${idx}`}>{line}</p>
+                                {statLineEntries.map(([statKey, line], idx) => (
+                                  <p
+                                    key={`${line}-${idx}`}
+                                    className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                                  >
+                                    {line}
+                                  </p>
                                 ))}
                               </div>
                             );

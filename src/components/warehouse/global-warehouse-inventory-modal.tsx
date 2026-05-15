@@ -7,11 +7,14 @@ import {
   type WithdrawWarehouseEntry,
 } from "@/app/(main)/warehouse/actions";
 import {
+  formatInstanceStatRollTooltipLine,
   formatWeaponAttackTypeLabel,
   inventoryTooltipSubtitleUnderName,
+  isInstanceStatWeakTooltipKey,
   type EquipmentInstanceTooltip,
   type WeaponInstanceTooltip,
 } from "@/components/character-profile/inventory-types";
+import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 import Image from "next/image";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
@@ -81,22 +84,6 @@ const INITIAL_TOOLTIP: TooltipState = {
 function isDesktopViewport(): boolean {
   if (typeof window === "undefined") return false;
   return window.matchMedia("(min-width: 1024px)").matches;
-}
-
-function formatWeaponStatLine(
-  statKey: string | null | undefined,
-  valueFlat: number | null | undefined,
-  valuePct: number | null | undefined,
-): string | null {
-  const key = statKey?.trim();
-  if (!key) return null;
-  if (valueFlat != null && Number.isFinite(Number(valueFlat))) {
-    return `+ ${valueFlat} ${key}`;
-  }
-  if (valuePct != null && Number.isFinite(Number(valuePct))) {
-    return `+ ${valuePct}% ${key}`;
-  }
-  return null;
 }
 
 function weaponDamageRange(min: number | null | undefined, max: number | null | undefined): string {
@@ -1326,23 +1313,33 @@ export function GlobalWarehouseInventoryModal({
                       {showDamage ? (
                         <>
                           <p>
-                            {weaponDamageRange(roll.attackDamageMin, roll.attackDamageMax)} Daño
+                            <WeaponPhysicalDamageTooltipLine
+                              damageRangeText={weaponDamageRange(roll.attackDamageMin, roll.attackDamageMax)}
+                              attackFamily={activeItem.weaponInstance?.attackFamily}
+                            />
                           </p>
                           <p>
                             {weaponDamageRange(roll.magicDamageMin, roll.magicDamageMax)} Daño Mágico
                           </p>
                         </>
                       ) : null}
-                      {[
-                        formatWeaponStatLine(roll.statKey1, roll.valueFlat1, roll.valuePct1),
-                        formatWeaponStatLine(roll.statKey2, roll.valueFlat2, roll.valuePct2),
-                        formatWeaponStatLine(roll.statKey3, roll.valueFlat3, roll.valuePct3),
-                        formatWeaponStatLine(roll.statKey4, roll.valueFlat4, roll.valuePct4),
-                        formatWeaponStatLine(roll.statKey5, roll.valueFlat5, roll.valuePct5),
-                      ]
-                        .filter(Boolean)
-                        .map((line, index) => (
-                          <p key={`${line}-${index}`}>{line}</p>
+                      {(
+                        [
+                          [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
+                          [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
+                          [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
+                          [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
+                          [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
+                        ] as const
+                      )
+                        .filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]))
+                        .map(([statKey, line], index) => (
+                          <p
+                            key={`${line}-${index}`}
+                            className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                          >
+                            {line}
+                          </p>
                         ))}
                     </div>
                   );

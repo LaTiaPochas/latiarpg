@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { HerreriaHelpButton } from "@/components/herreria/herreria-help-button";
+import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 
 export type HerreriaRecipeInventoryItem = {
   inventoryId: number;
@@ -29,9 +30,9 @@ export type HerreriaAvailableRecipeItem = {
     rarityColor: string | null;
     slotLabel: string | null;
     attackType: string | null;
-    damageLine: string | null;
+    physicalDamageRangeText: string | null;
+    physicalDamageAttackFamily: string | null;
     magicDamageLine: string | null;
-    firstStatLine: string | null;
     requirements: Array<{ label: string; value: string }>;
   } | null;
   components: Array<{
@@ -709,9 +710,8 @@ export function HerreriaCompletedModal({
                     ) : null}
                   </p>
                   {activeTooltip.craftedTooltip.rarity ||
-                  activeTooltip.craftedTooltip.damageLine ||
-                  activeTooltip.craftedTooltip.magicDamageLine ||
-                  activeTooltip.craftedTooltip.firstStatLine ? (
+                  activeTooltip.craftedTooltip.physicalDamageRangeText ||
+                  activeTooltip.craftedTooltip.magicDamageLine ? (
                     <div className="mt-2 space-y-1 text-xs leading-tight text-amber-100">
                       {activeTooltip.craftedTooltip.rarity ? (
                         <p
@@ -723,19 +723,16 @@ export function HerreriaCompletedModal({
                           {activeTooltip.craftedTooltip.rarity}
                         </p>
                       ) : null}
-                      {activeTooltip.craftedTooltip.damageLine ? (
-                        <p>{activeTooltip.craftedTooltip.damageLine}</p>
+                      {activeTooltip.craftedTooltip.physicalDamageRangeText ? (
+                        <p>
+                          <WeaponPhysicalDamageTooltipLine
+                            damageRangeText={activeTooltip.craftedTooltip.physicalDamageRangeText}
+                            attackFamily={activeTooltip.craftedTooltip.physicalDamageAttackFamily}
+                          />
+                        </p>
                       ) : null}
                       {activeTooltip.craftedTooltip.magicDamageLine ? (
                         <p>{activeTooltip.craftedTooltip.magicDamageLine}</p>
-                      ) : null}
-                      {activeTooltip.craftedTooltip.firstStatLine ? (
-                        <>
-                          <p>{activeTooltip.craftedTooltip.firstStatLine}</p>
-                          <p className="text-[11px] font-semibold text-emerald-300">
-                            (Stats adicionales generados al momento de craftear)
-                          </p>
-                        </>
                       ) : null}
                     </div>
                   ) : null}

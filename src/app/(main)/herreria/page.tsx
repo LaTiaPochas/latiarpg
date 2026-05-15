@@ -94,6 +94,7 @@ type CraftedWeaponInstanceRow = {
   rarity: string | null;
   rarity_color: string | null;
   attack_type: string | null;
+  attack_family: string | null;
   attack_damage_min: number | null;
   attack_damage_max: number | null;
   magic_damage_min: number | null;
@@ -114,7 +115,12 @@ type CraftedWeaponInstanceRow = {
 };
 type CraftedEquipmentInstanceRow = Omit<
   CraftedWeaponInstanceRow,
-  "attack_type" | "attack_damage_min" | "attack_damage_max" | "magic_damage_min" | "magic_damage_max"
+  | "attack_type"
+  | "attack_family"
+  | "attack_damage_min"
+  | "attack_damage_max"
+  | "magic_damage_min"
+  | "magic_damage_max"
 >;
 type CraftedItemRequirementRow = {
   item_id: string;
@@ -286,10 +292,31 @@ function recipeComponentEntries(row: RecipeComponentRow) {
 }
 
 function recipeComponentItemType(row: RecipeComponentRow): "weapon" | "equipment" | null {
-  const raw = row.item_type;
-  if (typeof raw !== "string") return null;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "weapon" || normalized === "equipment") return normalized;
+  const record = row as Record<string, unknown>;
+  const rawCandidates: unknown[] = [
+    record.item_type,
+    record.crafted_item_type,
+    record.result_item_type,
+    record.output_item_type,
+  ];
+  const crafted = record.crafted_item;
+  if (crafted && typeof crafted === "object" && !Array.isArray(crafted)) {
+    const cr = crafted as Record<string, unknown>;
+    rawCandidates.push(cr.item_type, cr.itemType, cr.type);
+  }
+  for (const raw of rawCandidates) {
+    if (typeof raw !== "string") continue;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "weapon" || normalized === "weapons") return "weapon";
+    if (
+      normalized === "equipment" ||
+      normalized === "armor" ||
+      normalized === "armour" ||
+      normalized === "gear"
+    ) {
+      return "equipment";
+    }
+  }
   return null;
 }
 
@@ -299,22 +326,6 @@ function randomIdFromRows(rows: Array<{ id: number | null }>) {
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (ids.length === 0) return null;
   return ids[Math.floor(Math.random() * ids.length)] ?? null;
-}
-
-function formatCraftedStatLine(
-  statKey: string | null | undefined,
-  valueFlat: number | null | undefined,
-  valuePct: number | null | undefined,
-) {
-  const key = statKey?.trim();
-  if (!key) return null;
-  if (valueFlat != null && Number.isFinite(Number(valueFlat))) {
-    return `+ ${valueFlat} ${key}`;
-  }
-  if (valuePct != null && Number.isFinite(Number(valuePct))) {
-    return `+ ${valuePct}% ${key}`;
-  }
-  return null;
 }
 
 function craftedDamageRange(min: number | null | undefined, max: number | null | undefined) {
@@ -582,7 +593,7 @@ export default async function HerreriaPage() {
       ? await supabase
           .from("weapon_instance")
           .select(
-            "id, item_id, rarity, rarity_color, attack_type, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
+            "id, item_id, rarity, rarity_color, attack_type, attack_family, attack_damage_min, attack_damage_max, magic_damage_min, magic_damage_max, stat_key_1, value_flat_1, value_pct_1, stat_key_2, value_flat_2, value_pct_2, stat_key_3, value_flat_3, value_pct_3, stat_key_4, value_flat_4, stat_key_5, value_flat_5",
           )
           .in("item_id", craftedItemIds)
       : { data: [] };
@@ -793,15 +804,6 @@ export default async function HerreriaPage() {
     const equipmentInstance =
       !weaponInstance && craftedItemId ? craftedEquipmentByItemId.get(craftedItemId) : null;
     const roll = weaponInstance ?? equipmentInstance ?? null;
-    const firstStatLine = roll
-      ? [
-          formatCraftedStatLine(roll.stat_key_1, roll.value_flat_1, roll.value_pct_1),
-          formatCraftedStatLine(roll.stat_key_2, roll.value_flat_2, roll.value_pct_2),
-          formatCraftedStatLine(roll.stat_key_3, roll.value_flat_3, roll.value_pct_3),
-          formatCraftedStatLine(roll.stat_key_4, roll.value_flat_4, null),
-          formatCraftedStatLine(roll.stat_key_5, roll.value_flat_5, null),
-        ].find((line): line is string => Boolean(line)) ?? null
-      : null;
     const requirements = craftedItemId
       ? craftedItemRequirementLines(craftedRequirementsByItemId.get(craftedItemId) ?? [])
       : [];
@@ -851,13 +853,18 @@ export default async function HerreriaPage() {
           rarityColor: roll?.rarity_color ?? displayItem.rarity_color ?? null,
           slotLabel: craftedItem?.equip_slot?.toUpperCase() ?? null,
           attackType: weaponInstance ? formatAttackType(weaponInstance.attack_type) : null,
-          damageLine: weaponInstance
-            ? `${craftedDamageRange(weaponInstance.attack_damage_min, weaponInstance.attack_damage_max)} Daño`
+          physicalDamageRangeText: weaponInstance
+            ? craftedDamageRange(weaponInstance.attack_damage_min, weaponInstance.attack_damage_max)
             : null,
+          physicalDamageAttackFamily:
+            weaponInstance &&
+            typeof weaponInstance.attack_family === "string" &&
+            weaponInstance.attack_family.trim().length > 0
+              ? weaponInstance.attack_family.trim()
+              : null,
           magicDamageLine: weaponInstance
             ? `${craftedDamageRange(weaponInstance.magic_damage_min, weaponInstance.magic_damage_max)} Daño Mágico`
             : null,
-          firstStatLine,
           requirements,
         },
         components,
@@ -1082,11 +1089,31 @@ export default async function HerreriaPage() {
       }
     }
 
-    const itemType = recipeComponentItemType(recipeComponent);
+    let craftItemKind = recipeComponentItemType(recipeComponent);
+    if (craftItemKind == null) {
+      const { data: weaponProbe } = await supabaseAction
+        .from("weapon_instance")
+        .select("id")
+        .eq("item_id", craftedItemId)
+        .limit(1);
+      if ((weaponProbe ?? []).length > 0) {
+        craftItemKind = "weapon";
+      } else {
+        const { data: equipmentProbe } = await supabaseAction
+          .from("equipment_instances")
+          .select("id")
+          .eq("item_id", craftedItemId)
+          .limit(1);
+        if ((equipmentProbe ?? []).length > 0) {
+          craftItemKind = "equipment";
+        }
+      }
+    }
+
     let weaponInstanceId: number | null = null;
     let equipmentInstanceId: number | null = null;
 
-    if (itemType === "weapon") {
+    if (craftItemKind === "weapon") {
       const { data: weaponRows } = await supabaseAction
         .from("weapon_instance")
         .select("id")
@@ -1094,7 +1121,7 @@ export default async function HerreriaPage() {
       weaponInstanceId = randomIdFromRows((weaponRows ?? []) as Array<{ id: number | null }>);
     }
 
-    if (itemType === "equipment") {
+    if (craftItemKind === "equipment") {
       const { data: equipmentRows } = await supabaseAction
         .from("equipment_instances")
         .select("id")
@@ -1102,11 +1129,11 @@ export default async function HerreriaPage() {
       equipmentInstanceId = randomIdFromRows((equipmentRows ?? []) as Array<{ id: number | null }>);
     }
 
-    if (itemType === "weapon" && weaponInstanceId == null) {
+    if (craftItemKind === "weapon" && weaponInstanceId == null) {
       return { ok: false };
     }
 
-    if (itemType === "equipment" && equipmentInstanceId == null) {
+    if (craftItemKind === "equipment" && equipmentInstanceId == null) {
       return { ok: false };
     }
 

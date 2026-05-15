@@ -5,8 +5,8 @@ export type MagicForestGatherOutcome = {
 
 /** Probabilidades “juntar madera” en Bosque Mágico. Suman 1. */
 export const MAGIC_FOREST_GATHER_OUTCOMES: MagicForestGatherOutcome[] = [
-  { result: "madera", chance: 0.45 },
-  { result: "enemy", chance: 0.35 },
+  { result: "madera", chance: 0.40 },
+  { result: "enemy", chance: 0.40 },
   { result: "potion", chance: 0.05 },
   { result: "medium_potion", chance: 0.01 },
   { result: "feather", chance: 0.05 },
