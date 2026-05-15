@@ -1983,16 +1983,9 @@ export function CombatEncounterShell({
     [enemies],
   );
   const [displayEnemies, setDisplayEnemies] = useState<CombatEncounterEnemyView[]>(initialEnemies);
-  useEffect(() => {
-    setDisplayEnemies(initialEnemies);
-  }, [initialEnemies]);
+  /** Evita que un re-render del servidor (p. ej. tras guardar stats) reviva enemigos y cancele victoria. */
+  const [combatOutcome, setCombatOutcome] = useState<"active" | "won" | "lost">("active");
   const [selectedEnemyId, setSelectedEnemyId] = useState<string | null>(null);
-  useEffect(() => {
-    setSelectedEnemyId((prev) => {
-      if (prev && initialEnemies.some((enemy) => enemy.id === prev)) return prev;
-      return null;
-    });
-  }, [initialEnemies]);
   /** Si el objetivo seleccionado muere (p. ej. área), limpiar para poder elegir otro sin estado colgado. */
   useEffect(() => {
     if (!selectedEnemyId) return;
@@ -2278,6 +2271,9 @@ export function CombatEncounterShell({
   }, []);
 
   useEffect(() => {
+    setCombatOutcome("active");
+    setDisplayEnemies(initialEnemies);
+    setSelectedEnemyId(null);
     setIsDefeatOverlayVisible(false);
     setIsDefeatPenaltyOpen(false);
     setIsVictoryOverlayVisible(false);
@@ -2313,6 +2309,7 @@ export function CombatEncounterShell({
       clearTimeout(victoryModalDelayRef.current);
       victoryModalDelayRef.current = null;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar encuentro, no si el padre re-pasa `enemies`
   }, [encounterCode]);
 
   useEffect(() => {
@@ -2389,6 +2386,32 @@ export function CombatEncounterShell({
   );
   const victoryTotalGold = Math.max(0, Math.trunc(victoryGoldFromLoot));
   useEffect(() => {
+    if (combatOutcome !== "active") return;
+    if (hasAnyEnemy && !hasAliveEnemies && playerCurrentHp > 0) {
+      setCombatOutcome("won");
+    }
+  }, [combatOutcome, hasAnyEnemy, hasAliveEnemies, playerCurrentHp]);
+  useEffect(() => {
+    if (combatOutcome !== "active") return;
+    if (playerCurrentHp <= 0 && hasAnyEnemy) {
+      setCombatOutcome("lost");
+    }
+  }, [combatOutcome, hasAnyEnemy, playerCurrentHp]);
+  useEffect(() => {
+    if (combatOutcome === "won") {
+      if (isVictoryOverlayVisible) return;
+      if (victoryModalDelayRef.current) return;
+      victoryModalDelayRef.current = setTimeout(() => {
+        setIsVictoryOverlayVisible(true);
+        victoryModalDelayRef.current = null;
+      }, VICTORY_MODAL_DELAY_MS);
+      return () => {
+        if (victoryModalDelayRef.current) {
+          clearTimeout(victoryModalDelayRef.current);
+          victoryModalDelayRef.current = null;
+        }
+      };
+    }
     if (!hasAnyEnemy || hasAliveEnemies || playerCurrentHp <= 0) {
       setIsVictoryOverlayVisible(false);
       setIsVictoryLootOpen(false);
@@ -2396,23 +2419,8 @@ export function CombatEncounterShell({
         clearTimeout(victoryModalDelayRef.current);
         victoryModalDelayRef.current = null;
       }
-      return;
     }
-    if (isVictoryOverlayVisible) return;
-    if (victoryModalDelayRef.current) return;
-
-    victoryModalDelayRef.current = setTimeout(() => {
-      setIsVictoryOverlayVisible(true);
-      victoryModalDelayRef.current = null;
-    }, VICTORY_MODAL_DELAY_MS);
-
-    return () => {
-      if (victoryModalDelayRef.current) {
-        clearTimeout(victoryModalDelayRef.current);
-        victoryModalDelayRef.current = null;
-      }
-    };
-  }, [hasAnyEnemy, hasAliveEnemies, playerCurrentHp, isVictoryOverlayVisible]);
+  }, [combatOutcome, hasAnyEnemy, hasAliveEnemies, playerCurrentHp, isVictoryOverlayVisible]);
   useEffect(() => {
     if (!isVictoryOverlayVisible || !isVictoryLootOpen || !shouldTriggerLevelUpModal) return;
     if (didOpenLevelUpModalRef.current) return;
@@ -2459,10 +2467,10 @@ export function CombatEncounterShell({
   }, [playerMana, playerManaMax]);
   useEffect(() => {
     setEnemySkillNextAvailableTurn({});
-  }, [initialEnemies]);
+  }, [encounterCode]);
   useEffect(() => {
     setPlayerSkillNextAvailableTurn({});
-  }, [initialEnemies]);
+  }, [encounterCode]);
   const turnOrder = useMemo<TurnActor[]>(() => {
     const actors: TurnActor[] = [
       {
@@ -2484,6 +2492,10 @@ export function CombatEncounterShell({
     ];
     return actors.sort((a, b) => b.speed - a.speed);
   }, [displayEnemies, playerCombatSpeedBonus, playerSpeed, timedBuffBonusByStat]);
+  const turnOrderRef = useRef(turnOrder);
+  useEffect(() => {
+    turnOrderRef.current = turnOrder;
+  }, [turnOrder]);
   /** Firma estable del orden de iniciativa (quién actúa). Cambia al morir un enemigo o variar velocidades. */
   const initiativeOrderSig = useMemo(
     () => turnOrder.map((a) => a.id).join(">"),
@@ -2628,6 +2640,8 @@ export function CombatEncounterShell({
       clearTimeout(initialActionDelayTimeoutRef.current);
       initialActionDelayTimeoutRef.current = null;
     }
+    /** Si se canceló un avance de turno pendiente, no dejar la UI bloqueada ni el turno enemigo sin reintentar. */
+    resolvedEnemyTurnRef.current = null;
 
     setIsTurnTransitioning(true);
     initialActionDelayTimeoutRef.current = setTimeout(() => {
@@ -2722,12 +2736,18 @@ export function CombatEncounterShell({
     (selectedEnemyId ? displayEnemies.find((enemy) => enemy.id === selectedEnemyId) : null) ??
     null;
   const isPlayerTurn = currentActor?.type === "player";
+  const attackBlockReason =
+    playerCurrentHp <= 0
+      ? null
+      : isTurnTransitioning
+        ? "Esperá a que termine la acción en curso."
+        : !isPlayerTurn
+          ? "Todavía no es tu turno."
+          : selectedEnemy == null || selectedEnemy.hp <= 0
+            ? "Tenés que seleccionar un enemigo vivo para atacar."
+            : null;
   const canAttack =
-    isPlayerTurn &&
-    !isTurnTransitioning &&
-    selectedEnemy != null &&
-    selectedEnemy.hp > 0 &&
-    playerCurrentHp > 0;
+    combatOutcome === "active" && attackBlockReason === null && playerCurrentHp > 0;
 
   function playerSkillCooldownTurnsRemaining(skill: CombatPlayerSkillView): number {
     const nextAvailable = playerSkillNextAvailableTurn[skill.userCharacterSkillId] ?? 1;
@@ -2914,7 +2934,8 @@ export function CombatEncounterShell({
     scheduleAdvanceTurn();
   }
 
-  const isPlayerActionsLocked = !isPlayerTurn || isTurnTransitioning || playerCurrentHp <= 0;
+  const isPlayerActionsLocked =
+    combatOutcome !== "active" || !isPlayerTurn || isTurnTransitioning || playerCurrentHp <= 0;
 
   function openSkillInfoTooltip(skillId: string, x: number, y: number, pinned: boolean) {
     setSkillInfoTooltip({
@@ -3381,9 +3402,12 @@ export function CombatEncounterShell({
   }
 
   function advanceTurn() {
-    if (turnOrder.length === 0) return;
-    const nextIndex = (effectiveTurnIndex + 1) % turnOrder.length;
-    setCurrentTurnIndex(nextIndex);
+    setCurrentTurnIndex((prev) => {
+      const order = turnOrderRef.current;
+      if (order.length === 0) return 0;
+      const effective = Math.min(prev, order.length - 1);
+      return (effective + 1) % order.length;
+    });
   }
 
   useEffect(() => {
@@ -3461,14 +3485,32 @@ export function CombatEncounterShell({
   function scheduleAdvanceTurn() {
     if (advanceTurnTimeoutRef.current) {
       clearTimeout(advanceTurnTimeoutRef.current);
+      advanceTurnTimeoutRef.current = null;
+      resolvedEnemyTurnRef.current = null;
     }
     setIsTurnTransitioning(true);
     advanceTurnTimeoutRef.current = setTimeout(() => {
+      resolvedEnemyTurnRef.current = null;
       advanceTurn();
       setIsTurnTransitioning(false);
       advanceTurnTimeoutRef.current = null;
     }, ACTION_DELAY_MS);
   }
+
+  /** Evita quedar con `isTurnTransitioning` o turno enemigo colgado si un timeout se cancela sin avanzar. */
+  useEffect(() => {
+    if (!isTurnTransitioning) return;
+    const safetyMs = ACTION_DELAY_MS + 2500;
+    const safetyId = setTimeout(() => {
+      if (advanceTurnTimeoutRef.current) {
+        clearTimeout(advanceTurnTimeoutRef.current);
+        advanceTurnTimeoutRef.current = null;
+      }
+      resolvedEnemyTurnRef.current = null;
+      setIsTurnTransitioning(false);
+    }, safetyMs);
+    return () => clearTimeout(safetyId);
+  }, [isTurnTransitioning]);
 
   function handleAttack() {
     if (isTurnTransitioning) return;
@@ -3578,6 +3620,7 @@ export function CombatEncounterShell({
   }
 
   useEffect(() => {
+    if (combatOutcome !== "active") return;
     if (!currentActor || currentActor.type !== "enemy") return;
     if (isTurnTransitioning) return;
     if (playerCurrentHp <= 0) return;
@@ -3663,6 +3706,7 @@ export function CombatEncounterShell({
     }
     scheduleAdvanceTurn();
   }, [
+    combatOutcome,
     currentActor,
     effectiveTurnIndex,
     displayEnemies,
@@ -3931,6 +3975,7 @@ export function CombatEncounterShell({
                       <button
                         type="button"
                         disabled={!canAttack}
+                        title={attackBlockReason ?? undefined}
                         onClick={handleAttack}
                         className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
                           canAttack
@@ -4248,6 +4293,7 @@ export function CombatEncounterShell({
                   <button
                     type="button"
                     disabled={!canAttack}
+                    title={attackBlockReason ?? undefined}
                     onClick={handleAttack}
                     className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
                       canAttack
@@ -4599,7 +4645,7 @@ export function CombatEncounterShell({
           role="status"
           aria-live="polite"
         >
-          Tenés que seleccionar un enemigo para poder atacar.
+          {attackBlockReason ?? "No podés atacar en este momento."}
         </div>
       ) : null}
 
