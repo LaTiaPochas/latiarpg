@@ -11,6 +11,12 @@ import {
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
+import type { ParsedEnemySkillEffect } from "@/lib/enemy-skill-combat";
+import {
+  enemySkillMatchesUseWhen,
+  parsedEnemySkillChance,
+  parsedEnemySkillUseWhen,
+} from "@/lib/enemy-skill-combat";
 import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 import { formatInstanceStatRollTooltipLine, isInstanceStatWeakTooltipKey } from "@/components/character-profile/inventory-types";
 import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
@@ -165,26 +171,36 @@ type PlayerEnemyTimedEffect = {
   dotEffectJson: Record<string, unknown> | null;
 };
 
+/** Modificadores temporales que un enemigo aplica al PJ (elementos en resistencia / debilidad). */
+type EnemyAppliedPlayerTimedModifier = {
+  id: string;
+  remainingTurns: number;
+  lastTickTurn: number;
+  sourceSkillName: string;
+  stateIcons: string[];
+  extraWeaknessTags: string[];
+  extraResistanceTags: string[];
+};
+
+/** Buffs/debuffs temporales en el propio enemigo (caster). */
+type EnemySelfTimedModifier = {
+  id: string;
+  enemyId: string;
+  remainingTurns: number;
+  lastTickTurn: number;
+  skillName: string;
+  stateIcons: string[];
+  resistanceTags: string[];
+  weaknessTags: string[];
+};
+
 export type CombatEncounterEnemySkill = {
   id: string;
   name: string;
   description: string | null;
   cooldownTurns: number;
   manaCost: number;
-  effect: {
-    type: "damage";
-    target: "player";
-    min: number;
-    max: number;
-    /** Mitigación vs armor (physical/neutral/buff) o MR (magical) del PJ. */
-    subtype: PlayerSkillEffectSubtype;
-    /** `damage_type`/`damage_types` del JSON original, normalizado como etiquetas. */
-    damageTypes?: string[];
-    /** `state_icon` del JSON original, reservado para estados visuales futuros. */
-    stateIcon?: string | null;
-    /** Probabilidad [0..1] de lanzar la skill cuando está disponible. */
-    chance: number;
-  };
+  parsedEffect: ParsedEnemySkillEffect;
 };
 
 /** Skill del PJ aprendido (`user_character_skills`) + datos de `player_skills` para combate. */
@@ -1012,6 +1028,63 @@ function mergeEnemyWeaknessesWithExtraTags(
   return out;
 }
 
+function dedupeNormalizedTagStrings(values: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const n = normalizeDamageTypeLabel(raw);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+function mergePlayerResistWeakForIncoming(
+  baseRes: string[],
+  baseWeak: string[],
+  timedMods: EnemyAppliedPlayerTimedModifier[],
+): { resistances: string[]; weaknesses: string[] } {
+  const resistances = dedupeNormalizedTagStrings([
+    ...baseRes,
+    ...timedMods.flatMap((m) => m.extraResistanceTags),
+  ]);
+  const weaknesses = dedupeNormalizedTagStrings([
+    ...baseWeak,
+    ...timedMods.flatMap((m) => m.extraWeaknessTags),
+  ]);
+  return { resistances, weaknesses };
+}
+
+function selfTimedModifiersForEnemy(
+  enemyId: string,
+  selfMods: EnemySelfTimedModifier[],
+): EnemySelfTimedModifier[] {
+  return selfMods.filter((m) => m.enemyId === enemyId);
+}
+
+function mergedEnemyResistancesForPlayerAttack(
+  enemy: CombatEncounterEnemyView,
+  selfMods: EnemySelfTimedModifier[],
+): string[] {
+  const own = selfTimedModifiersForEnemy(enemy.id, selfMods);
+  return dedupeNormalizedTagStrings([
+    ...enemy.resistances,
+    ...own.flatMap((m) => m.resistanceTags),
+  ]);
+}
+
+function mergedEnemyWeaknessesForPlayerAttack(
+  enemy: CombatEncounterEnemyView,
+  effects: PlayerEnemyTimedEffect[],
+  selfMods: EnemySelfTimedModifier[],
+  additionalTags: string[],
+): string[] {
+  const baseMerged = mergeEnemyWeaknessesWithExtraTags(enemy, effects, additionalTags);
+  const own = selfTimedModifiersForEnemy(enemy.id, selfMods);
+  return dedupeNormalizedTagStrings([...baseMerged, ...own.flatMap((m) => m.weaknessTags)]);
+}
+
 function computePlayerSkillMitigatedDamageToEnemy(
   effect: Record<string, unknown>,
   enemy: CombatEncounterEnemyView,
@@ -1020,6 +1093,8 @@ function computePlayerSkillMitigatedDamageToEnemy(
     skillDamageBases: PlayerSkillDamageBaseBounds;
     magicalCombatDamageFlat: number;
     resistWeakTags: string[];
+    /** Resistencias efectivas (base + temporales del enemigo). */
+    enemyResistancesResolved: string[];
     /** Lista completa de debilidades (base + temporales) para RES/WEAK. */
     weaknessesResolved: string[];
   },
@@ -1035,7 +1110,7 @@ function computePlayerSkillMitigatedDamageToEnemy(
   return applyEnemyResistWeakTagsToMitigatedDamage(
     mitigated,
     opts.resistWeakTags,
-    enemy.resistances,
+    opts.enemyResistancesResolved,
     opts.weaknessesResolved,
   );
 }
@@ -1258,8 +1333,11 @@ function playerDefenseStatVsIncoming(
   return Math.max(0, Math.trunc(playerArmor));
 }
 
-/** Normaliza subtype de skills enemigas para decidir mitigación (armor vs MR). */
-function enemySkillIncomingSubtype(effect: CombatEncounterEnemySkill["effect"]): PlayerSkillEffectSubtype {
+/** Mitigación (armor vs MR) para daño de skill enemiga hacia el PJ. */
+function enemySkillIncomingSubtypeFromParsed(
+  effect: ParsedEnemySkillEffect,
+): PlayerSkillEffectSubtype {
+  if (effect.mode !== "damage") return "physical";
   const raw = effect.subtype;
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (s === "physical") return "physical";
@@ -2118,6 +2196,10 @@ export function CombatEncounterShell({
   );
 
   const [enemyPlayerTimedEffects, setEnemyPlayerTimedEffects] = useState<PlayerEnemyTimedEffect[]>([]);
+  const [enemyAppliedPlayerTimedModifiers, setEnemyAppliedPlayerTimedModifiers] = useState<
+    EnemyAppliedPlayerTimedModifier[]
+  >([]);
+  const [enemySelfTimedModifiers, setEnemySelfTimedModifiers] = useState<EnemySelfTimedModifier[]>([]);
   const displayEnemiesRef = useRef(displayEnemies);
   useEffect(() => {
     displayEnemiesRef.current = displayEnemies;
@@ -2126,6 +2208,14 @@ export function CombatEncounterShell({
   useEffect(() => {
     enemyPlayerTimedEffectsRef.current = enemyPlayerTimedEffects;
   }, [enemyPlayerTimedEffects]);
+  const enemyAppliedPlayerTimedModifiersRef = useRef(enemyAppliedPlayerTimedModifiers);
+  useEffect(() => {
+    enemyAppliedPlayerTimedModifiersRef.current = enemyAppliedPlayerTimedModifiers;
+  }, [enemyAppliedPlayerTimedModifiers]);
+  const enemySelfTimedModifiersRef = useRef(enemySelfTimedModifiers);
+  useEffect(() => {
+    enemySelfTimedModifiersRef.current = enemySelfTimedModifiers;
+  }, [enemySelfTimedModifiers]);
 
   const getCombatStatValueForSkills = useCallback(
     (key: string): number => {
@@ -2300,6 +2390,8 @@ export function CombatEncounterShell({
     setPlayerCombatMagicDamageMaxBonus(0);
     setPlayerTimedSelfBuffs([]);
     setEnemyPlayerTimedEffects([]);
+    setEnemyAppliedPlayerTimedModifiers([]);
+    setEnemySelfTimedModifiers([]);
     setTurn(1);
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
@@ -2700,8 +2792,15 @@ export function CombatEncounterShell({
         if (url) out.push(url);
       }
     }
+    for (const deb of enemyAppliedPlayerTimedModifiers) {
+      for (const raw of deb.stateIcons) {
+        if (typeof raw !== "string" || raw.trim().length === 0) continue;
+        const url = normalizePublicAssetUrl(raw);
+        if (url) out.push(url);
+      }
+    }
     return out;
-  }, [playerTimedSelfBuffs]);
+  }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers]);
 
   const enemyHudStateIconSrcsById = useMemo(() => {
     const byEnemy = new Map<string, Set<string>>();
@@ -2718,12 +2817,25 @@ export function CombatEncounterShell({
         if (url) bucket.add(url);
       }
     }
+    for (const sm of enemySelfTimedModifiers) {
+      if (sm.remainingTurns <= 0) continue;
+      let bucket = byEnemy.get(sm.enemyId);
+      if (!bucket) {
+        bucket = new Set();
+        byEnemy.set(sm.enemyId, bucket);
+      }
+      for (const raw of sm.stateIcons) {
+        if (typeof raw !== "string" || raw.trim().length === 0) continue;
+        const url = normalizePublicAssetUrl(raw);
+        if (url) bucket.add(url);
+      }
+    }
     const out = new Map<string, string[]>();
     for (const [enemyId, set] of byEnemy) {
       out.set(enemyId, Array.from(set));
     }
     return out;
-  }, [enemyPlayerTimedEffects]);
+  }, [enemyPlayerTimedEffects, enemySelfTimedModifiers]);
 
   /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
   const floatPlayerStatusOverActionsMobile = isActionsPanelOpen && isMobileViewport;
@@ -3261,16 +3373,22 @@ export function CombatEncounterShell({
       if (!target || target.hp <= 0) return;
 
       const weakThis = collectWeaknessTagsFromDamageSkillScalings(effect);
-      const weaknessesResolved = mergeEnemyWeaknessesWithExtraTags(
+      const weaknessesResolved = mergedEnemyWeaknessesForPlayerAttack(
         target,
         enemyPlayerTimedEffects,
+        enemySelfTimedModifiers,
         weakThis,
+      );
+      const enemyResistancesResolved = mergedEnemyResistancesForPlayerAttack(
+        target,
+        enemySelfTimedModifiers,
       );
       const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(effect, target, {
         getCombatStatValue: getCombatStatValueForSkills,
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        enemyResistancesResolved,
         weaknessesResolved,
       });
       const damageDone = Math.min(mitigatedFinal, target.hp);
@@ -3306,16 +3424,22 @@ export function CombatEncounterShell({
     for (const enemy of displayEnemies) {
       if (enemy.hp <= 0) continue;
       const weakThis = collectWeaknessTagsFromDamageSkillScalings(effect);
-      const weaknessesResolved = mergeEnemyWeaknessesWithExtraTags(
+      const weaknessesResolved = mergedEnemyWeaknessesForPlayerAttack(
         enemy,
         enemyPlayerTimedEffects,
+        enemySelfTimedModifiers,
         weakThis,
+      );
+      const enemyResistancesResolved = mergedEnemyResistancesForPlayerAttack(
+        enemy,
+        enemySelfTimedModifiers,
       );
       const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(effect, enemy, {
         getCombatStatValue: getCombatStatValueForSkills,
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        enemyResistancesResolved,
         weaknessesResolved,
       });
       const damageDone = Math.min(mitigatedFinal, enemy.hp);
@@ -3413,6 +3537,32 @@ export function CombatEncounterShell({
   useEffect(() => {
     tickPlayerTimedBuffs(turn);
 
+    setEnemyAppliedPlayerTimedModifiers((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const remainingTurns = row.remainingTurns - 1;
+        changed = true;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+      return changed ? next : prev;
+    });
+
+    setEnemySelfTimedModifiers((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const remainingTurns = row.remainingTurns - 1;
+        changed = true;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+      return changed ? next : prev;
+    });
+
     const prevEffects = enemyPlayerTimedEffectsRef.current;
     if (prevEffects.length === 0) return;
 
@@ -3430,12 +3580,22 @@ export function CombatEncounterShell({
           eff.dotEffectJson,
           ctx.playerWeaponAttackFamily,
         );
-        const extraWeak = mergeEnemyWeaknessesForPlayerAttackFromEffects(enemy, prevEffects);
+        const extraWeak = mergedEnemyWeaknessesForPlayerAttack(
+          enemy,
+          prevEffects,
+          enemySelfTimedModifiersRef.current,
+          [],
+        );
+        const enemyResistancesResolved = mergedEnemyResistancesForPlayerAttack(
+          enemy,
+          enemySelfTimedModifiersRef.current,
+        );
         const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(eff.dotEffectJson, enemy, {
           getCombatStatValue: ctx.getCombatStatValue,
           skillDamageBases: ctx.skillDamageBases,
           magicalCombatDamageFlat: ctx.magicalCombatDamageFlat,
           resistWeakTags: resistTags,
+          enemyResistancesResolved,
           weaknessesResolved: extraWeak,
         });
         const damageDone = Math.min(mitigatedFinal, enemy.hp);
@@ -3546,11 +3706,18 @@ export function CombatEncounterShell({
     );
     const rawDamage = randomIntInclusive(damageMin, damageMax);
     const afterArmor = mitigateDamageByDefense(rawDamage, target.armor);
+    const resistMerged = mergedEnemyResistancesForPlayerAttack(target, enemySelfTimedModifiers);
+    const weakMerged = mergedEnemyWeaknessesForPlayerAttack(
+      target,
+      enemyPlayerTimedEffects,
+      enemySelfTimedModifiers,
+      [],
+    );
     const mitigated = applyEnemyAttackFamilyToMitigatedDamage(
       afterArmor,
       playerWeaponAttackFamily,
-      target.resistances,
-      target.weaknesses,
+      resistMerged,
+      weakMerged,
     );
     const updatedHp = Math.max(0, target.hp - mitigated);
     const damageDone = target.hp - updatedHp;
@@ -3606,7 +3773,9 @@ export function CombatEncounterShell({
       const nextAvailableTurn = skillState[skill.id] ?? 1;
       if (turn < nextAvailableTurn) continue;
       if (enemy.mana < skill.manaCost) continue;
-      const chance = Math.max(0, Math.min(1, skill.effect.chance));
+      const root = skill.parsedEffect;
+      if (!enemySkillMatchesUseWhen(enemy.hp, enemy.hpMax, parsedEnemySkillUseWhen(root))) continue;
+      const chance = parsedEnemySkillChance(root);
       const roll = Math.random();
       return {
         chosenSkill: roll <= chance ? skill : null,
@@ -3642,65 +3811,177 @@ export function CombatEncounterShell({
 
     const skillDecision = pickAvailableEnemySkill(enemy);
     const skill = skillDecision?.chosenSkill ?? null;
-    let incomingSubtype: PlayerSkillEffectSubtype = "physical";
-    let rawDamage = 0;
-    if (skill) {
-      incomingSubtype = enemySkillIncomingSubtype(skill.effect);
-      rawDamage = Math.max(0, randomIntInclusive(skill.effect.min, skill.effect.max));
-      const nextTurnForSkill = turn + Math.max(1, skill.cooldownTurns);
+
+    const spendSkillResources = (sk: CombatEncounterEnemySkill) => {
+      const nextTurnForSkill = turn + Math.max(1, sk.cooldownTurns);
       setEnemySkillNextAvailableTurn((prev) => ({
         ...prev,
         [enemy.id]: {
           ...(prev[enemy.id] ?? {}),
-          [skill.id]: nextTurnForSkill,
+          [sk.id]: nextTurnForSkill,
         },
       }));
       setDisplayEnemies((prev) =>
         prev.map((entry) =>
           entry.id === enemy.id
-            ? { ...entry, mana: Math.max(0, entry.mana - Math.max(0, skill.manaCost)) }
+            ? { ...entry, mana: Math.max(0, entry.mana - Math.max(0, sk.manaCost)) }
             : entry,
         ),
       );
-    } else {
-      incomingSubtype = "physical";
-      rawDamage = Math.max(0, randomIntInclusive(enemy.attackMin, enemy.attackMax));
-    }
-    const defenseStat = playerDefenseStatVsIncoming(
-      incomingSubtype,
-      effectivePlayerArmor,
-      effectivePlayerMr,
-    );
-    const damage = mitigateDamageByDefense(rawDamage, defenseStat);
-    recordPlayerDamageTaken(damage);
-    const nextPlayerHp = Math.max(0, playerCurrentHp - damage);
-    setPlayerCurrentHp(nextPlayerHp);
+    };
+
+    let simPlayerHp = playerCurrentHp;
+    const applyPlayerDamageTaken = (amount: number) => {
+      const d = Math.max(0, Math.trunc(amount));
+      if (d <= 0) return;
+      recordPlayerDamageTaken(d);
+      simPlayerHp = Math.max(0, simPlayerHp - d);
+      setPlayerCurrentHp(simPlayerHp);
+    };
+
     if (skill) {
-      const descRaw = skill.description?.trim();
-      const fallback = `${enemy.name} usa ${skill.name}.`;
-      const template = descRaw && descRaw.length > 0 ? descRaw : fallback;
-      const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(template);
-      const logText = formatEnemySkillCombatLogDescription(
-        template,
-        damage,
-        enemy.name,
-        skill.effect.damageTypes ?? [],
-      );
-      appendCombatLog(
-        logText,
-        "danger",
-        undefined,
-        hadDamagePh ? Math.max(0, Math.trunc(damage)) : undefined,
-      );
+      spendSkillResources(skill);
+      const root = skill.parsedEffect;
+      let livePlayerMods = [...enemyAppliedPlayerTimedModifiersRef.current];
+      let simEnemyHp = enemy.hp;
+      const enemyHpMaxSafe = Math.max(1, Math.trunc(enemy.hpMax));
+
+      const substLogDamage = (damageAmt: number, dmgTypes: string[]) => {
+        const descRaw = skill.description?.trim();
+        const template =
+          descRaw && descRaw.length > 0 ? descRaw : `${enemy.name} usa ${skill.name}.`;
+        const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(template);
+        const logText = formatEnemySkillCombatLogDescription(
+          template,
+          damageAmt,
+          enemy.name,
+          dmgTypes,
+        );
+        appendCombatLog(
+          logText,
+          "danger",
+          undefined,
+          hadDamagePh ? Math.max(0, Math.trunc(damageAmt)) : undefined,
+        );
+      };
+
+      const runLeaf = (leaf: ParsedEnemySkillEffect, rollLeafChance: boolean) => {
+        if (leaf.mode === "composite") {
+          if (rollLeafChance && Math.random() > leaf.chance) return;
+          for (const step of leaf.steps) {
+            runLeaf(step, true);
+          }
+          return;
+        }
+        if (!enemySkillMatchesUseWhen(simEnemyHp, enemyHpMaxSafe, parsedEnemySkillUseWhen(leaf))) {
+          return;
+        }
+        if (rollLeafChance && Math.random() > parsedEnemySkillChance(leaf)) return;
+
+        switch (leaf.mode) {
+          case "damage": {
+            const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
+            const rawDamageRoll = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+            const defenseStat = playerDefenseStatVsIncoming(
+              incomingSubtype,
+              effectivePlayerArmor,
+              effectivePlayerMr,
+            );
+            const afterDef = mitigateDamageByDefense(rawDamageRoll, defenseStat);
+            const rw = mergePlayerResistWeakForIncoming(
+              playerResistancesRef.current,
+              playerWeaknessesRef.current,
+              livePlayerMods,
+            );
+            const damage = applyEnemyResistWeakTagsToMitigatedDamage(
+              afterDef,
+              leaf.damageTypes,
+              rw.resistances,
+              rw.weaknesses,
+            );
+            const d = Math.max(0, Math.trunc(damage));
+            applyPlayerDamageTaken(d);
+            substLogDamage(d, leaf.damageTypes);
+            break;
+          }
+          case "heal": {
+            const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+            const nextHp = Math.min(enemyHpMaxSafe, simEnemyHp + rolled);
+            const gained = Math.max(0, nextHp - simEnemyHp);
+            simEnemyHp = nextHp;
+            if (gained > 0) {
+              setDisplayEnemies((prev) =>
+                prev.map((e) => (e.id === enemy.id ? { ...e, hp: simEnemyHp } : e)),
+              );
+            }
+            appendCombatLog(
+              `${enemy.name} recupera ${gained} PV (${skill.name}).`,
+              gained > 0 ? "success" : "default",
+            );
+            break;
+          }
+          case "apply_modifier": {
+            const idBase = `${enemy.id}:${skill.id}:${turn}:${Math.random().toString(36).slice(2, 9)}`;
+            if (leaf.target === "player") {
+              const row: EnemyAppliedPlayerTimedModifier = {
+                id: idBase,
+                remainingTurns: leaf.durationTurns,
+                lastTickTurn: turn,
+                sourceSkillName: skill.name,
+                stateIcons: leaf.stateIcons,
+                extraWeaknessTags: leaf.weaknessTags,
+                extraResistanceTags: leaf.resistanceTags,
+              };
+              livePlayerMods.push(row);
+              setEnemyAppliedPlayerTimedModifiers((prev) => [...prev, row]);
+            } else {
+              const row: EnemySelfTimedModifier = {
+                id: idBase,
+                enemyId: enemy.id,
+                remainingTurns: leaf.durationTurns,
+                lastTickTurn: turn,
+                skillName: skill.name,
+                stateIcons: leaf.stateIcons,
+                resistanceTags: leaf.resistanceTags,
+                weaknessTags: leaf.weaknessTags,
+              };
+              setEnemySelfTimedModifiers((prev) => [...prev, row]);
+            }
+            appendCombatLog(`${enemy.name} usa ${skill.name} (altera estado).`, "default");
+            break;
+          }
+          default:
+            break;
+        }
+      };
+
+      if (root.mode === "composite") {
+        for (const step of root.steps) {
+          runLeaf(step, true);
+        }
+      } else {
+        runLeaf(root, false);
+      }
     } else {
+      const incomingSubtype: PlayerSkillEffectSubtype = "physical";
+      const rawDamage = Math.max(0, randomIntInclusive(enemy.attackMin, enemy.attackMax));
+      const defenseStat = playerDefenseStatVsIncoming(
+        incomingSubtype,
+        effectivePlayerArmor,
+        effectivePlayerMr,
+      );
+      const damage = mitigateDamageByDefense(rawDamage, defenseStat);
+      const d = Math.max(0, Math.trunc(damage));
+      applyPlayerDamageTaken(d);
       appendCombatLog(
-        `${enemy.name} te ataca y te inflige ${damage} de daño.`,
+        `${enemy.name} te ataca y te inflige ${d} de daño.`,
         "danger",
         undefined,
-        Math.max(0, Math.trunc(damage)),
+        d,
       );
     }
-    if (nextPlayerHp === 0) {
+
+    if (simPlayerHp === 0) {
       appendCombatLog(`${enemy.name} te ha derrotado.`, "danger");
       return;
     }
