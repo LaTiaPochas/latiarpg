@@ -63,7 +63,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
   },
   {
     id: "cave-node-7",
-    step: 7,
+    step: 6,
     label: "Puente Colgante",
     xPercent: 26,
     yPercent: 50,
@@ -71,7 +71,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
   },
   {
     id: "cave-node-8",
-    step: 8,
+    step: 7,
     label: "Final del Camino",
     xPercent: 30,
     yPercent: 30,
@@ -79,7 +79,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
   },
   {
     id: "cave-node-9",
-    step: 9,
+    step: 8,
     label: "Punto de Control Tomado",
     xPercent: 48,
     yPercent: 28,
@@ -87,7 +87,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
   },
   {
     id: "cave-node-10",
-    step: 9,
+    step: 8,
     label: "Las Profundidades",
     xPercent: 19,
     yPercent: 16,

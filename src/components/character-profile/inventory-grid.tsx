@@ -22,10 +22,10 @@ import {
   equipInventoryItem,
 } from "@/app/(main)/character_profile/actions";
 import {
-  formatInstanceStatRollTooltipLine,
+  collectInstanceStatTooltipRollLines,
   formatWeaponAttackTypeLabel,
+  instanceStatRollTooltipLineClassName,
   inventoryTooltipSubtitleUnderName,
-  isInstanceStatWeakTooltipKey,
   type EquipmentInstanceTooltip,
   type WeaponInstanceTooltip,
 } from "@/components/character-profile/inventory-types";
@@ -1564,24 +1564,20 @@ export function InventoryGrid({
                           </p>
                         </>
                       ) : null}
-                      {(
-                        [
-                          [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
-                          [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
-                          [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
-                          [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
-                          [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
-                        ] as const
-                      )
-                        .filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]))
-                        .map(([statKey, line], index) => (
+                      {collectInstanceStatTooltipRollLines(roll).map(
+                        ({ statKey, valueFlat, valuePct, line }, index) => (
                           <p
                             key={`${line}-${index}`}
-                            className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                            className={instanceStatRollTooltipLineClassName(
+                              statKey,
+                              valueFlat,
+                              valuePct,
+                            )}
                           >
                             {line}
                           </p>
-                        ))}
+                        ),
+                      )}
                     </div>
                   );
                 })()}

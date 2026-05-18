@@ -12,9 +12,108 @@ export type EnemySkillUseWhen = {
   enemyHpPctMin?: number | null;
 };
 
+/** Destino de un efecto de skill enemiga (`target` en `effect_json`). */
+export type EnemySkillEffectTarget = "player" | "caster" | "all_enemies" | "all";
+
+export function parseEnemySkillTarget(
+  raw: unknown,
+  fallback: EnemySkillEffectTarget,
+): EnemySkillEffectTarget {
+  if (typeof raw !== "string") return fallback;
+  const t = raw.trim().toLowerCase().replace(/-/g, "_");
+  if (t === "player") return "player";
+  if (t === "caster" || t === "self" || t === "enemy") return "caster";
+  if (t === "all_enemies" || t === "all_enemy" || t === "enemies") return "all_enemies";
+  if (t === "all") return "all";
+  return fallback;
+}
+
+export type EnemyStatBuffAffectedStat =
+  | "hp"
+  | "mana"
+  | "armor"
+  | "mr"
+  | "speed"
+  | "damage"
+  | "magic_damage";
+
+export type EnemyStatBuffPart = {
+  stat: EnemyStatBuffAffectedStat;
+  amount: number;
+};
+
+export type EnemyCombatStatBonuses = {
+  hp: number;
+  mana: number;
+  armor: number;
+  mr: number;
+  speed: number;
+  attackMin: number;
+  attackMax: number;
+  magicMin: number;
+  magicMax: number;
+};
+
+export function emptyEnemyCombatStatBonuses(): EnemyCombatStatBonuses {
+  return {
+    hp: 0,
+    mana: 0,
+    armor: 0,
+    mr: 0,
+    speed: 0,
+    attackMin: 0,
+    attackMax: 0,
+    magicMin: 0,
+    magicMax: 0,
+  };
+}
+
+export function sumEnemyTimedStatBonuses(
+  rows: Array<{ enemyId: string; parts: EnemyStatBuffPart[]; remainingTurns: number }>,
+  enemyId: string,
+): EnemyCombatStatBonuses {
+  const totals = emptyEnemyCombatStatBonuses();
+  for (const row of rows) {
+    if (row.enemyId !== enemyId || row.remainingTurns <= 0) continue;
+    for (const part of row.parts) {
+      const a = Math.trunc(part.amount);
+      if (a === 0) continue;
+      switch (part.stat) {
+        case "hp":
+          totals.hp += a;
+          break;
+        case "mana":
+          totals.mana += a;
+          break;
+        case "armor":
+          totals.armor += a;
+          break;
+        case "mr":
+          totals.mr += a;
+          break;
+        case "speed":
+          totals.speed += a;
+          break;
+        case "damage":
+          totals.attackMin += a;
+          totals.attackMax += a;
+          break;
+        case "magic_damage":
+          totals.magicMin += a;
+          totals.magicMax += a;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  return totals;
+}
+
 export type ParsedEnemySkillEffect =
   | {
       mode: "damage";
+      target: EnemySkillEffectTarget;
       min: number;
       max: number;
       subtype: PlayerSkillEffectSubtype;
@@ -25,6 +124,7 @@ export type ParsedEnemySkillEffect =
     }
   | {
       mode: "heal";
+      target: EnemySkillEffectTarget;
       min: number;
       max: number;
       chance: number;
@@ -32,9 +132,18 @@ export type ParsedEnemySkillEffect =
     }
   | {
       mode: "apply_modifier";
-      target: "player" | "caster";
+      target: EnemySkillEffectTarget;
       weaknessTags: string[];
       resistanceTags: string[];
+      durationTurns: number;
+      stateIcons: string[];
+      chance: number;
+      useWhen: EnemySkillUseWhen | null;
+    }
+  | {
+      mode: "stat_buff";
+      target: EnemySkillEffectTarget;
+      parts: EnemyStatBuffPart[];
       durationTurns: number;
       stateIcons: string[];
       chance: number;
@@ -45,7 +154,27 @@ export type ParsedEnemySkillEffect =
       steps: ParsedEnemySkillEffect[];
       chance: number;
       useWhen: EnemySkillUseWhen | null;
+      /** Texto del log de combate (`{enemigo}`, `{daño}` / `{dano}` / `{damage}`). */
+      logDescription: string | null;
     };
+
+const ENEMY_STAT_BUFF_MAP = new Map<string, EnemyStatBuffAffectedStat>([
+  ["hp", "hp"],
+  ["mana", "mana"],
+  ["mp", "mana"],
+  ["armor", "armor"],
+  ["armadura", "armor"],
+  ["mr", "mr"],
+  ["magic_resist", "mr"],
+  ["magicresist", "mr"],
+  ["speed", "speed"],
+  ["velocidad", "speed"],
+  ["damage", "damage"],
+  ["attack_damage", "damage"],
+  ["attack-damage", "damage"],
+  ["magic_damage", "magic_damage"],
+  ["magic-damage", "magic_damage"],
+]);
 
 function num(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -138,6 +267,32 @@ function extractUseWhen(effect: Record<string, unknown>): EnemySkillUseWhen | nu
   return parseUseWhen(uw);
 }
 
+function extractLogDescription(effect: Record<string, unknown>): string | null {
+  const raw = effect.description;
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  return t.length > 0 ? t : null;
+}
+
+function parseAffectedStatFromRaw(raw: unknown): EnemyStatBuffAffectedStat | null {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!s) return null;
+  const hit = s.replace(/\s+/g, "_").replace(/-/g, "_");
+  return ENEMY_STAT_BUFF_MAP.get(hit) ?? ENEMY_STAT_BUFF_MAP.get(s) ?? null;
+}
+
+function parseModifierScalingFlat(mod: Record<string, unknown>): number {
+  const scaling = mod.scaling;
+  if (scaling != null && typeof scaling === "object" && !Array.isArray(scaling)) {
+    const flat = (scaling as Record<string, unknown>).flat;
+    const fromScaling = num(flat, Number.NaN);
+    if (Number.isFinite(fromScaling)) return Math.trunc(fromScaling);
+  }
+  const direct = num(mod.amount ?? mod.flat, Number.NaN);
+  if (Number.isFinite(direct)) return Math.trunc(direct);
+  return 0;
+}
+
 function parseModifierTags(mod: Record<string, unknown>): {
   weaknessTags: string[];
   resistanceTags: string[];
@@ -187,14 +342,40 @@ function parseModifierTags(mod: Record<string, unknown>): {
   return { weaknessTags, resistanceTags, durationTurns, stateIcons };
 }
 
+function parseStatBuffModifier(mod: Record<string, unknown>): {
+  parts: EnemyStatBuffPart[];
+  durationTurns: number;
+  stateIcons: string[];
+} | null {
+  const kindRaw = mod.kind ?? mod.modifier_kind;
+  const kind = typeof kindRaw === "string" ? kindRaw.trim().toLowerCase().replace(/-/g, "_") : "";
+  if (kind !== "buff") return null;
+
+  const stat = parseAffectedStatFromRaw(mod["affected-stat"] ?? mod.affected_stat);
+  const amount = parseModifierScalingFlat(mod);
+  if (!stat || amount === 0) return null;
+
+  const durationTurns = Math.max(
+    1,
+    Math.trunc(
+      num(mod.duration_turns ?? mod.durationTurns ?? mod.duration, 3),
+    ),
+  );
+  const stateIcons = getEffectStateIcons(mod);
+
+  return {
+    parts: [{ stat, amount }],
+    durationTurns,
+    stateIcons,
+  };
+}
+
 function parseApplyModifier(
   effect: Record<string, unknown>,
   chance: number,
   useWhen: EnemySkillUseWhen | null,
 ): ParsedEnemySkillEffect | null {
-  const targetRaw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
-  const target: "player" | "caster" =
-    targetRaw === "player" ? "player" : "caster";
+  const target = parseEnemySkillTarget(effect.target, "caster");
   const modRaw = effect.modifier;
   if (!modRaw || typeof modRaw !== "object" || Array.isArray(modRaw)) return null;
   const { weaknessTags, resistanceTags, durationTurns, stateIcons } = parseModifierTags(
@@ -208,6 +389,28 @@ function parseApplyModifier(
     resistanceTags,
     durationTurns,
     stateIcons,
+    chance,
+    useWhen,
+  };
+}
+
+function parseStatBuff(
+  effect: Record<string, unknown>,
+  chance: number,
+  useWhen: EnemySkillUseWhen | null,
+): ParsedEnemySkillEffect | null {
+  const target = parseEnemySkillTarget(effect.target, "caster");
+  const modRaw = effect.modifier;
+  if (!modRaw || typeof modRaw !== "object" || Array.isArray(modRaw)) return null;
+  const parsed = parseStatBuffModifier(modRaw as Record<string, unknown>);
+  if (!parsed) return null;
+
+  return {
+    mode: "stat_buff",
+    target,
+    parts: parsed.parts,
+    durationTurns: parsed.durationTurns,
+    stateIcons: parsed.stateIcons,
     chance,
     useWhen,
   };
@@ -229,15 +432,24 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
       if (parsed) steps.push(parsed);
     }
     if (steps.length === 0) return null;
-    return { mode: "composite", steps, chance, useWhen };
+    return {
+      mode: "composite",
+      steps,
+      chance,
+      useWhen,
+      logDescription: extractLogDescription(effect),
+    };
   }
 
   if (typeNorm === "heal") {
-    const targetRaw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
-    if (targetRaw !== "caster" && targetRaw !== "self" && targetRaw !== "enemy") return null;
+    const target = parseEnemySkillTarget(effect.target, "caster");
     const min = Math.max(0, num(effect.min, 0));
     const max = Math.max(min, num(effect.max, min));
-    return { mode: "heal", min, max, chance, useWhen };
+    return { mode: "heal", target, min, max, chance, useWhen };
+  }
+
+  if (typeNorm === "buff") {
+    return parseStatBuff(effect, chance, useWhen);
   }
 
   if (typeNorm === "apply_modifier") {
@@ -245,12 +457,12 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
   }
 
   if (typeNorm !== "damage") return null;
-  const targetRaw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
-  if (targetRaw !== "player") return null;
+  const target = parseEnemySkillTarget(effect.target, "player");
   const min = Math.max(0, num(effect.min, 0));
   const max = Math.max(min, num(effect.max, min));
   return {
     mode: "damage",
+    target,
     min,
     max,
     subtype: enemySkillDamageSubtype(effect),
@@ -296,6 +508,7 @@ export function parsedEnemySkillUseWhen(
     case "damage":
     case "heal":
     case "apply_modifier":
+    case "stat_buff":
       return effect.useWhen;
     case "composite":
       return effect.useWhen;
@@ -311,6 +524,8 @@ export function parsedEnemySkillChance(effect: ParsedEnemySkillEffect): number {
     case "heal":
       return effect.chance;
     case "apply_modifier":
+      return effect.chance;
+    case "stat_buff":
       return effect.chance;
     case "composite":
       return effect.chance;

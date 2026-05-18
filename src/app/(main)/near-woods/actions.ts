@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { resolveInventoryIconPath } from "@/lib/inventory-icon-path";
 import { rollMagicForestEnemyCombatCode } from "@/lib/magic-forest-enemy-combats";
-import { rollMagicForestGatherOutcome } from "@/lib/magic-forest-gather-outcomes";
+import {
+  rollMagicForestGatherOutcome,
+  rollMagicForestWoodQuantity,
+} from "@/lib/magic-forest-gather-outcomes";
 import { rollNearWoodsEnemyCombatCode } from "@/lib/near-woods-enemy-combats";
 import { rollNearWoodsGatherOutcome } from "@/lib/near-woods-gather-outcomes";
 import { createClient } from "@/lib/supabase/server";
@@ -350,7 +353,7 @@ export async function gatherMagicForest(): Promise<GatherMagicForestResult> {
     return { ok: false, error: "Resultado sin ítem configurado." };
   }
 
-  const grantQuantity = result === "madera" ? Math.floor(Math.random() * 5) + 3 : 1;
+  const grantQuantity = result === "madera" ? rollMagicForestWoodQuantity() : 1;
 
   const { data: existingRows, error: selectError } = await supabase
     .from("user_inventory")

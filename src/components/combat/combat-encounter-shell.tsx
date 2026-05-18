@@ -11,14 +11,44 @@ import {
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
-import type { ParsedEnemySkillEffect } from "@/lib/enemy-skill-combat";
+import type {
+  EnemyCombatStatBonuses,
+  EnemySkillEffectTarget,
+  EnemyStatBuffAffectedStat,
+  EnemyStatBuffPart,
+  ParsedEnemySkillEffect,
+} from "@/lib/enemy-skill-combat";
 import {
+  emptyEnemyCombatStatBonuses,
   enemySkillMatchesUseWhen,
   parsedEnemySkillChance,
   parsedEnemySkillUseWhen,
+  sumEnemyTimedStatBonuses,
 } from "@/lib/enemy-skill-combat";
+import {
+  createDefaultCombatAmmoEntry,
+  formatAmmoMenuButtonLabel,
+  isAmmoCompatibleWithWeapon,
+  isAmmoConsumableEffect,
+  parseAmmoEffect,
+  resolveAmmoAttackFamilyForHit,
+  resolveAmmoAttackTypeForHit,
+  rollAmmoDamage,
+  weaponRequiresAmmo,
+  type AmmoAttackType,
+  type CombatAmmoMenuEntry,
+} from "@/lib/combat-ammo";
+import {
+  collectResistWeakIconSrcsForEnemyTags,
+  getCombatResistWeakIconSrc,
+  preloadCombatResistWeakIcons,
+  resolveCombatStateIconSrcs,
+} from "@/lib/combat-resist-weak-icons";
 import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
-import { formatInstanceStatRollTooltipLine, isInstanceStatWeakTooltipKey } from "@/components/character-profile/inventory-types";
+import {
+  collectInstanceStatTooltipRollLines,
+  instanceStatRollTooltipLineClassName,
+} from "@/components/character-profile/inventory-types";
 import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
@@ -192,6 +222,17 @@ type EnemySelfTimedModifier = {
   stateIcons: string[];
   resistanceTags: string[];
   weaknessTags: string[];
+};
+
+/** Buff de stats temporales en el enemigo (`type: buff`, `modifier.kind: buff`). */
+type EnemyTimedStatBuff = {
+  id: string;
+  enemyId: string;
+  parts: EnemyStatBuffPart[];
+  remainingTurns: number;
+  lastTickTurn: number;
+  skillName: string;
+  stateIcons: string[];
 };
 
 export type CombatEncounterEnemySkill = {
@@ -752,196 +793,6 @@ function splitSelfBuffPartsForTimedAndInstant(
   };
 }
 
-type CombatBuffStatDebugNumbers = {
-  armor: number;
-  mr: number;
-  speed: number;
-  weaponMin: number;
-  weaponMax: number;
-  magicMin: number;
-  magicMax: number;
-  /** Mismo criterio que `MAGIC_DAMAGE` en scaling de skills. */
-  magicAvgForScaling: number;
-  hp: number;
-  mana: number;
-};
-
-function addTimedBuffPartsToStatTotals(
-  base: Record<PlayerTimedSelfBuffStat, number>,
-  parts: PlayerTimedSelfBuffPart[],
-): Record<PlayerTimedSelfBuffStat, number> {
-  const out: Record<PlayerTimedSelfBuffStat, number> = { ...base };
-  for (const p of parts) {
-    out[p.stat] = out[p.stat] + Math.trunc(p.amount);
-  }
-  return out;
-}
-
-function sumInstantSelfBuffCombatDeltas(
-  instantParts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>,
-): {
-  armor: number;
-  mr: number;
-  speed: number;
-  weaponMin: number;
-  weaponMax: number;
-  magicMin: number;
-  magicMax: number;
-  hpHeal: number;
-  manaDelta: number;
-} {
-  const d = {
-    armor: 0,
-    mr: 0,
-    speed: 0,
-    weaponMin: 0,
-    weaponMax: 0,
-    magicMin: 0,
-    magicMax: 0,
-    hpHeal: 0,
-    manaDelta: 0,
-  };
-  for (const p of instantParts) {
-    const a = Math.trunc(p.amount);
-    switch (p.stat) {
-      case "armor":
-        d.armor += a;
-        break;
-      case "mr":
-        d.mr += a;
-        break;
-      case "speed":
-        d.speed += a;
-        break;
-      case "weapon_damage_min":
-        d.weaponMin += a;
-        break;
-      case "weapon_damage_max":
-        d.weaponMax += a;
-        break;
-      case "magic_damage_min":
-        d.magicMin += a;
-        break;
-      case "magic_damage_max":
-        d.magicMax += a;
-        break;
-      case "hp":
-        if (a > 0) d.hpHeal += a;
-        break;
-      case "mana":
-        d.manaDelta += a;
-        break;
-      default:
-        break;
-    }
-  }
-  return d;
-}
-
-function computeCombatBuffStatNumbers(args: {
-  playerArmor: number;
-  playerCombatArmorBonus: number;
-  timed: Record<PlayerTimedSelfBuffStat, number>;
-  playerMr: number;
-  playerCombatMrBonus: number;
-  playerSpeed: number;
-  playerCombatSpeedBonus: number;
-  playerWeaponDamageMin: number;
-  playerWeaponDamageMax: number;
-  playerCombatWeaponDamageMinBonus: number;
-  playerCombatWeaponDamageMaxBonus: number;
-  playerMagicDamageMin: number;
-  playerMagicDamageMax: number;
-  playerCombatMagicDamageMinBonus: number;
-  playerCombatMagicDamageMaxBonus: number;
-  playerCurrentHp: number;
-  displayPlayerMana: number;
-  playerHpMax: number;
-  playerManaMax: number;
-}): CombatBuffStatDebugNumbers {
-  const t = args.timed;
-  const armor = Math.max(
-    0,
-    Math.trunc(args.playerArmor + args.playerCombatArmorBonus + t.armor),
-  );
-  const mr = Math.max(0, Math.trunc(args.playerMr + args.playerCombatMrBonus + t.mr));
-  const speed = Math.max(
-    0,
-    Math.trunc(args.playerSpeed + args.playerCombatSpeedBonus + t.speed),
-  );
-  const weaponMin = Math.max(
-    1,
-    Math.floor(
-      args.playerWeaponDamageMin +
-        args.playerCombatWeaponDamageMinBonus +
-        t.weapon_damage_min,
-    ),
-  );
-  const weaponMax = Math.max(
-    weaponMin,
-    Math.floor(
-      args.playerWeaponDamageMax +
-        args.playerCombatWeaponDamageMaxBonus +
-        t.weapon_damage_max,
-    ),
-  );
-  const magicMin = Math.max(
-    0,
-    Math.floor(
-      args.playerMagicDamageMin +
-        args.playerCombatMagicDamageMinBonus +
-        t.magic_damage_min,
-    ),
-  );
-  const magicMax = Math.max(
-    magicMin,
-    Math.floor(
-      args.playerMagicDamageMax +
-        args.playerCombatMagicDamageMaxBonus +
-        t.magic_damage_max,
-    ),
-  );
-  const magicAvgForScaling = Math.floor((magicMin + magicMax) / 2);
-  return {
-    armor,
-    mr,
-    speed,
-    weaponMin,
-    weaponMax,
-    magicMin,
-    magicMax,
-    magicAvgForScaling,
-    hp: args.playerCurrentHp,
-    mana: args.displayPlayerMana,
-  };
-}
-
-function logCombatBuffStatDebug(payload: {
-  skillName: string;
-  turn: number;
-  durationTurns: number | null;
-  parts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>;
-  timedParts: PlayerTimedSelfBuffPart[];
-  instantParts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>;
-  antes: CombatBuffStatDebugNumbers;
-  despues: CombatBuffStatDebugNumbers;
-  timedTotalsAntes: Record<PlayerTimedSelfBuffStat, number>;
-  timedTotalsDespues: Record<PlayerTimedSelfBuffStat, number>;
-  instantDeltas: ReturnType<typeof sumInstantSelfBuffCombatDeltas>;
-}): void {
-  console.log("[combate][buff][stats] antes → después (previsto mismo tick)", {
-    skill: payload.skillName,
-    turn: payload.turn,
-    duration_turns: payload.durationTurns,
-    efectivo: { antes: payload.antes, despues: payload.despues },
-    partes_resueltas: payload.parts,
-    timed_parts_nuevos: payload.timedParts,
-    instant_parts: payload.instantParts,
-    timed_totals: { antes: payload.timedTotalsAntes, despues: payload.timedTotalsDespues },
-    bonos_instantaneos_sumados: payload.instantDeltas,
-  });
-}
-
 function getPlayerSkillDamageEffectKind(
   effect: Record<string, unknown>,
 ): "none" | "damage" | "damage_dot" {
@@ -1097,10 +948,15 @@ function computePlayerSkillMitigatedDamageToEnemy(
     enemyResistancesResolved: string[];
     /** Lista completa de debilidades (base + temporales) para RES/WEAK. */
     weaknessesResolved: string[];
+    enemyStatBonuses?: EnemyCombatStatBonuses;
   },
 ): number {
   const subtype = getPlayerSkillEffectSubtype(effect);
-  const defenseStat = enemyDefenseStatForPlayerSkill(subtype, enemy);
+  const defenseStat = enemyDefenseStatForPlayerSkill(
+    subtype,
+    enemy,
+    opts.enemyStatBonuses ?? emptyEnemyCombatStatBonuses(),
+  );
   let rawDamage = rollDamageFromPlayerSkillEffect(effect, opts.getCombatStatValue, opts.skillDamageBases);
   rawDamage =
     subtype === "magical"
@@ -1271,9 +1127,11 @@ function mitigateDamageByDefense(rawDamage: number, defense: number): number {
 }
 
 /**
- * Tras (daño - armadura/MR): si algún tag está en resistencias del enemigo ×0.5;
- * si no, si algún tag está en debilidades ×2; si no coincide ninguno, sin cambio.
- * Resistencia tiene prioridad si un mismo tag figurara en ambas listas (no debería).
+ * Tras (daño - armadura/MR), por cada tag del ataque:
+ * - Si el mismo tipo está en resistencias y debilidades → se cancelan (sin efecto).
+ * - Si solo en resistencias → candidato a ×0.5.
+ * - Si solo en debilidades → candidato a ×2.
+ * Con varios tags activos: resistencia antes que debilidad (misma prioridad que antes, pero sin el mismo tipo).
  */
 function applyEnemyResistWeakTagsToMitigatedDamage(
   damageAfterDefense: number,
@@ -1286,10 +1144,21 @@ function applyEnemyResistWeakTagsToMitigatedDamage(
   if (tags.length === 0) return base;
   const norm = (arr: string[]) =>
     arr.map((s) => String(s).trim().toLowerCase()).filter((s) => s.length > 0);
-  const res = norm(resistances);
-  const weak = norm(weaknesses);
-  if (tags.some((t) => res.includes(t))) return Math.max(0, Math.floor(base * 0.5));
-  if (tags.some((t) => weak.includes(t))) return Math.max(0, Math.floor(base * 2));
+  const res = new Set(norm(resistances));
+  const weak = new Set(norm(weaknesses));
+
+  let hasResistOnly = false;
+  let hasWeakOnly = false;
+  for (const t of tags) {
+    const inRes = res.has(t);
+    const inWeak = weak.has(t);
+    if (inRes && inWeak) continue;
+    if (inRes) hasResistOnly = true;
+    else if (inWeak) hasWeakOnly = true;
+  }
+
+  if (hasResistOnly) return Math.max(0, Math.floor(base * 0.5));
+  if (hasWeakOnly) return Math.max(0, Math.floor(base * 2));
   return base;
 }
 
@@ -1314,13 +1183,146 @@ function applyEnemyAttackFamilyToMitigatedDamage(
   );
 }
 
+function effectiveEnemyArmor(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.armor + bonuses.armor));
+}
+
+function effectiveEnemyMr(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.mr + bonuses.mr));
+}
+
+function effectiveEnemySpeed(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.speed + bonuses.speed));
+}
+
+function effectiveEnemyAttackRange(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): { min: number; max: number } {
+  const min = Math.max(0, Math.trunc(enemy.attackMin + bonuses.attackMin));
+  const max = Math.max(min, Math.trunc(enemy.attackMax + bonuses.attackMax));
+  return { min, max };
+}
+
+function effectiveEnemyHpMax(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(1, Math.trunc(enemy.hpMax + bonuses.hp));
+}
+
+function effectiveEnemyMana(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.mana + bonuses.mana));
+}
+
+function enemyStatBuffPartLabel(stat: EnemyStatBuffAffectedStat): string {
+  switch (stat) {
+    case "hp":
+      return "PV";
+    case "mana":
+      return "maná";
+    case "armor":
+      return "armadura";
+    case "mr":
+      return "resistencia mágica";
+    case "speed":
+      return "velocidad";
+    case "damage":
+      return "daño de ataque";
+    case "magic_damage":
+      return "daño mágico";
+    default:
+      return stat;
+  }
+}
+
+function resolveEnemySkillEffectTargets(
+  target: EnemySkillEffectTarget,
+  casterEnemyId: string,
+  livingEnemies: CombatEncounterEnemyView[],
+): { hitPlayer: boolean; enemies: CombatEncounterEnemyView[] } {
+  switch (target) {
+    case "player":
+      return { hitPlayer: true, enemies: [] };
+    case "caster": {
+      const caster = livingEnemies.find((e) => e.id === casterEnemyId);
+      return { hitPlayer: false, enemies: caster ? [caster] : [] };
+    }
+    case "all_enemies":
+      return { hitPlayer: false, enemies: livingEnemies };
+    case "all":
+      return { hitPlayer: true, enemies: livingEnemies };
+    default:
+      return { hitPlayer: false, enemies: [] };
+  }
+}
+
+function enemyStatPartsToPlayerTimedParts(parts: EnemyStatBuffPart[]): PlayerTimedSelfBuffPart[] {
+  const out: PlayerTimedSelfBuffPart[] = [];
+  for (const part of parts) {
+    const a = Math.trunc(part.amount);
+    if (a === 0) continue;
+    switch (part.stat) {
+      case "armor":
+        out.push({ stat: "armor", amount: a });
+        break;
+      case "mr":
+        out.push({ stat: "mr", amount: a });
+        break;
+      case "speed":
+        out.push({ stat: "speed", amount: a });
+        break;
+      case "damage":
+        out.push({ stat: "weapon_damage_min", amount: a });
+        out.push({ stat: "weapon_damage_max", amount: a });
+        break;
+      case "magic_damage":
+        out.push({ stat: "magic_damage_min", amount: a });
+        out.push({ stat: "magic_damage_max", amount: a });
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+type ParsedEnemyDamageLeaf = Extract<ParsedEnemySkillEffect, { mode: "damage" }>;
+
+function mitigatedEnemySkillDamageToEnemy(
+  leaf: ParsedEnemyDamageLeaf,
+  victim: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
+  const rawDamageRoll = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+  const defenseStat =
+    incomingSubtype === "magical"
+      ? effectiveEnemyMr(victim, bonuses)
+      : effectiveEnemyArmor(victim, bonuses);
+  return Math.max(0, Math.trunc(mitigateDamageByDefense(rawDamageRoll, defenseStat)));
+}
+
 /** Daño del PJ al enemigo: físico/neutral/buff usa armor del monstruo; mágico usa MR. */
 function enemyDefenseStatForPlayerSkill(
   subtype: PlayerSkillEffectSubtype,
   enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses = emptyEnemyCombatStatBonuses(),
 ): number {
-  if (subtype === "magical") return Math.max(0, Math.trunc(enemy.mr));
-  return Math.max(0, Math.trunc(enemy.armor));
+  if (subtype === "magical") return effectiveEnemyMr(enemy, bonuses);
+  return effectiveEnemyArmor(enemy, bonuses);
 }
 
 /** Daño que recibe el PJ: físico/neutral/buff usa armor del PJ; mágico usa MR. */
@@ -1574,6 +1576,10 @@ export type CombatConsumeResult = {
   error?: string;
 };
 
+import type { CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
+
+export type { CombatAmmoSpentEntry };
+
 export type CombatEncounterStatsPayload = {
   didWin: boolean;
   enemiesDefeated: number;
@@ -1585,36 +1591,8 @@ export type CombatEncounterStatsPayload = {
   highestHitReceived: number;
   finalHp: number;
   finalMana: number;
-};
-
-export type CombatEncounterDebugPayload = {
-  encounterCode: string;
-  /** `zones.code` usado en la URL (?zone=), o null si no se filtró por zona. */
-  zoneFilter: string | null;
-  encounterId: string;
-  rowsError: {
-    message: string;
-    code?: string;
-    details?: string;
-    hint?: string;
-  } | null;
-  rawRowCount: number;
-  mappedEnemyCount: number;
-  enemies: CombatEncounterEnemyView[];
-  /** Resistencias / debilidades del PJ al iniciar el encuentro (desde `user_character`). */
-  playerResistances?: string[];
-  playerWeaknesses?: string[];
-  /** `weapon_instance.attack_family` del arma equipada en slot `weapon` al iniciar el encuentro. */
-  playerWeaponAttackFamily?: string | null;
-  rawRows: Array<{
-    index: number;
-    spawn_index: number | null;
-    hp_override: number | null;
-    mana_override: number | null;
-    ai_profile: string | null;
-    enemyTemplate: Record<string, unknown> | null;
-  }>;
-  lootDebug?: Record<string, unknown>;
+  /** Munición gastada en combate (se persiste en inventario al cerrar victoria/derrota). */
+  ammoSpent?: CombatAmmoSpentEntry[];
 };
 
 export type CombatEncounterShellProps = {
@@ -1625,7 +1603,6 @@ export type CombatEncounterShellProps = {
   recommendedLevel: number | null;
   backgroundSrc: string | null;
   enemies: CombatEncounterEnemyView[];
-  combatDebug?: CombatEncounterDebugPayload | null;
   combatStartMessage?: string | null;
   /** Overrides opcionales del PJ (más adelante desde `user_character`). */
   playerDisplayName?: string;
@@ -1653,10 +1630,8 @@ export type CombatEncounterShellProps = {
   playerWeaknesses?: string[];
   /** `weapon_instance.attack_family` del arma equipada (ataque normal). */
   playerWeaponAttackFamily?: string | null;
-  /** Con `?debug=1`: `console.log` en cliente con resistencias PJ + enemigos al montar / al cambiar props. */
-  combatResistWeakDebug?: boolean;
-  /** Con `?debug=1`: al usar un buff self, `console.log` con stats efectivas antes / después (previsto mismo tick). */
-  combatBuffStatDebug?: boolean;
+  /** `weapon_instance.ammo_kind` del arma equipada; si tiene valor, el ataque exige munición compatible. */
+  playerWeaponAmmoKind?: string | null;
   playerExperienceToNext?: number;
   playerLevelCurrent?: number;
   playerLevelAfterVictory?: number;
@@ -1672,8 +1647,12 @@ export type CombatEncounterShellProps = {
   victoryGoldFromLoot?: number;
   /** Acción servidor para consumir 1 unidad en inventario. */
   onConsumeConsumable?: (inventoryId: number) => Promise<CombatConsumeResult>;
-  /** Persiste estado actual (HP/Mana) cuando el usuario escapa. */
-  onEscapePersistState?: (payload: { finalHp: number; finalMana: number }) => Promise<void>;
+  /** Persiste estado actual (HP/Mana y munición gastada) cuando el usuario escapa. */
+  onEscapePersistState?: (payload: {
+    finalHp: number;
+    finalMana: number;
+    ammoSpent?: CombatAmmoSpentEntry[];
+  }) => Promise<void>;
   /** Registra en el log global cuando el PJ cae en combate. */
   onPlayerDefeatedGlobalLog?: () => Promise<void>;
   /** Registra en el log global cuando el PJ sube de nivel. */
@@ -1975,7 +1954,6 @@ export function CombatEncounterShell({
   recommendedLevel,
   backgroundSrc,
   enemies,
-  combatDebug,
   combatStartMessage = null,
   playerDisplayName = "Fede",
   playerPortraitSrc = PJ_FEDE_FACE_COMBAT,
@@ -1998,8 +1976,7 @@ export function CombatEncounterShell({
   playerResistances = [],
   playerWeaknesses = [],
   playerWeaponAttackFamily = null,
-  combatResistWeakDebug = false,
-  combatBuffStatDebug = false,
+  playerWeaponAmmoKind = null,
   playerExperienceToNext = 0,
   playerLevelCurrent = 1,
   playerLevelAfterVictory = 1,
@@ -2025,24 +2002,6 @@ export function CombatEncounterShell({
     playerWeaknessesRef.current = [...playerWeaknesses];
   }, [playerResistances, playerWeaknesses]);
 
-  useEffect(() => {
-    if (!combatResistWeakDebug) return;
-    console.log("[combate][resist-weak][cliente] PJ (props + ref)", {
-      resistances: [...playerResistances],
-      weaknesses: [...playerWeaknesses],
-      weaponAttackFamily: playerWeaponAttackFamily,
-      refResistances: [...playerResistancesRef.current],
-      refWeaknesses: [...playerWeaknessesRef.current],
-    });
-    enemies.slice(0, MAX_ENEMIES_ON_FIELD).forEach((e, i) => {
-      console.log(`[combate][resist-weak][cliente] enemigo[${i}]`, e.name, {
-        templateId: e.templateId,
-        resistances: e.resistances,
-        weaknesses: e.weaknesses,
-      });
-    });
-  }, [combatResistWeakDebug, playerResistances, playerWeaknesses, playerWeaponAttackFamily, enemies]);
-
   /** Copia en memoria del combate para uso al activar habilidades del PJ. */
   const playerCombatSkills = useMemo(() => [...playerSkills], [playerSkills]);
   const playerCombatSkillsRef = useRef(playerCombatSkills);
@@ -2056,11 +2015,71 @@ export function CombatEncounterShell({
     setCombatConsumables([...playerConsumables]);
   }, [playerConsumables]);
 
+  const [selectedAmmoInventoryId, setSelectedAmmoInventoryId] = useState<number | null>(null);
+
+  const weaponAmmoKindNorm = useMemo(() => {
+    const kind =
+      typeof playerWeaponAmmoKind === "string" ? playerWeaponAmmoKind.trim() : "";
+    return kind.length > 0 ? kind : null;
+  }, [playerWeaponAmmoKind]);
+
+  const requiresAmmo = weaponRequiresAmmo(weaponAmmoKindNorm);
+
+  const combatAmmoItems = useMemo((): CombatAmmoMenuEntry[] => {
+    if (!requiresAmmo || !weaponAmmoKindNorm) return [];
+    const defaultAmmo = createDefaultCombatAmmoEntry(weaponAmmoKindNorm);
+    const fromInventory: CombatAmmoMenuEntry[] = combatConsumables
+      .filter(
+        (entry) =>
+          entry.quantity > 0 &&
+          isAmmoCompatibleWithWeapon(weaponAmmoKindNorm, entry.effect),
+      )
+      .map((entry) => ({ ...entry, isDefaultAmmo: false }));
+    return defaultAmmo ? [defaultAmmo, ...fromInventory] : fromInventory;
+  }, [combatConsumables, requiresAmmo, weaponAmmoKindNorm]);
+
+  const combatPotionItems = useMemo(
+    () => combatConsumables.filter((entry) => !isAmmoConsumableEffect(entry.effect)),
+    [combatConsumables],
+  );
+
+  useEffect(() => {
+    if (!requiresAmmo) {
+      setSelectedAmmoInventoryId(null);
+      return;
+    }
+    if (combatAmmoItems.length === 0) {
+      setSelectedAmmoInventoryId(null);
+      return;
+    }
+    setSelectedAmmoInventoryId((prev) => {
+      if (prev != null && combatAmmoItems.some((entry) => entry.inventoryId === prev)) {
+        return prev;
+      }
+      return combatAmmoItems[0]?.inventoryId ?? null;
+    });
+  }, [requiresAmmo, combatAmmoItems]);
+
   const initialEnemies = useMemo(
     () => enemies.slice(0, MAX_ENEMIES_ON_FIELD),
     [enemies],
   );
   const [displayEnemies, setDisplayEnemies] = useState<CombatEncounterEnemyView[]>(initialEnemies);
+
+  /** Catálogo RES/WEAK en memoria + precarga al entrar (encuentro + PJ). */
+  useEffect(() => {
+    const encounterSrcs = collectResistWeakIconSrcsForEnemyTags(enemies);
+    const playerTagSrcs: string[] = [];
+    for (const tag of playerResistances) {
+      const src = getCombatResistWeakIconSrc(tag, "up");
+      if (src) playerTagSrcs.push(src);
+    }
+    for (const tag of playerWeaknesses) {
+      const src = getCombatResistWeakIconSrc(tag, "down");
+      if (src) playerTagSrcs.push(src);
+    }
+    preloadCombatResistWeakIcons([...encounterSrcs, ...playerTagSrcs]);
+  }, [enemies, playerResistances, playerWeaknesses]);
   /** Evita que un re-render del servidor (p. ej. tras guardar stats) reviva enemigos y cancele victoria. */
   const [combatOutcome, setCombatOutcome] = useState<"active" | "won" | "lost">("active");
   const [selectedEnemyId, setSelectedEnemyId] = useState<string | null>(null);
@@ -2078,10 +2097,12 @@ export function CombatEncounterShell({
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
   const [isEscaping, setIsEscaping] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory">("main");
+  const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory" | "ammo">("main");
   const [isTurnTransitioning, setIsTurnTransitioning] = useState(true);
   const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
   const combatLogDesktopRef = useRef<HTMLDivElement | null>(null);
+  /** Munición gastada en este combate (persiste en BD solo al terminar victoria/derrota). */
+  const ammoSpentByInventoryIdRef = useRef<Map<number, number>>(new Map());
   const combatLogIdRef = useRef(0);
   const advanceTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialActionDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2200,6 +2221,7 @@ export function CombatEncounterShell({
     EnemyAppliedPlayerTimedModifier[]
   >([]);
   const [enemySelfTimedModifiers, setEnemySelfTimedModifiers] = useState<EnemySelfTimedModifier[]>([]);
+  const [enemyTimedStatBuffs, setEnemyTimedStatBuffs] = useState<EnemyTimedStatBuff[]>([]);
   const displayEnemiesRef = useRef(displayEnemies);
   useEffect(() => {
     displayEnemiesRef.current = displayEnemies;
@@ -2216,6 +2238,23 @@ export function CombatEncounterShell({
   useEffect(() => {
     enemySelfTimedModifiersRef.current = enemySelfTimedModifiers;
   }, [enemySelfTimedModifiers]);
+  const enemyTimedStatBuffsRef = useRef(enemyTimedStatBuffs);
+  useEffect(() => {
+    enemyTimedStatBuffsRef.current = enemyTimedStatBuffs;
+  }, [enemyTimedStatBuffs]);
+
+  const enemyStatBonusesById = useMemo(() => {
+    const map = new Map<string, EnemyCombatStatBonuses>();
+    for (const enemy of displayEnemies) {
+      map.set(enemy.id, sumEnemyTimedStatBonuses(enemyTimedStatBuffs, enemy.id));
+    }
+    return map;
+  }, [displayEnemies, enemyTimedStatBuffs]);
+
+  const getEnemyStatBonuses = useCallback(
+    (enemyId: string) => enemyStatBonusesById.get(enemyId) ?? emptyEnemyCombatStatBonuses(),
+    [enemyStatBonusesById],
+  );
 
   const getCombatStatValueForSkills = useCallback(
     (key: string): number => {
@@ -2392,6 +2431,7 @@ export function CombatEncounterShell({
     setEnemyPlayerTimedEffects([]);
     setEnemyAppliedPlayerTimedModifiers([]);
     setEnemySelfTimedModifiers([]);
+    setEnemyTimedStatBuffs([]);
     setTurn(1);
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
@@ -2550,6 +2590,7 @@ export function CombatEncounterShell({
       highestHitReceived: combatStatsRef.current.highestHitReceived,
       finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
       finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+      ammoSpent: getAmmoSpentForPersist(),
     }).catch(() => {
       // Si falla el guardado de stats no se bloquea la resolución visual del combate.
     });
@@ -2562,6 +2603,9 @@ export function CombatEncounterShell({
   }, [encounterCode]);
   useEffect(() => {
     setPlayerSkillNextAvailableTurn({});
+  }, [encounterCode]);
+  useEffect(() => {
+    ammoSpentByInventoryIdRef.current = new Map();
   }, [encounterCode]);
   const turnOrder = useMemo<TurnActor[]>(() => {
     const actors: TurnActor[] = [
@@ -2578,12 +2622,12 @@ export function CombatEncounterShell({
         .map((enemy) => ({
           id: `enemy:${enemy.id}`,
           type: "enemy" as const,
-          speed: Math.max(0, Math.trunc(enemy.speed)),
+          speed: effectiveEnemySpeed(enemy, getEnemyStatBonuses(enemy.id)),
           enemyId: enemy.id,
         })),
     ];
     return actors.sort((a, b) => b.speed - a.speed);
-  }, [displayEnemies, playerCombatSpeedBonus, playerSpeed, timedBuffBonusByStat]);
+  }, [displayEnemies, getEnemyStatBonuses, playerCombatSpeedBonus, playerSpeed, timedBuffBonusByStat]);
   const turnOrderRef = useRef(turnOrder);
   useEffect(() => {
     turnOrderRef.current = turnOrder;
@@ -2646,42 +2690,6 @@ export function CombatEncounterShell({
   const effectiveTurnIndex =
     turnOrder.length === 0 ? 0 : Math.min(currentTurnIndex, turnOrder.length - 1);
   const currentActor = turnOrder[effectiveTurnIndex] ?? null;
-  const runtimeInitiativeDebug = useMemo(
-    () => ({
-      playerSpeed: Math.max(
-        0,
-        Math.trunc(playerSpeed + playerCombatSpeedBonus + timedBuffBonusByStat.speed),
-      ),
-      enemies: displayEnemies.map((enemy) => ({
-        id: enemy.id,
-        name: enemy.name,
-        speed: Math.max(0, Math.trunc(enemy.speed)),
-        hp: enemy.hp,
-        alive: enemy.hp > 0,
-      })),
-      turnOrder: turnOrder.map((actor, idx) => ({
-        idx,
-        actorId: actor.id,
-        actorType: actor.type,
-        speed: actor.speed,
-        isCurrent: idx === effectiveTurnIndex,
-      })),
-      currentTurnIndex: effectiveTurnIndex,
-      currentActorId: currentActor?.id ?? null,
-      currentActorType: currentActor?.type ?? null,
-      turn,
-    }),
-    [
-      playerCombatSpeedBonus,
-      playerSpeed,
-      timedBuffBonusByStat,
-      displayEnemies,
-      turnOrder,
-      effectiveTurnIndex,
-      currentActor,
-      turn,
-    ],
-  );
   useEffect(() => {
     if (turnOrder.length === 0) return;
     const previous = previousTurnIndexRef.current;
@@ -2785,57 +2793,79 @@ export function CombatEncounterShell({
   );
   const playerActiveBuffStateIconSrcs = useMemo(() => {
     const out: string[] = [];
-    for (const buff of playerTimedSelfBuffs) {
-      for (const raw of buff.stateIcons) {
-        if (typeof raw !== "string" || raw.trim().length === 0) continue;
-        const url = normalizePublicAssetUrl(raw);
-        if (url) out.push(url);
+    const seen = new Set<string>();
+    const addResolved = (opts: Parameters<typeof resolveCombatStateIconSrcs>[0]) => {
+      for (const src of resolveCombatStateIconSrcs(opts)) {
+        if (seen.has(src)) continue;
+        seen.add(src);
+        out.push(src);
       }
+    };
+    for (const buff of playerTimedSelfBuffs) {
+      addResolved({ stateIcons: buff.stateIcons });
     }
     for (const deb of enemyAppliedPlayerTimedModifiers) {
-      for (const raw of deb.stateIcons) {
-        if (typeof raw !== "string" || raw.trim().length === 0) continue;
-        const url = normalizePublicAssetUrl(raw);
-        if (url) out.push(url);
-      }
+      addResolved({
+        stateIcons: deb.stateIcons,
+        resistanceTags: deb.extraResistanceTags,
+        weaknessTags: deb.extraWeaknessTags,
+      });
     }
     return out;
   }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers]);
 
   const enemyHudStateIconSrcsById = useMemo(() => {
-    const byEnemy = new Map<string, Set<string>>();
+    const byEnemy = new Map<string, string[]>();
+    const mergeForEnemy = (
+      enemyId: string,
+      opts: Parameters<typeof resolveCombatStateIconSrcs>[0],
+    ) => {
+      const resolved = resolveCombatStateIconSrcs(opts);
+      if (resolved.length === 0) return;
+      const prev = byEnemy.get(enemyId) ?? [];
+      const seen = new Set(prev);
+      const merged = [...prev];
+      for (const src of resolved) {
+        if (seen.has(src)) continue;
+        seen.add(src);
+        merged.push(src);
+      }
+      byEnemy.set(enemyId, merged);
+    };
+
+    for (const enemy of displayEnemies) {
+      mergeForEnemy(enemy.id, {
+        resistanceTags: enemy.resistances,
+        weaknessTags: enemy.weaknesses,
+      });
+    }
+
     for (const eff of enemyPlayerTimedEffects) {
       if (eff.debuffRemainingTurns <= 0 && eff.dotTicksRemaining <= 0) continue;
-      let bucket = byEnemy.get(eff.enemyId);
-      if (!bucket) {
-        bucket = new Set();
-        byEnemy.set(eff.enemyId, bucket);
-      }
-      for (const raw of eff.stateIcons) {
-        if (typeof raw !== "string" || raw.trim().length === 0) continue;
-        const url = normalizePublicAssetUrl(raw);
-        if (url) bucket.add(url);
-      }
+      mergeForEnemy(eff.enemyId, {
+        stateIcons: eff.stateIcons,
+        weaknessTags: eff.extraWeaknessTags,
+      });
     }
     for (const sm of enemySelfTimedModifiers) {
       if (sm.remainingTurns <= 0) continue;
-      let bucket = byEnemy.get(sm.enemyId);
-      if (!bucket) {
-        bucket = new Set();
-        byEnemy.set(sm.enemyId, bucket);
-      }
-      for (const raw of sm.stateIcons) {
-        if (typeof raw !== "string" || raw.trim().length === 0) continue;
-        const url = normalizePublicAssetUrl(raw);
-        if (url) bucket.add(url);
-      }
+      mergeForEnemy(sm.enemyId, {
+        stateIcons: sm.stateIcons,
+        resistanceTags: sm.resistanceTags,
+        weaknessTags: sm.weaknessTags,
+      });
     }
-    const out = new Map<string, string[]>();
-    for (const [enemyId, set] of byEnemy) {
-      out.set(enemyId, Array.from(set));
+    for (const sb of enemyTimedStatBuffs) {
+      if (sb.remainingTurns <= 0) continue;
+      mergeForEnemy(sb.enemyId, { stateIcons: sb.stateIcons });
     }
-    return out;
-  }, [enemyPlayerTimedEffects, enemySelfTimedModifiers]);
+    return byEnemy;
+  }, [
+    displayEnemies,
+    enemyPlayerTimedEffects,
+    enemySelfTimedModifiers,
+    enemyTimedStatBuffs,
+  ]);
 
   /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
   const floatPlayerStatusOverActionsMobile = isActionsPanelOpen && isMobileViewport;
@@ -2848,6 +2878,11 @@ export function CombatEncounterShell({
     (selectedEnemyId ? displayEnemies.find((enemy) => enemy.id === selectedEnemyId) : null) ??
     null;
   const isPlayerTurn = currentActor?.type === "player";
+  const selectedAmmoItem =
+    selectedAmmoInventoryId != null
+      ? (combatAmmoItems.find((entry) => entry.inventoryId === selectedAmmoInventoryId) ?? null)
+      : null;
+
   const attackBlockReason =
     playerCurrentHp <= 0
       ? null
@@ -2857,7 +2892,9 @@ export function CombatEncounterShell({
           ? "Todavía no es tu turno."
           : selectedEnemy == null || selectedEnemy.hp <= 0
             ? "Tenés que seleccionar un enemigo vivo para atacar."
-            : null;
+            : requiresAmmo && selectedAmmoItem == null
+                ? "Seleccioná munición compatible para atacar."
+                : null;
   const canAttack =
     combatOutcome === "active" && attackBlockReason === null && playerCurrentHp > 0;
 
@@ -2923,6 +2960,7 @@ export function CombatEncounterShell({
   }
 
   function canUseConsumable(item: CombatPlayerConsumableView): boolean {
+    if (isAmmoConsumableEffect(item.effect)) return false;
     if (isPlayerActionsLocked) return false;
     if (item.quantity <= 0) return false;
     if (!item.effect) return false;
@@ -3157,77 +3195,6 @@ export function CombatEncounterShell({
       const stateIconsList = getEffectStateIcons(effect);
       const { timedParts, instantParts } = splitSelfBuffPartsForTimedAndInstant(parts, durationTurns);
 
-      if (combatBuffStatDebug) {
-        const timedTotalsAntes: Record<PlayerTimedSelfBuffStat, number> = { ...timedBuffBonusByStat };
-        const timedTotalsDespues = addTimedBuffPartsToStatTotals(timedTotalsAntes, timedParts);
-        const instantDeltas = sumInstantSelfBuffCombatDeltas(instantParts);
-        const antes = computeCombatBuffStatNumbers({
-          playerArmor,
-          playerCombatArmorBonus,
-          timed: timedTotalsAntes,
-          playerMr,
-          playerCombatMrBonus,
-          playerSpeed,
-          playerCombatSpeedBonus,
-          playerWeaponDamageMin,
-          playerWeaponDamageMax,
-          playerCombatWeaponDamageMinBonus,
-          playerCombatWeaponDamageMaxBonus,
-          playerMagicDamageMin,
-          playerMagicDamageMax,
-          playerCombatMagicDamageMinBonus,
-          playerCombatMagicDamageMaxBonus,
-          playerCurrentHp,
-          displayPlayerMana,
-          playerHpMax,
-          playerManaMax,
-        });
-        const despues = computeCombatBuffStatNumbers({
-          playerArmor,
-          playerCombatArmorBonus: playerCombatArmorBonus + instantDeltas.armor,
-          timed: timedTotalsDespues,
-          playerMr,
-          playerCombatMrBonus: playerCombatMrBonus + instantDeltas.mr,
-          playerSpeed,
-          playerCombatSpeedBonus: playerCombatSpeedBonus + instantDeltas.speed,
-          playerWeaponDamageMin,
-          playerWeaponDamageMax,
-          playerCombatWeaponDamageMinBonus:
-            playerCombatWeaponDamageMinBonus + instantDeltas.weaponMin,
-          playerCombatWeaponDamageMaxBonus:
-            playerCombatWeaponDamageMaxBonus + instantDeltas.weaponMax,
-          playerMagicDamageMin,
-          playerMagicDamageMax,
-          playerCombatMagicDamageMinBonus:
-            playerCombatMagicDamageMinBonus + instantDeltas.magicMin,
-          playerCombatMagicDamageMaxBonus:
-            playerCombatMagicDamageMaxBonus + instantDeltas.magicMax,
-          playerCurrentHp: Math.min(
-            Math.max(1, playerHpMax),
-            playerCurrentHp + instantDeltas.hpHeal,
-          ),
-          displayPlayerMana: Math.min(
-            Math.max(0, playerManaMax),
-            Math.max(0, displayPlayerMana + instantDeltas.manaDelta),
-          ),
-          playerHpMax,
-          playerManaMax,
-        });
-        logCombatBuffStatDebug({
-          skillName: skillEntry.skill.name,
-          turn,
-          durationTurns,
-          parts,
-          timedParts,
-          instantParts,
-          antes,
-          despues,
-          timedTotalsAntes,
-          timedTotalsDespues,
-          instantDeltas,
-        });
-      }
-
       if (timedParts.length > 0 && durationTurns != null) {
         setPlayerTimedSelfBuffs((prev) => [
           ...prev,
@@ -3390,6 +3357,7 @@ export function CombatEncounterShell({
         resistWeakTags,
         enemyResistancesResolved,
         weaknessesResolved,
+        enemyStatBonuses: getEnemyStatBonuses(target.id),
       });
       const damageDone = Math.min(mitigatedFinal, target.hp);
       const updatedHp = target.hp - damageDone;
@@ -3441,6 +3409,7 @@ export function CombatEncounterShell({
         resistWeakTags,
         enemyResistancesResolved,
         weaknessesResolved,
+        enemyStatBonuses: getEnemyStatBonuses(enemy.id),
       });
       const damageDone = Math.min(mitigatedFinal, enemy.hp);
       const hpNext = enemy.hp - damageDone;
@@ -3563,6 +3532,19 @@ export function CombatEncounterShell({
       return changed ? next : prev;
     });
 
+    setEnemyTimedStatBuffs((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const remainingTurns = row.remainingTurns - 1;
+        changed = true;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+      return changed ? next : prev;
+    });
+
     const prevEffects = enemyPlayerTimedEffectsRef.current;
     if (prevEffects.length === 0) return;
 
@@ -3597,6 +3579,10 @@ export function CombatEncounterShell({
           resistWeakTags: resistTags,
           enemyResistancesResolved,
           weaknessesResolved: extraWeak,
+          enemyStatBonuses: sumEnemyTimedStatBonuses(
+            enemyTimedStatBuffsRef.current,
+            enemy.id,
+          ),
         });
         const damageDone = Math.min(mitigatedFinal, enemy.hp);
         if (damageDone > 0) {
@@ -3672,6 +3658,25 @@ export function CombatEncounterShell({
     return () => clearTimeout(safetyId);
   }, [isTurnTransitioning]);
 
+  function recordAmmoSpentInCombat(inventoryId: number, amount = 1) {
+    const id = Math.max(0, Math.trunc(inventoryId));
+    const delta = Math.max(0, Math.trunc(amount));
+    if (id <= 0 || delta <= 0) return;
+    ammoSpentByInventoryIdRef.current.set(
+      id,
+      (ammoSpentByInventoryIdRef.current.get(id) ?? 0) + delta,
+    );
+  }
+
+  function getAmmoSpentForPersist(): CombatAmmoSpentEntry[] {
+    return Array.from(ammoSpentByInventoryIdRef.current.entries())
+      .map(([inventoryId, quantitySpent]) => ({
+        inventoryId,
+        quantitySpent: Math.max(0, Math.trunc(quantitySpent)),
+      }))
+      .filter((entry) => entry.quantitySpent > 0);
+  }
+
   function handleAttack() {
     if (isTurnTransitioning) return;
     if (!isPlayerTurn) {
@@ -3685,6 +3690,10 @@ export function CombatEncounterShell({
     }
     if (target.hp <= 0) {
       appendCombatLog(`${target.name} ya está derrotado.`);
+      return;
+    }
+    if (requiresAmmo && !selectedAmmoItem) {
+      appendCombatLog("Seleccioná munición compatible para atacar.");
       return;
     }
 
@@ -3704,8 +3713,42 @@ export function CombatEncounterShell({
           timedBuffBonusByStat.weapon_damage_max,
       ),
     );
-    const rawDamage = randomIntInclusive(damageMin, damageMax);
-    const afterArmor = mitigateDamageByDefense(rawDamage, target.armor);
+    let rawDamage = randomIntInclusive(damageMin, damageMax);
+    let attackFamilyForHit = playerWeaponAttackFamily;
+
+    let ammoItemForAttack: CombatAmmoMenuEntry | null = null;
+    let ammoAttackType: AmmoAttackType | null = null;
+    if (requiresAmmo && selectedAmmoItem) {
+      const parsedAmmo = parseAmmoEffect(selectedAmmoItem.effect);
+      if (!parsedAmmo) {
+        appendCombatLog("La munición seleccionada no es válida.", "danger");
+        return;
+      }
+      ammoItemForAttack = selectedAmmoItem;
+      rawDamage += rollAmmoDamage(parsedAmmo);
+      attackFamilyForHit = resolveAmmoAttackFamilyForHit(parsedAmmo);
+      ammoAttackType = resolveAmmoAttackTypeForHit(parsedAmmo);
+
+      if (!selectedAmmoItem.isDefaultAmmo) {
+        setCombatConsumables((prev) =>
+          prev
+            .map((entry) =>
+              entry.inventoryId === selectedAmmoItem.inventoryId
+                ? { ...entry, quantity: Math.max(0, entry.quantity - 1) }
+                : entry,
+            )
+            .filter((entry) => entry.quantity > 0),
+        );
+        recordAmmoSpentInCombat(selectedAmmoItem.inventoryId, 1);
+      }
+    }
+
+    const targetBonuses = getEnemyStatBonuses(target.id);
+    const enemyDefenseForHit =
+      ammoAttackType === "magical"
+        ? effectiveEnemyMr(target, targetBonuses)
+        : effectiveEnemyArmor(target, targetBonuses);
+    const afterArmor = mitigateDamageByDefense(rawDamage, enemyDefenseForHit);
     const resistMerged = mergedEnemyResistancesForPlayerAttack(target, enemySelfTimedModifiers);
     const weakMerged = mergedEnemyWeaknessesForPlayerAttack(
       target,
@@ -3715,7 +3758,7 @@ export function CombatEncounterShell({
     );
     const mitigated = applyEnemyAttackFamilyToMitigatedDamage(
       afterArmor,
-      playerWeaponAttackFamily,
+      attackFamilyForHit,
       resistMerged,
       weakMerged,
     );
@@ -3725,8 +3768,10 @@ export function CombatEncounterShell({
     setDisplayEnemies((prev) =>
       prev.map((enemy) => (enemy.id === target.id ? { ...enemy, hp: updatedHp } : enemy)),
     );
+    const ammoSuffix =
+      ammoItemForAttack != null ? ` (con ${ammoItemForAttack.name})` : "";
     appendCombatLog(
-      `Atacaste a ${target.name} y le infligiste ${damageDone} de daño.`,
+      `Atacaste a ${target.name}${ammoSuffix} y le infligiste ${damageDone} de daño.`,
       "default",
       damageDone,
     );
@@ -3746,6 +3791,48 @@ export function CombatEncounterShell({
     setAttackHint((prev) => (prev.visible ? { ...prev, visible: false } : prev));
   }
 
+  function renderAmmoMenuPanel(textSizeClass = "text-[11px]") {
+    if (combatAmmoItems.length === 0) {
+      return (
+        <p
+          className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center ${textSizeClass} text-amber-200/75`}
+        >
+          No hay munición para este arma.
+        </p>
+      );
+    }
+    return (
+      <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
+        <div className="grid gap-1 sm:gap-1.5">
+          {combatAmmoItems.map((item) => {
+            const selected = item.inventoryId === selectedAmmoInventoryId;
+            const label = formatAmmoMenuButtonLabel(item.name, item.quantity, item.effect, {
+              unlimitedQuantity: item.isDefaultAmmo,
+            });
+            return (
+              <button
+                key={item.inventoryId}
+                type="button"
+                disabled={isPlayerActionsLocked}
+                onClick={() => {
+                  setSelectedAmmoInventoryId(item.inventoryId);
+                  setActionMenu("main");
+                }}
+                className={`w-full rounded-md border px-1.5 py-0.5 text-left ${textSizeClass} font-semibold leading-snug transition ${
+                  selected
+                    ? "cursor-pointer border-amber-400/90 bg-amber-700/55 text-amber-50 shadow-[inset_0_1px_0_rgba(253,224,71,0.22),0_0_10px_rgba(217,119,6,0.28)] hover:bg-amber-600/60"
+                    : "cursor-pointer border-yellow-600/65 bg-yellow-900/40 text-yellow-100/90 hover:border-yellow-500/75 hover:bg-yellow-800/50"
+                } ${isPlayerActionsLocked ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   function handleEscapeClick(event: React.MouseEvent<HTMLAnchorElement>) {
     if (isEscapeDisabledByEnemyHp) {
       event.preventDefault();
@@ -3758,11 +3845,13 @@ export function CombatEncounterShell({
     void onEscapePersistState({
       finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
       finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+      ammoSpent: getAmmoSpentForPersist(),
     })
       .catch(() => {
         // Si falla el guardado no bloquea escape.
       })
       .finally(() => {
+        ammoSpentByInventoryIdRef.current = new Map();
         router.push(escapeHref);
       });
   }
@@ -3772,7 +3861,7 @@ export function CombatEncounterShell({
     for (const skill of enemy.skills) {
       const nextAvailableTurn = skillState[skill.id] ?? 1;
       if (turn < nextAvailableTurn) continue;
-      if (enemy.mana < skill.manaCost) continue;
+      if (effectiveEnemyMana(enemy, getEnemyStatBonuses(enemy.id)) < skill.manaCost) continue;
       const root = skill.parsedEffect;
       if (!enemySkillMatchesUseWhen(enemy.hp, enemy.hpMax, parsedEnemySkillUseWhen(root))) continue;
       const chance = parsedEnemySkillChance(root);
@@ -3846,13 +3935,16 @@ export function CombatEncounterShell({
       let simEnemyHp = enemy.hp;
       const enemyHpMaxSafe = Math.max(1, Math.trunc(enemy.hpMax));
 
-      const substLogDamage = (damageAmt: number, dmgTypes: string[]) => {
-        const descRaw = skill.description?.trim();
-        const template =
-          descRaw && descRaw.length > 0 ? descRaw : `${enemy.name} usa ${skill.name}.`;
-        const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(template);
+      const appendEnemySkillLog = (
+        template: string,
+        damageAmt: number,
+        dmgTypes: string[] = [],
+      ) => {
+        const t = template.trim();
+        if (!t) return;
+        const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(t);
         const logText = formatEnemySkillCombatLogDescription(
-          template,
+          t,
           damageAmt,
           enemy.name,
           dmgTypes,
@@ -3865,66 +3957,159 @@ export function CombatEncounterShell({
         );
       };
 
-      const runLeaf = (leaf: ParsedEnemySkillEffect, rollLeafChance: boolean) => {
+      const runLeaf = (
+        leaf: ParsedEnemySkillEffect,
+        rollLeafChance: boolean,
+        opts?: { suppressPlayerDamageLog?: boolean },
+      ): number => {
         if (leaf.mode === "composite") {
-          if (rollLeafChance && Math.random() > leaf.chance) return;
+          if (rollLeafChance && Math.random() > leaf.chance) return 0;
+          const desc = leaf.logDescription?.trim() ?? null;
+          const suppressHits = Boolean(desc) || Boolean(opts?.suppressPlayerDamageLog);
+          let totalPlayerDamage = 0;
           for (const step of leaf.steps) {
-            runLeaf(step, true);
+            totalPlayerDamage += runLeaf(step, true, {
+              suppressPlayerDamageLog: suppressHits,
+            });
           }
-          return;
+          if (desc) {
+            appendEnemySkillLog(desc, totalPlayerDamage);
+          }
+          return totalPlayerDamage;
         }
         if (!enemySkillMatchesUseWhen(simEnemyHp, enemyHpMaxSafe, parsedEnemySkillUseWhen(leaf))) {
-          return;
+          return 0;
         }
-        if (rollLeafChance && Math.random() > parsedEnemySkillChance(leaf)) return;
+        if (rollLeafChance && Math.random() > parsedEnemySkillChance(leaf)) return 0;
+
+        const livingEnemyTargets = displayEnemiesRef.current.filter((e) => e.hp > 0);
 
         switch (leaf.mode) {
           case "damage": {
-            const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
-            const rawDamageRoll = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
-            const defenseStat = playerDefenseStatVsIncoming(
-              incomingSubtype,
-              effectivePlayerArmor,
-              effectivePlayerMr,
+            let playerDamage = 0;
+            const dmgTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
             );
-            const afterDef = mitigateDamageByDefense(rawDamageRoll, defenseStat);
-            const rw = mergePlayerResistWeakForIncoming(
-              playerResistancesRef.current,
-              playerWeaknessesRef.current,
-              livePlayerMods,
-            );
-            const damage = applyEnemyResistWeakTagsToMitigatedDamage(
-              afterDef,
-              leaf.damageTypes,
-              rw.resistances,
-              rw.weaknesses,
-            );
-            const d = Math.max(0, Math.trunc(damage));
-            applyPlayerDamageTaken(d);
-            substLogDamage(d, leaf.damageTypes);
-            break;
+            if (dmgTargets.hitPlayer) {
+              const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
+              const rawDamageRoll = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+              const defenseStat = playerDefenseStatVsIncoming(
+                incomingSubtype,
+                effectivePlayerArmor,
+                effectivePlayerMr,
+              );
+              const afterDef = mitigateDamageByDefense(rawDamageRoll, defenseStat);
+              const rw = mergePlayerResistWeakForIncoming(
+                playerResistancesRef.current,
+                playerWeaknessesRef.current,
+                livePlayerMods,
+              );
+              const damage = applyEnemyResistWeakTagsToMitigatedDamage(
+                afterDef,
+                leaf.damageTypes,
+                rw.resistances,
+                rw.weaknesses,
+              );
+              const d = Math.max(0, Math.trunc(damage));
+              playerDamage += d;
+              applyPlayerDamageTaken(d);
+              if (!opts?.suppressPlayerDamageLog) {
+                const descRaw = skill.description?.trim();
+                const template =
+                  descRaw && descRaw.length > 0
+                    ? descRaw
+                    : `${enemy.name} usa ${skill.name}.`;
+                appendEnemySkillLog(template, d, leaf.damageTypes);
+              }
+            }
+            if (dmgTargets.enemies.length > 0) {
+              const hpById = new Map<string, number>();
+              for (const victim of dmgTargets.enemies) {
+                const bonuses = getEnemyStatBonuses(victim.id);
+                const d = mitigatedEnemySkillDamageToEnemy(leaf, victim, bonuses);
+                if (d <= 0) continue;
+                const nextHp = Math.max(0, victim.hp - d);
+                hpById.set(victim.id, nextHp);
+                appendCombatLog(
+                  `${enemy.name} inflige ${d} de daño a ${victim.name} (${skill.name}).`,
+                  "default",
+                );
+                if (victim.id === enemy.id) simEnemyHp = nextHp;
+              }
+              if (hpById.size > 0) {
+                setDisplayEnemies((prev) =>
+                  prev.map((e) => {
+                    const nextHp = hpById.get(e.id);
+                    return nextHp != null ? { ...e, hp: nextHp } : e;
+                  }),
+                );
+              }
+            }
+            return playerDamage;
           }
           case "heal": {
-            const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
-            const nextHp = Math.min(enemyHpMaxSafe, simEnemyHp + rolled);
-            const gained = Math.max(0, nextHp - simEnemyHp);
-            simEnemyHp = nextHp;
-            if (gained > 0) {
-              setDisplayEnemies((prev) =>
-                prev.map((e) => (e.id === enemy.id ? { ...e, hp: simEnemyHp } : e)),
+            const healTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            if (healTargets.hitPlayer) {
+              const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+              setPlayerCurrentHp((prev) => {
+                const cap = Math.max(1, playerHpMax);
+                const next = Math.min(cap, prev + rolled);
+                recordPlayerHealing(Math.max(0, next - prev));
+                return next;
+              });
+              appendCombatLog(
+                `${enemy.name} restaura ${rolled} PV al jugador (${skill.name}).`,
+                "success",
               );
             }
-            appendCombatLog(
-              `${enemy.name} recupera ${gained} PV (${skill.name}).`,
-              gained > 0 ? "success" : "default",
-            );
-            break;
+            if (healTargets.enemies.length > 0) {
+              const hpById = new Map<string, number>();
+              let totalGained = 0;
+              for (const recipient of healTargets.enemies) {
+                const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+                const hpMax = Math.max(
+                  1,
+                  effectiveEnemyHpMax(recipient, getEnemyStatBonuses(recipient.id)),
+                );
+                const nextHp = Math.min(hpMax, recipient.hp + rolled);
+                const gained = Math.max(0, nextHp - recipient.hp);
+                totalGained += gained;
+                hpById.set(recipient.id, nextHp);
+                if (recipient.id === enemy.id) simEnemyHp = nextHp;
+              }
+              if (hpById.size > 0) {
+                setDisplayEnemies((prev) =>
+                  prev.map((e) => {
+                    const nextHp = hpById.get(e.id);
+                    return nextHp != null ? { ...e, hp: nextHp } : e;
+                  }),
+                );
+              }
+              appendCombatLog(
+                healTargets.enemies.length === 1
+                  ? `${enemy.name} recupera ${totalGained} PV (${skill.name}).`
+                  : `${enemy.name} recupera ${totalGained} PV en total (${skill.name}).`,
+                totalGained > 0 ? "success" : "default",
+              );
+            }
+            return 0;
           }
           case "apply_modifier": {
-            const idBase = `${enemy.id}:${skill.id}:${turn}:${Math.random().toString(36).slice(2, 9)}`;
-            if (leaf.target === "player") {
+            const modTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            const idSuffix = `${skill.id}:${turn}:${Math.random().toString(36).slice(2, 9)}`;
+            if (modTargets.hitPlayer) {
               const row: EnemyAppliedPlayerTimedModifier = {
-                id: idBase,
+                id: `${enemy.id}:player:${idSuffix}`,
                 remainingTurns: leaf.durationTurns,
                 lastTickTurn: turn,
                 sourceSkillName: skill.name,
@@ -3934,37 +4119,149 @@ export function CombatEncounterShell({
               };
               livePlayerMods.push(row);
               setEnemyAppliedPlayerTimedModifiers((prev) => [...prev, row]);
-            } else {
-              const row: EnemySelfTimedModifier = {
-                id: idBase,
-                enemyId: enemy.id,
+            }
+            if (modTargets.enemies.length > 0) {
+              const rows: EnemySelfTimedModifier[] = modTargets.enemies.map((recipient) => ({
+                id: `${enemy.id}:${recipient.id}:${idSuffix}`,
+                enemyId: recipient.id,
                 remainingTurns: leaf.durationTurns,
                 lastTickTurn: turn,
                 skillName: skill.name,
                 stateIcons: leaf.stateIcons,
                 resistanceTags: leaf.resistanceTags,
                 weaknessTags: leaf.weaknessTags,
-              };
-              setEnemySelfTimedModifiers((prev) => [...prev, row]);
+              }));
+              setEnemySelfTimedModifiers((prev) => [...prev, ...rows]);
             }
             appendCombatLog(`${enemy.name} usa ${skill.name} (altera estado).`, "default");
-            break;
+            return 0;
+          }
+          case "stat_buff": {
+            const buffTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            const idSuffix = `${skill.id}:${turn}:${Math.random().toString(36).slice(2, 9)}`;
+            const labels = leaf.parts
+              .map((p) => `+${Math.trunc(p.amount)} ${enemyStatBuffPartLabel(p.stat)}`)
+              .join(", ");
+
+            if (buffTargets.hitPlayer) {
+              const playerTimedParts = enemyStatPartsToPlayerTimedParts(leaf.parts);
+              if (playerTimedParts.length > 0) {
+                setPlayerTimedSelfBuffs((prev) => [
+                  ...prev,
+                  {
+                    id: `${enemy.id}:player:${idSuffix}`,
+                    parts: playerTimedParts,
+                    remainingTurns: leaf.durationTurns,
+                    lastTickTurn: turn,
+                    skillName: skill.name,
+                    stateIcons: leaf.stateIcons,
+                  },
+                ]);
+              }
+              for (const part of leaf.parts) {
+                const amount = Math.trunc(part.amount);
+                if (amount <= 0) continue;
+                if (part.stat === "hp") {
+                  setPlayerCurrentHp((prev) => {
+                    const cap = Math.max(1, playerHpMax);
+                    const next = Math.min(cap, prev + amount);
+                    recordPlayerHealing(Math.max(0, next - prev));
+                    return next;
+                  });
+                } else if (part.stat === "mana") {
+                  setDisplayPlayerMana((m) =>
+                    Math.min(Math.max(0, playerManaMax), Math.max(0, m + amount)),
+                  );
+                }
+              }
+            }
+
+            if (buffTargets.enemies.length > 0) {
+              const newRows: EnemyTimedStatBuff[] = buffTargets.enemies.map((recipient) => ({
+                id: `${enemy.id}:${recipient.id}:${idSuffix}`,
+                enemyId: recipient.id,
+                parts: leaf.parts,
+                remainingTurns: leaf.durationTurns,
+                lastTickTurn: turn,
+                skillName: skill.name,
+                stateIcons: leaf.stateIcons,
+              }));
+              setEnemyTimedStatBuffs((prev) => [...prev, ...newRows]);
+
+              const hpById = new Map<string, number>();
+              const manaById = new Map<string, number>();
+              for (const recipient of buffTargets.enemies) {
+                const bonusesAfter = sumEnemyTimedStatBonuses(
+                  [
+                    ...enemyTimedStatBuffsRef.current,
+                    ...newRows.filter((r) => r.enemyId === recipient.id),
+                  ],
+                  recipient.id,
+                );
+                let nextHp = recipient.id === enemy.id ? simEnemyHp : recipient.hp;
+                let nextMana = recipient.mana;
+                let hpChanged = false;
+                let manaChanged = false;
+                for (const part of leaf.parts) {
+                  const amount = Math.trunc(part.amount);
+                  if (amount <= 0) continue;
+                  if (part.stat === "hp") {
+                    const cap = effectiveEnemyHpMax(recipient, bonusesAfter);
+                    const healed = Math.min(cap, nextHp + amount) - nextHp;
+                    if (healed > 0) {
+                      nextHp += healed;
+                      hpChanged = true;
+                    }
+                  } else if (part.stat === "mana") {
+                    nextMana += amount;
+                    manaChanged = true;
+                  }
+                }
+                if (hpChanged) {
+                  hpById.set(recipient.id, nextHp);
+                  if (recipient.id === enemy.id) simEnemyHp = nextHp;
+                }
+                if (manaChanged) manaById.set(recipient.id, Math.max(0, nextMana));
+              }
+              if (hpById.size > 0 || manaById.size > 0) {
+                setDisplayEnemies((prev) =>
+                  prev.map((e) => {
+                    const hpNext = hpById.get(e.id);
+                    const manaNext = manaById.get(e.id);
+                    if (hpNext == null && manaNext == null) return e;
+                    return {
+                      ...e,
+                      hp: hpNext != null ? hpNext : e.hp,
+                      mana: manaNext != null ? manaNext : e.mana,
+                    };
+                  }),
+                );
+              }
+            }
+
+            appendCombatLog(
+              labels.length > 0
+                ? `${enemy.name} usa ${skill.name} (${labels}, ${leaf.durationTurns} turnos).`
+                : `${enemy.name} usa ${skill.name} (${leaf.durationTurns} turnos).`,
+              "success",
+            );
+            return 0;
           }
           default:
-            break;
+            return 0;
         }
       };
 
-      if (root.mode === "composite") {
-        for (const step of root.steps) {
-          runLeaf(step, true);
-        }
-      } else {
-        runLeaf(root, false);
-      }
+      runLeaf(root, false);
     } else {
       const incomingSubtype: PlayerSkillEffectSubtype = "physical";
-      const rawDamage = Math.max(0, randomIntInclusive(enemy.attackMin, enemy.attackMax));
+      const enemyBonuses = getEnemyStatBonuses(enemy.id);
+      const attackRange = effectiveEnemyAttackRange(enemy, enemyBonuses);
+      const rawDamage = Math.max(0, randomIntInclusive(attackRange.min, attackRange.max));
       const defenseStat = playerDefenseStatVsIncoming(
         incomingSubtype,
         effectivePlayerArmor,
@@ -4011,26 +4308,6 @@ export function CombatEncounterShell({
       />
 
       <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-[100dvh] sm:p-6">
-        {combatDebug ? (
-          <details className="mb-2 rounded-lg border border-amber-600/50 bg-black/75 p-2 text-left text-[11px] text-amber-100/95 shadow-lg backdrop-blur-sm">
-            <summary className="cursor-pointer select-none font-semibold text-amber-300">
-              Debug combate (?debug=1)
-            </summary>
-            <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-emerald-100/90">
-              {JSON.stringify(
-                {
-                  server: combatDebug,
-                  runtime: {
-                    initiative: runtimeInitiativeDebug,
-                  },
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </details>
-        ) : null}
-
         <header
           className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/88 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:py-2 sm:px-4`}
         >
@@ -4257,7 +4534,7 @@ export function CombatEncounterShell({
                         type="button"
                         disabled={!canAttack}
                         title={attackBlockReason ?? undefined}
-                        onClick={handleAttack}
+                        onClick={() => void handleAttack()}
                         className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
                           canAttack
                             ? "cursor-pointer border-amber-600/80 bg-amber-900/40 text-amber-100 hover:bg-amber-800/55"
@@ -4279,6 +4556,20 @@ export function CombatEncounterShell({
                     >
                       Habilidades
                     </button>
+                    {requiresAmmo ? (
+                      <button
+                        type="button"
+                        disabled={isPlayerActionsLocked}
+                        onClick={() => setActionMenu("ammo")}
+                        className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
+                          isPlayerActionsLocked
+                            ? "cursor-not-allowed border-slate-600/70 bg-slate-800/40 text-slate-300 opacity-55"
+                            : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                        }`}
+                      >
+                        Munición
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={isPlayerActionsLocked}
@@ -4292,6 +4583,8 @@ export function CombatEncounterShell({
                       Inventario
                     </button>
                   </div>
+                ) : actionMenu === "ammo" ? (
+                  renderAmmoMenuPanel("text-[11px]")
                 ) : actionMenu === "skills" ? (
                   playerCombatSkills.length === 0 ? (
                     <p
@@ -4373,7 +4666,7 @@ export function CombatEncounterShell({
                     </div>
                     </div>
                   )
-                ) : combatConsumables.length === 0 ? (
+                ) : combatPotionItems.length === 0 ? (
                   <p
                     className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-[11px] text-amber-200/75`}
                   >
@@ -4382,7 +4675,7 @@ export function CombatEncounterShell({
                 ) : (
                   <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
                   <div className="grid gap-1">
-                    {combatConsumables.map((item) => {
+                    {combatPotionItems.map((item) => {
                       const usable = canUseConsumable(item);
                       return (
                         <div key={item.inventoryId} className="flex items-center gap-1.5">
@@ -4559,7 +4852,9 @@ export function CombatEncounterShell({
                   ? "Acciones"
                   : actionMenu === "skills"
                     ? "Habilidades"
-                    : "Inventario"}
+                    : actionMenu === "ammo"
+                      ? "Munición"
+                      : "Inventario"}
               </p>
             </div>
 
@@ -4575,7 +4870,7 @@ export function CombatEncounterShell({
                     type="button"
                     disabled={!canAttack}
                     title={attackBlockReason ?? undefined}
-                    onClick={handleAttack}
+                    onClick={() => void handleAttack()}
                     className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
                       canAttack
                         ? "cursor-pointer border-amber-600/80 bg-amber-900/40 text-amber-100 hover:bg-amber-800/55"
@@ -4597,6 +4892,20 @@ export function CombatEncounterShell({
                 >
                   Habilidades
                 </button>
+                {requiresAmmo ? (
+                      <button
+                        type="button"
+                        disabled={isPlayerActionsLocked}
+                        onClick={() => setActionMenu("ammo")}
+                        className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
+                          isPlayerActionsLocked
+                            ? "cursor-not-allowed border-slate-500/70 bg-slate-700/45 text-slate-300 opacity-55"
+                            : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                        }`}
+                      >
+                        Munición
+                      </button>
+                    ) : null}
                 <button
                   type="button"
                   disabled={isPlayerActionsLocked}
@@ -4610,6 +4919,8 @@ export function CombatEncounterShell({
                   Inventario
                 </button>
               </div>
+            ) : actionMenu === "ammo" ? (
+              renderAmmoMenuPanel("text-[11px] sm:text-xs")
             ) : actionMenu === "skills" ? (
               playerCombatSkills.length === 0 ? (
                 <p
@@ -4677,7 +4988,7 @@ export function CombatEncounterShell({
                 </div>
                 </div>
               )
-            ) : combatConsumables.length === 0 ? (
+            ) : combatPotionItems.length === 0 ? (
               <p
                 className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-sm text-amber-200/75`}
               >
@@ -4686,7 +4997,7 @@ export function CombatEncounterShell({
             ) : (
               <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
               <div className="grid gap-1 sm:gap-1.5">
-                {combatConsumables.map((item) => {
+                {combatPotionItems.map((item) => {
                   const usable = canUseConsumable(item);
                   return (
                     <div key={item.inventoryId} className="flex items-center gap-1.5">
@@ -5180,15 +5491,7 @@ export function CombatEncounterShell({
                             const roll = loot.weaponInstance ?? loot.equipmentInstance ?? null;
                             if (!roll) return null;
                             const showDamage = Boolean(loot.weaponInstance);
-                            const statLineEntries = (
-                              [
-                                [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
-                                [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
-                                [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
-                                [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
-                                [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
-                              ] as const
-                            ).filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]));
+                            const statLineEntries = collectInstanceStatTooltipRollLines(roll);
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
                                 {roll.rarity ? (
@@ -5216,10 +5519,14 @@ export function CombatEncounterShell({
                                     </p>
                                   </>
                                 ) : null}
-                                {statLineEntries.map(([statKey, line], idx) => (
+                                {statLineEntries.map(({ statKey, valueFlat, valuePct, line }, idx) => (
                                   <p
                                     key={`${line}-${idx}`}
-                                    className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                                    className={instanceStatRollTooltipLineClassName(
+                                      statKey,
+                                      valueFlat,
+                                      valuePct,
+                                    )}
                                   >
                                     {line}
                                   </p>
@@ -5310,15 +5617,7 @@ export function CombatEncounterShell({
                             const roll = entry.weaponInstance ?? entry.equipmentInstance ?? null;
                             if (!roll) return null;
                             const showDamage = Boolean(entry.weaponInstance);
-                            const statLineEntries = (
-                              [
-                                [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
-                                [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
-                                [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
-                                [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
-                                [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
-                              ] as const
-                            ).filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]));
+                            const statLineEntries = collectInstanceStatTooltipRollLines(roll);
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
                                 {roll.rarity ? (
@@ -5346,10 +5645,14 @@ export function CombatEncounterShell({
                                     </p>
                                   </>
                                 ) : null}
-                                {statLineEntries.map(([statKey, line], idx) => (
+                                {statLineEntries.map(({ statKey, valueFlat, valuePct, line }, idx) => (
                                   <p
                                     key={`${line}-${idx}`}
-                                    className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                                    className={instanceStatRollTooltipLineClassName(
+                                      statKey,
+                                      valueFlat,
+                                      valuePct,
+                                    )}
                                   >
                                     {line}
                                   </p>

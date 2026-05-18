@@ -3,6 +3,15 @@ export type MagicForestGatherOutcome = {
   chance: number;
 };
 
+/** Cantidad de madera al resultado `madera` en Bosque Mágico (inclusive). */
+export const MAGIC_FOREST_WOOD_QUANTITY_MIN = 2;
+export const MAGIC_FOREST_WOOD_QUANTITY_MAX = 5;
+
+export function rollMagicForestWoodQuantity(): number {
+  const span = MAGIC_FOREST_WOOD_QUANTITY_MAX - MAGIC_FOREST_WOOD_QUANTITY_MIN + 1;
+  return MAGIC_FOREST_WOOD_QUANTITY_MIN + Math.floor(Math.random() * span);
+}
+
 /** Probabilidades “juntar madera” en Bosque Mágico. Suman 1. */
 export const MAGIC_FOREST_GATHER_OUTCOMES: MagicForestGatherOutcome[] = [
   { result: "madera", chance: 0.40 },

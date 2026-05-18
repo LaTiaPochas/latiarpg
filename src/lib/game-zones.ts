@@ -9,6 +9,8 @@ export const MYSTIC_CAVE_ZONE_CODE = "mystic-cave";
 export const NEAR_WOODS_ZONE_CODE = "near_woods";
 /** Valor recomendado para `?zone=` desde bosque mágico. Ajustá si en BD usás otro `zones.code`. */
 export const MAGIC_FOREST_ZONE_CODE = "magic-forest";
+/** Minas abandonadas — `combat_encounters.zone_id` y `?zone=` al minar. */
+export const ABANDONED_COAL_MINE_ZONE_CODE = "abandoned-coal-mine";
 
 export function normalizeZoneCodeKey(raw: string | null | undefined): string {
   if (typeof raw !== "string") return "";
@@ -50,6 +52,11 @@ export function zoneLookupCodeCandidates(zoneQueryParam: string): string[] {
     add(out, "magic_forest");
     return out;
   }
+  if (key === "abandoned_coal_mine") {
+    add(out, "abandoned-coal-mine");
+    add(out, "abandoned_coal_mine");
+    return out;
+  }
   return out;
 }
 
@@ -71,6 +78,9 @@ export function mapPathByZoneCode(zoneCode: string | null | undefined): string |
   }
   if (key === "magic_forest" || key === "magicforest") {
     return "/near-woods";
+  }
+  if (key === "abandoned_coal_mine") {
+    return "/abandoned-coal-mine";
   }
 
   return null;

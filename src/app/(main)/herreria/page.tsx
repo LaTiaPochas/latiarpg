@@ -86,6 +86,8 @@ type RecipeComponentRow = {
   recipe_id: string | null;
   recipe_level: number | null;
   crafted_item: unknown;
+  /** Cantidad del ítem fabricado (stackables). */
+  quantity?: number | null;
   [key: string]: unknown;
 };
 type CraftedWeaponInstanceRow = {
@@ -243,7 +245,6 @@ function resolveRecipeComponentQuantity(input: unknown): number {
   if (input && typeof input === "object") {
     const record = input as Record<string, unknown>;
     const candidates = [
-      record.quantity,
       record.qty,
       record.amount,
       record.required_quantity,
@@ -254,6 +255,19 @@ function resolveRecipeComponentQuantity(input: unknown): number {
       const resolved = resolveRecipeComponentQuantity(candidate);
       if (resolved > 1) return resolved;
     }
+  }
+  return 1;
+}
+
+/** `recipe_components.quantity`: unidades del ítem fabricado que se agregan al inventario. */
+function resolveRecipeCraftOutputQuantity(row: RecipeComponentRow): number {
+  const raw = row.quantity;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.max(1, Math.trunc(raw));
+  }
+  if (typeof raw === "string") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return Math.max(1, Math.trunc(parsed));
   }
   return 1;
 }
@@ -983,32 +997,6 @@ export default async function HerreriaPage() {
       redirect("/login");
     }
 
-    const { data: inventoryRowsForCraftCapacity } = await supabaseAction
-      .from("user_inventory")
-      .select("id")
-      .eq("profile_id", currentUser.id)
-      .gt("quantity", 0);
-    const { data: equippedRowsForCraftCapacity } = await supabaseAction
-      .from("user_equipment")
-      .select("inventory_id")
-      .eq("profile_id", currentUser.id);
-    const equippedCraftInventoryIds = new Set(
-      (equippedRowsForCraftCapacity ?? [])
-        .map((row) => row.inventory_id)
-        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
-    );
-    const unequippedCraftInventoryCount = (inventoryRowsForCraftCapacity ?? []).reduce(
-      (total, row) => {
-        const id = typeof row.id === "number" && Number.isFinite(row.id) ? Math.trunc(row.id) : null;
-        if (id == null || equippedCraftInventoryIds.has(id)) return total;
-        return total + 1;
-      },
-      0,
-    );
-    if (unequippedCraftInventoryCount >= 24) {
-      return { ok: false };
-    }
-
     const { data: globalRecipeRow } = await supabaseAction
       .from("global_herreria")
       .select("recipe_id, recipe_level")
@@ -1137,31 +1125,120 @@ export default async function HerreriaPage() {
       return { ok: false };
     }
 
-    const insertPayload: {
-      profile_id: string;
-      quantity: number;
-      item_id?: string;
-      weapon_instance_id?: number;
-      equipment_instance_id?: number;
-    } = {
-      profile_id: currentUser.id,
-      quantity: 1,
+    const craftOutputQuantity = resolveRecipeCraftOutputQuantity(recipeComponent);
+
+    const { data: inventoryRowsForCraftCapacity } = await supabaseAction
+      .from("user_inventory")
+      .select("id")
+      .eq("profile_id", currentUser.id)
+      .gt("quantity", 0);
+    const { data: equippedRowsForCraftCapacity } = await supabaseAction
+      .from("user_equipment")
+      .select("inventory_id")
+      .eq("profile_id", currentUser.id);
+    const equippedCraftInventoryIds = new Set(
+      (equippedRowsForCraftCapacity ?? [])
+        .map((row) => row.inventory_id)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
+    );
+    const unequippedCraftInventoryCount = (inventoryRowsForCraftCapacity ?? []).reduce(
+      (total, row) => {
+        const id = typeof row.id === "number" && Number.isFinite(row.id) ? Math.trunc(row.id) : null;
+        if (id == null || equippedCraftInventoryIds.has(id)) return total;
+        return total + 1;
+      },
+      0,
+    );
+
+    const needsNewInventorySlot = async (): Promise<boolean> => {
+      const { data: existingStackRows } = await supabaseAction
+        .from("user_inventory")
+        .select("id")
+        .eq("profile_id", currentUser.id)
+        .eq("item_id", craftedItemId)
+        .is("weapon_instance_id", null)
+        .is("equipment_instance_id", null)
+        .gt("quantity", 0)
+        .limit(1);
+      return (existingStackRows ?? []).length === 0;
     };
 
-    if (weaponInstanceId != null) {
-      insertPayload.weapon_instance_id = weaponInstanceId;
-    } else if (equipmentInstanceId != null) {
-      insertPayload.equipment_instance_id = equipmentInstanceId;
-    } else {
-      insertPayload.item_id = craftedItemId;
+    if (weaponInstanceId != null || equipmentInstanceId != null) {
+      if (unequippedCraftInventoryCount >= 24) {
+        return { ok: false };
+      }
+
+      const insertPayload: {
+        profile_id: string;
+        quantity: number;
+        weapon_instance_id?: number;
+        equipment_instance_id?: number;
+      } = {
+        profile_id: currentUser.id,
+        quantity: 1,
+      };
+
+      if (weaponInstanceId != null) {
+        insertPayload.weapon_instance_id = weaponInstanceId;
+      } else if (equipmentInstanceId != null) {
+        insertPayload.equipment_instance_id = equipmentInstanceId;
+      }
+
+      const { error: insertInventoryError } = await supabaseAction
+        .from("user_inventory")
+        .insert(insertPayload);
+
+      if (insertInventoryError) {
+        return { ok: false };
+      }
+
+      return { ok: true };
     }
 
-    const { error: insertInventoryError } = await supabaseAction
-      .from("user_inventory")
-      .insert(insertPayload);
-
-    if (insertInventoryError) {
+    const requiresNewSlot = await needsNewInventorySlot();
+    if (requiresNewSlot && unequippedCraftInventoryCount >= 24) {
       return { ok: false };
+    }
+
+    const { data: existingStackRows, error: existingStackError } = await supabaseAction
+      .from("user_inventory")
+      .select("id, quantity")
+      .eq("profile_id", currentUser.id)
+      .eq("item_id", craftedItemId)
+      .is("weapon_instance_id", null)
+      .is("equipment_instance_id", null)
+      .order("id", { ascending: true })
+      .limit(1);
+
+    if (existingStackError) {
+      return { ok: false };
+    }
+
+    const existingStack = (existingStackRows ?? [])[0] as ComponentInventoryRow | undefined;
+    if (existingStack && typeof existingStack.id === "number") {
+      const currentQty =
+        typeof existingStack.quantity === "number" && Number.isFinite(existingStack.quantity)
+          ? Math.max(0, Math.trunc(existingStack.quantity))
+          : 0;
+      const { error: updateInventoryError } = await supabaseAction
+        .from("user_inventory")
+        .update({ quantity: currentQty + craftOutputQuantity })
+        .eq("id", existingStack.id)
+        .eq("profile_id", currentUser.id);
+
+      if (updateInventoryError) {
+        return { ok: false };
+      }
+    } else {
+      const { error: insertInventoryError } = await supabaseAction.from("user_inventory").insert({
+        profile_id: currentUser.id,
+        item_id: craftedItemId,
+        quantity: craftOutputQuantity,
+      });
+
+      if (insertInventoryError) {
+        return { ok: false };
+      }
     }
 
     return { ok: true };
