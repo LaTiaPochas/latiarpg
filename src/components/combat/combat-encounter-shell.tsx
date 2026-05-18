@@ -44,7 +44,20 @@ import {
   preloadCombatResistWeakIcons,
   resolveCombatStateIconSrcs,
 } from "@/lib/combat-resist-weak-icons";
+import {
+  advanceAtbAfterAction,
+  createInitialAtbGauges,
+  predictAtbTimeline,
+  pruneAtbGaugesForCombatants,
+  resolveNextAtbActor,
+  type AtbCombatant,
+  type AtbGaugeMap,
+} from "@/lib/combat-atb";
 import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
+import {
+  CombatAtbTimeline,
+  type CombatAtbTimelineEntry,
+} from "@/components/combat/combat-atb-timeline";
 import {
   collectInstanceStatTooltipRollLines,
   instanceStatRollTooltipLineClassName,
@@ -2607,102 +2620,167 @@ export function CombatEncounterShell({
   useEffect(() => {
     ammoSpentByInventoryIdRef.current = new Map();
   }, [encounterCode]);
-  const turnOrder = useMemo<TurnActor[]>(() => {
-    const actors: TurnActor[] = [
-      {
+  const atbCombatants = useMemo<AtbCombatant[]>(() => {
+    const list: AtbCombatant[] = [];
+    if (playerCurrentHp > 0) {
+      list.push({
         id: "player",
-        type: "player",
         speed: Math.max(
           0,
           Math.trunc(playerSpeed + playerCombatSpeedBonus + timedBuffBonusByStat.speed),
         ),
-      },
-      ...displayEnemies
-        .filter((enemy) => enemy.hp > 0)
-        .map((enemy) => ({
-          id: `enemy:${enemy.id}`,
-          type: "enemy" as const,
-          speed: effectiveEnemySpeed(enemy, getEnemyStatBonuses(enemy.id)),
-          enemyId: enemy.id,
-        })),
-    ];
-    return actors.sort((a, b) => b.speed - a.speed);
-  }, [displayEnemies, getEnemyStatBonuses, playerCombatSpeedBonus, playerSpeed, timedBuffBonusByStat]);
-  const turnOrderRef = useRef(turnOrder);
-  useEffect(() => {
-    turnOrderRef.current = turnOrder;
-  }, [turnOrder]);
-  /** Firma estable del orden de iniciativa (quién actúa). Cambia al morir un enemigo o variar velocidades. */
-  const initiativeOrderSig = useMemo(
-    () => turnOrder.map((a) => a.id).join(">"),
-    [turnOrder],
-  );
-  const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
-  const previousTurnIndexRef = useRef(0);
-  const prevInitiativeSigRef = useRef<string | null>(null);
-  const prevTurnOrderSnapshotRef = useRef<TurnActor[]>([]);
-  const resolvedEnemyTurnRef = useRef<string | null>(null);
-  const prevEncounterCodeForInitiativeRef = useRef(encounterCode);
-  /**
-   * Al morir un enemigo solo hacer `min(índice, length-1)` rompe la iniciativa:
-   * el mismo número de índice puede pasar a otro actor (p. ej. de PJ a enemigo).
-   * Re-mapeamos por `TurnActor.id` y limpiamos la deduplicación del turno enemigo.
-   */
-  useLayoutEffect(() => {
-    if (prevEncounterCodeForInitiativeRef.current !== encounterCode) {
-      prevEncounterCodeForInitiativeRef.current = encounterCode;
-      prevInitiativeSigRef.current = null;
-      prevTurnOrderSnapshotRef.current = [];
-      resolvedEnemyTurnRef.current = null;
+        alive: true,
+      });
     }
+    for (const enemy of displayEnemies) {
+      if (enemy.hp <= 0) continue;
+      list.push({
+        id: `enemy:${enemy.id}`,
+        speed: effectiveEnemySpeed(enemy, getEnemyStatBonuses(enemy.id)),
+        alive: true,
+      });
+    }
+    return list;
+  }, [
+    displayEnemies,
+    getEnemyStatBonuses,
+    playerCombatSpeedBonus,
+    playerCurrentHp,
+    playerSpeed,
+    timedBuffBonusByStat.speed,
+  ]);
+  const atbCombatantsRef = useRef(atbCombatants);
+  useEffect(() => {
+    atbCombatantsRef.current = atbCombatants;
+  }, [atbCombatants]);
 
-    if (turnOrder.length === 0) {
-      setCurrentTurnIndex(0);
-      previousTurnIndexRef.current = 0;
-      prevInitiativeSigRef.current = initiativeOrderSig;
-      prevTurnOrderSnapshotRef.current = [];
+  const atbRosterSig = useMemo(
+    () => atbCombatants.map((c) => `${c.id}:${c.speed}`).join("|"),
+    [atbCombatants],
+  );
+
+  const [atbGauges, setAtbGauges] = useState<AtbGaugeMap>({});
+  const [currentActorId, setCurrentActorId] = useState<string | null>(null);
+  const atbGaugesRef = useRef(atbGauges);
+  const currentActorIdRef = useRef(currentActorId);
+  const actedThisRoundRef = useRef<Set<string>>(new Set());
+  const prevEncounterCodeForAtbRef = useRef(encounterCode);
+  const resolvedEnemyTurnRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    atbGaugesRef.current = atbGauges;
+  }, [atbGauges]);
+  useEffect(() => {
+    currentActorIdRef.current = currentActorId;
+  }, [currentActorId]);
+
+  useLayoutEffect(() => {
+    const needsFullInit =
+      prevEncounterCodeForAtbRef.current !== encounterCode ||
+      Object.keys(atbGaugesRef.current).length === 0;
+
+    if (needsFullInit) {
+      prevEncounterCodeForAtbRef.current = encounterCode;
+      actedThisRoundRef.current = new Set();
       resolvedEnemyTurnRef.current = null;
+      const gauges = createInitialAtbGauges(atbCombatants);
+      const nextId = resolveNextAtbActor({ ...gauges }, atbCombatants);
+      setAtbGauges(gauges);
+      setCurrentActorId(nextId);
       return;
     }
 
-    const prevSig = prevInitiativeSigRef.current;
-    const prevOrder = prevTurnOrderSnapshotRef.current;
+    const pruned = pruneAtbGaugesForCombatants(atbGaugesRef.current, atbCombatants);
+    const aliveIds = new Set(atbCombatants.filter((c) => c.alive).map((c) => c.id));
+    let nextGauges = pruned;
+    let nextActorId = currentActorIdRef.current;
 
-    if (prevSig !== null && prevSig !== initiativeOrderSig) {
+    if (!nextActorId || !aliveIds.has(nextActorId)) {
+      const sim = { ...pruned };
+      nextActorId = resolveNextAtbActor(sim, atbCombatants);
+      nextGauges = sim;
       resolvedEnemyTurnRef.current = null;
-      setCurrentTurnIndex((prevIndex) => {
-        const prevEffective = Math.min(prevIndex, Math.max(0, prevOrder.length - 1));
-        const actorAtTurn = prevOrder[prevEffective];
-        if (!actorAtTurn) {
-          return Math.min(prevIndex, turnOrder.length - 1);
-        }
-        const newIdx = turnOrder.findIndex((a) => a.id === actorAtTurn.id);
-        if (newIdx >= 0) return newIdx;
-        return Math.min(prevIndex, turnOrder.length - 1);
-      });
-    } else {
-      setCurrentTurnIndex((prev) => Math.min(prev, turnOrder.length - 1));
     }
 
-    prevInitiativeSigRef.current = initiativeOrderSig;
-    prevTurnOrderSnapshotRef.current = turnOrder;
-  }, [encounterCode, turnOrder, initiativeOrderSig]);
-  const effectiveTurnIndex =
-    turnOrder.length === 0 ? 0 : Math.min(currentTurnIndex, turnOrder.length - 1);
-  const currentActor = turnOrder[effectiveTurnIndex] ?? null;
-  useEffect(() => {
-    if (turnOrder.length === 0) return;
-    const previous = previousTurnIndexRef.current;
-    const wrapped =
-      turnOrder.length > 1 &&
-      previous === turnOrder.length - 1 &&
-      currentTurnIndex === 0;
-    if (wrapped) {
-      setTurn((current) => current + 1);
+    setAtbGauges(nextGauges);
+    if (nextActorId !== currentActorIdRef.current) {
+      setCurrentActorId(nextActorId);
     }
-    previousTurnIndexRef.current = currentTurnIndex;
-  }, [currentTurnIndex, turnOrder.length]);
+  }, [encounterCode, atbRosterSig, atbCombatants]);
+
+  const currentActor = useMemo((): TurnActor | null => {
+    if (!currentActorId) return null;
+    if (currentActorId === "player") {
+      const speed = Math.max(
+        0,
+        Math.trunc(playerSpeed + playerCombatSpeedBonus + timedBuffBonusByStat.speed),
+      );
+      return { id: "player", type: "player", speed };
+    }
+    const enemyId = currentActorId.startsWith("enemy:")
+      ? currentActorId.slice("enemy:".length)
+      : null;
+    if (!enemyId) return null;
+    const enemy = displayEnemies.find((e) => e.id === enemyId);
+    if (!enemy || enemy.hp <= 0) return null;
+    return {
+      id: currentActorId,
+      type: "enemy",
+      speed: effectiveEnemySpeed(enemy, getEnemyStatBonuses(enemy.id)),
+      enemyId,
+    };
+  }, [
+    currentActorId,
+    displayEnemies,
+    getEnemyStatBonuses,
+    playerCombatSpeedBonus,
+    playerSpeed,
+    timedBuffBonusByStat.speed,
+  ]);
+
   const turnOwner = currentActor?.type ?? "enemy";
+
+  const playerPortraitForAtb =
+    typeof playerPortraitSrc === "string" && playerPortraitSrc.trim().length > 0
+      ? playerPortraitSrc.trim()
+      : PJ_FEDE_FACE_COMBAT;
+
+  const atbTimelineEntries = useMemo((): CombatAtbTimelineEntry[] => {
+    const slotCount = Math.min(8, Math.max(3, atbCombatants.length + 2));
+    const order = predictAtbTimeline(atbGauges, atbCombatants, slotCount);
+    return order.map((id) => {
+      if (id === "player") {
+        return {
+          id,
+          label: playerDisplayName,
+          portraitSrc: playerPortraitForAtb,
+          isPlayer: true,
+          isCurrent: id === currentActorId,
+          gauge: atbGauges[id] ?? 0,
+        };
+      }
+      const enemyId = id.startsWith("enemy:") ? id.slice("enemy:".length) : "";
+      const enemy = displayEnemies.find((e) => e.id === enemyId);
+      return {
+        id,
+        label: enemy?.name ?? "Enemigo",
+        portraitSrc:
+          enemy?.portraitSrc && enemy.portraitSrc.trim().length > 0
+            ? enemy.portraitSrc.trim()
+            : null,
+        isPlayer: false,
+        isCurrent: id === currentActorId,
+        gauge: atbGauges[id] ?? 0,
+      };
+    });
+  }, [
+    atbCombatants,
+    atbGauges,
+    currentActorId,
+    displayEnemies,
+    playerDisplayName,
+    playerPortraitForAtb,
+  ]);
   /** Por enemigo: sube en cada ataque para reiniciar la animación de embestida hacia el PJ. */
   const [enemyAttackLungeSeq, setEnemyAttackLungeSeq] = useState<Record<string, number>>({});
   useEffect(
@@ -3495,12 +3573,25 @@ export function CombatEncounterShell({
   }
 
   function advanceTurn() {
-    setCurrentTurnIndex((prev) => {
-      const order = turnOrderRef.current;
-      if (order.length === 0) return 0;
-      const effective = Math.min(prev, order.length - 1);
-      return (effective + 1) % order.length;
-    });
+    const actedId = currentActorIdRef.current;
+    if (!actedId) return;
+
+    const combatants = atbCombatantsRef.current;
+    const gauges = { ...atbGaugesRef.current };
+    const nextId = advanceAtbAfterAction(gauges, combatants, actedId);
+
+    const acted = new Set(actedThisRoundRef.current);
+    acted.add(actedId);
+    const alive = combatants.filter((c) => c.alive).map((c) => c.id);
+    if (alive.length > 0 && alive.every((id) => acted.has(id))) {
+      actedThisRoundRef.current = new Set();
+      setTurn((t) => t + 1);
+    } else {
+      actedThisRoundRef.current = acted;
+    }
+
+    setAtbGauges(gauges);
+    if (nextId) setCurrentActorId(nextId);
   }
 
   useEffect(() => {
@@ -3883,7 +3974,7 @@ export function CombatEncounterShell({
     if (isTurnTransitioning) return;
     if (playerCurrentHp <= 0) return;
 
-    const resolvedKey = `${turn}:${effectiveTurnIndex}:${currentActor.id}`;
+    const resolvedKey = `${turn}:${currentActorId ?? ""}:${currentActor.id}`;
     if (resolvedEnemyTurnRef.current === resolvedKey) return;
     resolvedEnemyTurnRef.current = resolvedKey;
 
@@ -4286,7 +4377,7 @@ export function CombatEncounterShell({
   }, [
     combatOutcome,
     currentActor,
-    effectiveTurnIndex,
+    currentActorId,
     displayEnemies,
     effectivePlayerArmor,
     effectivePlayerMr,
@@ -4365,6 +4456,11 @@ export function CombatEncounterShell({
               {isEscaping ? "Escapando..." : "Escapar"}
             </Link>
           </div>
+          {atbTimelineEntries.length > 0 ? (
+            <div className="mt-2 border-t border-amber-800/45 pt-2">
+              <CombatAtbTimeline entries={atbTimelineEntries} />
+            </div>
+          ) : null}
         </header>
 
         <main className="relative mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-amber-900/70 bg-black/15 p-2 shadow-[inset_0_-30px_60px_rgba(0,0,0,0.5)] max-sm:pb-[calc(17rem+env(safe-area-inset-bottom,0px))] sm:mt-2 sm:p-6">
