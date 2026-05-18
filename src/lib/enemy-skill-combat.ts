@@ -68,6 +68,65 @@ export function emptyEnemyCombatStatBonuses(): EnemyCombatStatBonuses {
   };
 }
 
+/** Suma cantidades por stat (para apilar buffs de la misma skill en un solo registro). */
+export function mergeEnemyStatBuffParts(
+  existing: EnemyStatBuffPart[],
+  added: EnemyStatBuffPart[],
+): EnemyStatBuffPart[] {
+  const byStat = new Map<EnemyStatBuffAffectedStat, number>();
+  for (const part of existing) {
+    const amount = Math.trunc(part.amount);
+    if (amount === 0) continue;
+    byStat.set(part.stat, (byStat.get(part.stat) ?? 0) + amount);
+  }
+  for (const part of added) {
+    const amount = Math.trunc(part.amount);
+    if (amount === 0) continue;
+    byStat.set(part.stat, (byStat.get(part.stat) ?? 0) + amount);
+  }
+  return Array.from(byStat.entries()).map(([stat, amount]) => ({ stat, amount }));
+}
+
+export type EnemyTimedStatBuffRow = {
+  id: string;
+  enemyId: string;
+  parts: EnemyStatBuffPart[];
+  remainingTurns: number;
+  lastTickTurn: number;
+  skillName: string;
+  stateIcons: string[];
+};
+
+/**
+ * Apila buffs de la misma skill en el mismo enemigo (+4 → +8 → +12).
+ * Renueva duración al máximo entre el buff viejo y el nuevo.
+ */
+export function stackEnemyTimedStatBuffs<T extends EnemyTimedStatBuffRow>(
+  prev: T[],
+  incoming: T[],
+  roundTurn: number,
+): T[] {
+  const next = [...prev];
+  for (const row of incoming) {
+    const idx = next.findIndex(
+      (r) => r.enemyId === row.enemyId && r.skillName === row.skillName,
+    );
+    if (idx < 0) {
+      next.push({ ...row, lastTickTurn: roundTurn });
+      continue;
+    }
+    const existing = next[idx];
+    next[idx] = {
+      ...existing,
+      parts: mergeEnemyStatBuffParts(existing.parts, row.parts),
+      remainingTurns: Math.max(existing.remainingTurns, row.remainingTurns),
+      lastTickTurn: roundTurn,
+      stateIcons: row.stateIcons.length > 0 ? row.stateIcons : existing.stateIcons,
+    };
+  }
+  return next;
+}
+
 export function sumEnemyTimedStatBonuses(
   rows: Array<{ enemyId: string; parts: EnemyStatBuffPart[]; remainingTurns: number }>,
   enemyId: string,
@@ -146,6 +205,15 @@ export type ParsedEnemySkillEffect =
       parts: EnemyStatBuffPart[];
       durationTurns: number;
       stateIcons: string[];
+      chance: number;
+      useWhen: EnemySkillUseWhen | null;
+    }
+  /** Ataque con daño de arma del enemigo; `damage_type` aplica RES/WEAK como en `damage`. */
+  | {
+      mode: "weapon_attack";
+      target: EnemySkillEffectTarget;
+      subtype: PlayerSkillEffectSubtype;
+      damageTypes: string[];
       chance: number;
       useWhen: EnemySkillUseWhen | null;
     }
@@ -229,6 +297,65 @@ function getEffectStateIcons(effect: Record<string, unknown>): string[] {
     if (t) out.push(t);
   }
   return out;
+}
+
+function mergeStateIconLists(...lists: readonly string[][]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const list of lists) {
+    for (const raw of list) {
+      const t = raw.trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+const DEFAULT_ENEMY_STAT_BUFF_STATE_ICONS: Partial<
+  Record<EnemyStatBuffAffectedStat, string>
+> = {
+  damage: "icon_atkdamage_up.png",
+  magic_damage: "icon_mdamage_up.png",
+  speed: "icon_speed_up.png",
+  armor: "icon_armor_up.png",
+  mr: "icon_mr_up.png",
+};
+
+function defaultStateIconsForStatBuffParts(parts: EnemyStatBuffPart[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    if (part.amount <= 0) continue;
+    const icon = DEFAULT_ENEMY_STAT_BUFF_STATE_ICONS[part.stat];
+    if (!icon || seen.has(icon)) continue;
+    seen.add(icon);
+    out.push(icon);
+  }
+  return out;
+}
+
+function applyInheritedStateIconsToSteps(
+  steps: ParsedEnemySkillEffect[],
+  inherited: string[],
+): ParsedEnemySkillEffect[] {
+  if (inherited.length === 0) return steps;
+  return steps.map((step) => {
+    if (step.mode === "stat_buff") {
+      return {
+        ...step,
+        stateIcons: mergeStateIconLists(inherited, step.stateIcons),
+      };
+    }
+    if (step.mode === "composite") {
+      return {
+        ...step,
+        steps: applyInheritedStateIconsToSteps(step.steps, inherited),
+      };
+    }
+    return step;
+  });
 }
 
 function enemySkillDamageSubtype(effect: Record<string, unknown>): PlayerSkillEffectSubtype {
@@ -361,10 +488,14 @@ function parseStatBuffModifier(mod: Record<string, unknown>): {
       num(mod.duration_turns ?? mod.durationTurns ?? mod.duration, 3),
     ),
   );
-  const stateIcons = getEffectStateIcons(mod);
+  let stateIcons = getEffectStateIcons(mod);
+  const parts: EnemyStatBuffPart[] = [{ stat, amount }];
+  if (stateIcons.length === 0) {
+    stateIcons = defaultStateIconsForStatBuffParts(parts);
+  }
 
   return {
-    parts: [{ stat, amount }],
+    parts,
     durationTurns,
     stateIcons,
   };
@@ -405,12 +536,15 @@ function parseStatBuff(
   const parsed = parseStatBuffModifier(modRaw as Record<string, unknown>);
   if (!parsed) return null;
 
+  const effectIcons = getEffectStateIcons(effect);
+  let stateIcons = mergeStateIconLists(effectIcons, parsed.stateIcons);
+
   return {
     mode: "stat_buff",
     target,
     parts: parsed.parts,
     durationTurns: parsed.durationTurns,
-    stateIcons: parsed.stateIcons,
+    stateIcons,
     chance,
     useWhen,
   };
@@ -432,9 +566,11 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
       if (parsed) steps.push(parsed);
     }
     if (steps.length === 0) return null;
+    const inheritedIcons = getEffectStateIcons(effect);
+    const stepsWithIcons = applyInheritedStateIconsToSteps(steps, inheritedIcons);
     return {
       mode: "composite",
-      steps,
+      steps: stepsWithIcons,
       chance,
       useWhen,
       logDescription: extractLogDescription(effect),
@@ -446,6 +582,20 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
     const min = Math.max(0, num(effect.min, 0));
     const max = Math.max(min, num(effect.max, min));
     return { mode: "heal", target, min, max, chance, useWhen };
+  }
+
+  if (typeNorm === "weapon_attack") {
+    const target = parseEnemySkillTarget(effect.target, "player");
+    let subtype = enemySkillDamageSubtype(effect);
+    if (subtype === "neutral" || subtype === "buff") subtype = "physical";
+    return {
+      mode: "weapon_attack",
+      target,
+      subtype,
+      damageTypes: getEffectDamageTypes(effect),
+      chance,
+      useWhen,
+    };
   }
 
   if (typeNorm === "buff") {
@@ -479,6 +629,36 @@ export function parseEnemySkillEffectJson(effectRaw: unknown): ParsedEnemySkillE
   return parseOne(effectRaw as Record<string, unknown>);
 }
 
+/** Texto de log: columna `description` o `description` del `effect_json` (p. ej. composite). */
+export function resolveEnemySkillLogDescription(
+  skillDescription: string | null | undefined,
+  parsedEffect: ParsedEnemySkillEffect,
+): string | null {
+  const fromColumn =
+    typeof skillDescription === "string" ? skillDescription.trim() : "";
+  if (fromColumn.length > 0) return fromColumn;
+  if (parsedEffect.mode === "composite" && parsedEffect.logDescription) {
+    return parsedEffect.logDescription;
+  }
+  return null;
+}
+
+/** Buffs/modificadores antes que daño para que el ataque del mismo skill use el buff. */
+export function orderCompositeStepsForExecution(
+  steps: ParsedEnemySkillEffect[],
+): ParsedEnemySkillEffect[] {
+  const prep: ParsedEnemySkillEffect[] = [];
+  const rest: ParsedEnemySkillEffect[] = [];
+  for (const step of steps) {
+    if (step.mode === "stat_buff" || step.mode === "apply_modifier") {
+      prep.push(step);
+    } else {
+      rest.push(step);
+    }
+  }
+  return [...prep, ...rest];
+}
+
 export function enemyHpRatio(hp: number, hpMax: number): number {
   const max = Math.max(1, Math.trunc(hpMax));
   const h = Math.max(0, Math.trunc(hp));
@@ -509,6 +689,7 @@ export function parsedEnemySkillUseWhen(
     case "heal":
     case "apply_modifier":
     case "stat_buff":
+    case "weapon_attack":
       return effect.useWhen;
     case "composite":
       return effect.useWhen;
@@ -526,6 +707,8 @@ export function parsedEnemySkillChance(effect: ParsedEnemySkillEffect): number {
     case "apply_modifier":
       return effect.chance;
     case "stat_buff":
+      return effect.chance;
+    case "weapon_attack":
       return effect.chance;
     case "composite":
       return effect.chance;

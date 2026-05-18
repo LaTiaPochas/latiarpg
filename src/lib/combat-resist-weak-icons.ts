@@ -2,6 +2,20 @@ import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 
 const ICONOS_DIR = "/img/resources/iconos";
 
+/** Rutas de `state_icon` en JSON: nombre suelto → carpeta `iconos`. */
+export function normalizeCombatStateIconUrl(raw: unknown): string | null {
+  const normalized = normalizePublicAssetUrl(raw);
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  if (normalized.startsWith(`${ICONOS_DIR}/`)) return normalized;
+  if (normalized.startsWith("/img/")) return normalized;
+  const base = normalized.replace(/^\//, "");
+  if (!base.includes("/") && /^icon_/i.test(base)) {
+    return `${ICONOS_DIR}/${base}`;
+  }
+  return normalized;
+}
+
 /** Elementos con iconos `icon_{element}resist_{up|down}.png` en `public`. */
 export type CombatElementIconKey = "fire" | "water" | "earth" | "wind" | "contundente" | "perforante" | "cortante";
 
@@ -93,7 +107,7 @@ export function resolveCombatStateIconSrcs(opts: {
   };
 
   for (const raw of opts.stateIcons ?? []) {
-    push(normalizePublicAssetUrl(raw));
+    push(normalizeCombatStateIconUrl(raw));
   }
   for (const tag of opts.resistanceTags ?? []) {
     push(getCombatResistWeakIconSrc(tag, "up"));

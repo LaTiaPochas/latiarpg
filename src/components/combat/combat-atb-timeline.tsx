@@ -33,11 +33,9 @@ function TimelinePortrait({
     >
       <div
         className={`relative h-9 w-9 overflow-hidden rounded-full border-2 bg-black/60 shadow-md sm:h-10 sm:w-10 ${
-          entry.isCurrent
-            ? "border-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.75)]"
-            : entry.isPlayer
-              ? "border-emerald-600/80"
-              : "border-red-700/80"
+          entry.isPlayer
+            ? `border-emerald-400/95 ${entry.isCurrent ? "shadow-[0_0_12px_rgba(52,211,153,0.65)]" : ""}`
+            : `border-red-500/95 ${entry.isCurrent ? "shadow-[0_0_12px_rgba(239,68,68,0.55)]" : ""}`
         }`}
       >
         {entry.portraitSrc ? (
@@ -52,7 +50,11 @@ function TimelinePortrait({
           </span>
         )}
         {entry.isCurrent ? (
-          <span className="pointer-events-none absolute -bottom-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
+          <span
+            className={`pointer-events-none absolute -bottom-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full shadow-[0_0_6px_rgba(255,255,255,0.85)] ${
+              entry.isPlayer ? "bg-emerald-300" : "bg-red-400"
+            }`}
+          />
         ) : null}
       </div>
     </div>
@@ -60,16 +62,22 @@ function TimelinePortrait({
 }
 
 export function CombatAtbTimeline({ entries, className = "" }: CombatAtbTimelineProps) {
-  const trackWidth = `${Math.max(1, entries.length) * 2.85 + 2.5}rem`;
+  const trackContentRem = Math.max(1, entries.length) * 2.85 + 2.5;
+  const trackWidthRem = trackContentRem + 1; // px-2 en la barra
+  const trackWidth = `${trackContentRem}rem`;
+  const componentWidth = `${trackWidthRem}rem`;
 
   return (
-    <div className={`relative min-w-0 flex-1 ${className}`} aria-label="Linea de tiempo de turnos">
-      <div className="mb-1 text-[8px] font-semibold uppercase tracking-[0.18em] text-amber-400/80 sm:text-[9px]">
+    <div
+      className={`flex min-w-0 flex-col gap-1.5 ${className}`}
+      style={{ width: "100%", maxWidth: `min(100%, ${componentWidth})` }}
+      aria-label="Orden de turno"
+    >
+      <span className="text-center text-[8px] font-semibold uppercase leading-none tracking-[0.14em] text-amber-400/85 sm:text-[9px] sm:tracking-[0.18em]">
         Orden de turno
-      </div>
+      </span>
       <div
-        className="relative h-11 overflow-x-auto rounded-lg border border-amber-800/55 bg-[#120a08]/85 px-2 sm:h-12 [scrollbar-width:thin]"
-        style={{ minWidth: "min(100%, 12rem)" }}
+        className="relative h-10 w-full overflow-hidden rounded-lg border border-amber-800/55 bg-[#120a08]/85 px-2 sm:h-11"
       >
         <div className="relative h-full" style={{ minWidth: trackWidth }}>
           <div
@@ -89,5 +97,4 @@ export function CombatAtbTimeline({ entries, className = "" }: CombatAtbTimeline
     </div>
   );
 }
-
 

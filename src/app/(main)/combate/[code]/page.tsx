@@ -28,7 +28,7 @@ const LEVEL_UP_WORLD_EVENT_ICON_SRC = "/img/resources/iconos/icon_lvlup.png";
 
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ zone?: string; hotspot?: string }>;
+  searchParams: Promise<{ zone?: string; hotspot?: string; debug?: string }>;
 };
 
 type EnemyTemplateRow = Record<string, unknown>;
@@ -857,7 +857,8 @@ export default async function CombatEncounterPage({
 }: CombatEncounterPageProps) {
   const { code: rawCode } = await params;
   const code = decodeURIComponent(rawCode);
-  const { zone: zoneQuery, hotspot: hotspotQuery } = await searchParams;
+  const { zone: zoneQuery, hotspot: hotspotQuery, debug: debugQuery } = await searchParams;
+  const combatDebugEnabled = debugQuery === "1";
   const zoneCode =
     typeof zoneQuery === "string" && zoneQuery.trim().length > 0
       ? zoneQuery.trim()
@@ -1093,6 +1094,24 @@ export default async function CombatEncounterPage({
   const enemies: CombatEncounterEnemyView[] = enemyRows
     .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i, playerLevel))
     .filter((e): e is CombatEncounterEnemyView => e !== null);
+
+  if (combatDebugEnabled) {
+    console.log("[combat-debug][server] encuentro cargado", {
+      code,
+      enemies: enemies.map((e) => ({
+        id: e.id,
+        name: e.name,
+        attackMin: e.attackMin,
+        attackMax: e.attackMax,
+        skills: e.skills.map((s) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          parsedMode: s.parsedEffect.mode,
+        })),
+      })),
+    });
+  }
 
   const { data: enemyDropRows } = await supabase
     .from("enemy_drop_tables")
@@ -2684,6 +2703,7 @@ export default async function CombatEncounterPage({
       playerWeaknesses={playerWeaknesses}
       playerWeaponAttackFamily={playerWeaponAttackFamily}
       playerWeaponAmmoKind={playerWeaponAmmoKind}
+      combatDebugEnabled={combatDebugEnabled}
     />
   );
 }
