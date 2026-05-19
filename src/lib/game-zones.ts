@@ -60,6 +60,20 @@ export function zoneLookupCodeCandidates(zoneQueryParam: string): string[] {
   return out;
 }
 
+/** Zonas donde los encuentros por recolectar/minar no permiten escapar. */
+const COMBAT_ESCAPE_DISABLED_ZONE_KEYS = new Set([
+  "magic_forest",
+  "magicforest",
+  "abandoned_coal_mine",
+]);
+
+/** `true` si el combate entró desde bosque mágico o minas abandonadas (`?zone=`). */
+export function isCombatEscapeDisabledZone(zoneCode: string | null | undefined): boolean {
+  const key = normalizeZoneCodeKey(zoneCode);
+  if (!key) return false;
+  return COMBAT_ESCAPE_DISABLED_ZONE_KEYS.has(key);
+}
+
 /**
  * Mapa por `zones.code` (o alias) para `escapeHref` / “Volver al mapa” en combate.
  */

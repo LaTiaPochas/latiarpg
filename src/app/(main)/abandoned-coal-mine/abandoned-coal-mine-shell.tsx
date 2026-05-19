@@ -35,10 +35,12 @@ const INTRO_PARAGRAPHS = [
 const MINE_RESULT_MESSAGE: Record<string, string> = {
   piedra: "Extraés trozos de piedra del filón.",
   enemy: "¡Algo se mueve en la oscuridad del túnel!",
+  coal: "Encontrás vetas de carbón en la roca.",
+  iron: "El filón revela hierro oxidado.",
+  bones: "Entre los escombros hay restos óseos.",
+  cave_crystal: "Un cristal de cueva brilla en la penumbra.",
   potion: "Encontrás una poción entre los escombros.",
   medium_potion: "Encontrás una poción de tamaño considerable.",
-  feather: "Atrapás una pluma ligera junto a la veta.",
-  oro: "Entre la roca brilla algo: un poco de oro.",
   aguas: "Descubrís una pequeña reserva de aguas relajantes.",
   soul_fragment: "Un fragmento de alma resplandece entre el polvo.",
 };

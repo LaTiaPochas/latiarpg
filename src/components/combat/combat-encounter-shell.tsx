@@ -28,10 +28,30 @@ import {
   sumEnemyTimedStatBonuses,
 } from "@/lib/enemy-skill-combat";
 import {
+  type ActiveCombatCondition,
+  evaluateSkipTurnConditionsAtTurnStart,
+  getCombatConditionDefinition,
+  getCombatConditionIconSrc,
+  targetHasSkipTurnCondition,
+} from "@/lib/combat-conditions";
+import {
   createCombatDebugLogger,
   isCombatDebugEnabled,
   type CombatDebugLogger,
 } from "@/lib/combat-debug";
+import {
+  expandPlayerSkillEffectSteps,
+  getPlayerStatValueForConditionResist,
+  getStatValueForConditionResist,
+  formatPlayerSkillCooldownText,
+  parsePlayerSkillCooldownTurns,
+  parsePlayerSkillEffectTarget,
+  playerSkillStepsNeedCompositeHandler,
+  rollConditionResisted,
+  sumSelfBuffScalingTotals,
+  type ParsedPlayerConditionDebuff,
+  type PlayerSkillEffectTarget,
+} from "@/lib/player-skill-effect-combat";
 import {
   createDefaultCombatAmmoEntry,
   formatAmmoMenuButtonLabel,
@@ -992,50 +1012,6 @@ function computePlayerSkillMitigatedDamageToEnemy(
   );
 }
 
-/**
- * Contribución de una línea de `scaling`:
- * - `stat: Fixed` → `amount` entero ≥ 0
- * - `stat: STR|DEX|INT|WIS` → `floor(amount + stat × ratio)`
- */
-function selfBuffScalingLineValue(
-  entry: unknown,
-  getCombatStatValue: (statKeyUpper: string) => number,
-): number {
-  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
-  const o = entry as Record<string, unknown>;
-  const statRaw = typeof o.stat === "string" ? o.stat.trim() : "";
-  if (statRaw === "") return 0;
-  const upper = statRaw.toUpperCase();
-  const amount = coerceEffectNumber(o.amount, 0);
-  const ratio = buffScalingRatioParsed(o.ratio);
-
-  if (upper === "FIXED") {
-    return Math.max(0, Math.floor(amount));
-  }
-  if (["STR", "DEX", "INT", "WIS"].includes(upper)) {
-    const fromStat = Math.max(0, getCombatStatValue(upper)) * ratio;
-    return Math.max(0, Math.floor(amount + fromStat));
-  }
-  return 0;
-}
-
-function sumSelfBuffScalingTotals(
-  scalingRaw: unknown,
-  getCombatStatValue: (statKeyUpper: string) => number,
-): number {
-  if (scalingRaw == null) return 0;
-  if (Array.isArray(scalingRaw)) {
-    return scalingRaw.reduce(
-      (sum, item) => sum + selfBuffScalingLineValue(item, getCombatStatValue),
-      0,
-    );
-  }
-  if (typeof scalingRaw === "object") {
-    return selfBuffScalingLineValue(scalingRaw, getCombatStatValue);
-  }
-  return 0;
-}
-
 function formatPlayerSelfBuffCombatLog(
   template: string,
   parts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>,
@@ -1264,6 +1240,32 @@ function resolveEnemySkillEffectTargets(
       return { hitPlayer: false, enemies: livingEnemies };
     case "all":
       return { hitPlayer: true, enemies: livingEnemies };
+    default:
+      return { hitPlayer: false, enemies: [] };
+  }
+}
+
+function resolvePlayerSkillEffectTargetsForPlayer(
+  target: PlayerSkillEffectTarget,
+  selectedEnemy: CombatEncounterEnemyView | null,
+  livingEnemies: CombatEncounterEnemyView[],
+): { hitPlayer: boolean; enemies: CombatEncounterEnemyView[] } {
+  switch (target) {
+    case "self":
+      return { hitPlayer: true, enemies: [] };
+    case "enemy": {
+      if (!selectedEnemy || selectedEnemy.hp <= 0) {
+        return { hitPlayer: false, enemies: [] };
+      }
+      return { hitPlayer: false, enemies: [selectedEnemy] };
+    }
+    case "all_enemies":
+      return { hitPlayer: false, enemies: livingEnemies.filter((e) => e.hp > 0) };
+    case "all":
+      return {
+        hitPlayer: true,
+        enemies: livingEnemies.filter((e) => e.hp > 0),
+      };
     default:
       return { hitPlayer: false, enemies: [] };
   }
@@ -1661,6 +1663,8 @@ export type CombatEncounterShellProps = {
   onCombatFinishedStats?: (payload: CombatEncounterStatsPayload) => Promise<void>;
   /** Destino para "Escapar" (normalmente el mapa de la zona origen). */
   escapeHref?: string;
+  /** Si true, "Escapar" queda deshabilitado todo el combate (encuentros por recolectar/minar). */
+  escapeDisabled?: boolean;
   /** Activa logs `[enemy-dmg]` (también con `?debug=1` en la URL). */
   combatDebugEnabled?: boolean;
 };
@@ -1993,6 +1997,7 @@ export function CombatEncounterShell({
   onPlayerLevelUpGlobalLog,
   onCombatFinishedStats,
   escapeHref = "/",
+  escapeDisabled = false,
   combatDebugEnabled: combatDebugEnabledProp = false,
 }: CombatEncounterShellProps) {
   const router = useRouter();
@@ -2245,6 +2250,12 @@ export function CombatEncounterShell({
   );
 
   const [enemyPlayerTimedEffects, setEnemyPlayerTimedEffects] = useState<PlayerEnemyTimedEffect[]>([]);
+  const [activeCombatConditions, setActiveCombatConditions] = useState<ActiveCombatCondition[]>([]);
+  const activeCombatConditionsRef = useRef(activeCombatConditions);
+  useEffect(() => {
+    activeCombatConditionsRef.current = activeCombatConditions;
+  }, [activeCombatConditions]);
+  const playerSkipTurnResolvedRef = useRef<string | null>(null);
   const [enemyAppliedPlayerTimedModifiers, setEnemyAppliedPlayerTimedModifiers] = useState<
     EnemyAppliedPlayerTimedModifier[]
   >([]);
@@ -2296,6 +2307,10 @@ export function CombatEncounterShell({
           return Math.max(0, Math.floor(playerStatInt));
         case "WIS":
           return Math.max(0, Math.floor(playerStatWis));
+        case "LEVEL":
+        case "LV":
+        case "NIVEL":
+          return Math.max(1, Math.trunc(playerLevelCurrent));
         case "ATTACK_DAMAGE":
         case "WEAPON_DAMAGE": {
           const wmin = Math.max(
@@ -2344,6 +2359,7 @@ export function CombatEncounterShell({
       playerStatDex,
       playerStatInt,
       playerStatWis,
+      playerLevelCurrent,
       playerWeaponDamageMin,
       playerWeaponDamageMax,
       playerCombatWeaponDamageMinBonus,
@@ -2415,8 +2431,8 @@ export function CombatEncounterShell({
   const [playerSkillCooldownRemaining, setPlayerSkillCooldownRemaining] = useState<
     Record<string, number>
   >({});
-  /** Evita descontar CD en el mismo `scheduleAdvanceTurn` que acaba de aplicar el CD. */
-  const skipPlayerSkillCooldownTickRef = useRef(false);
+  /** Skill usada en esta acción: no bajar su CD en el mismo avance (recién se aplicó). */
+  const skipPlayerSkillCooldownTickIdRef = useRef<string | null>(null);
   useEffect(() => {
     setPlayerCurrentHp(Math.min(Math.max(0, playerHp), Math.max(1, playerHpMax)));
   }, [playerHp, playerHpMax]);
@@ -2459,11 +2475,12 @@ export function CombatEncounterShell({
     setPlayerCombatMagicDamageMaxBonus(0);
     setPlayerTimedSelfBuffs([]);
     setEnemyPlayerTimedEffects([]);
+    setActiveCombatConditions([]);
     setEnemyAppliedPlayerTimedModifiers([]);
     setEnemySelfTimedModifiers([]);
     setEnemyTimedStatBuffs([]);
     setPlayerSkillCooldownRemaining({});
-    skipPlayerSkillCooldownTickRef.current = false;
+    skipPlayerSkillCooldownTickIdRef.current = null;
     setAtbActionSeq(0);
     setTurn(1);
     if (defeatModalDelayRef.current) {
@@ -2521,6 +2538,7 @@ export function CombatEncounterShell({
   );
   const isEscapeDisabledByEnemyHp =
     totalEnemyHpMax > 0 && totalEnemyHp / totalEnemyHpMax <= 0.6;
+  const isEscapeDisabled = escapeDisabled || isEscapeDisabledByEnemyHp;
   const recordPlayerDamageDealt = (amount: number) => {
     const safe = Math.max(0, Math.trunc(amount));
     if (safe <= 0) return;
@@ -2636,7 +2654,7 @@ export function CombatEncounterShell({
   }, [encounterCode]);
   useEffect(() => {
     setPlayerSkillCooldownRemaining({});
-    skipPlayerSkillCooldownTickRef.current = false;
+    skipPlayerSkillCooldownTickIdRef.current = null;
   }, [encounterCode]);
   useEffect(() => {
     ammoSpentByInventoryIdRef.current = new Map();
@@ -2938,8 +2956,15 @@ export function CombatEncounterShell({
         weaknessTags: deb.extraWeaknessTags,
       });
     }
+    for (const cond of activeCombatConditions) {
+      if (cond.targetKind !== "player" || cond.targetId !== "player") continue;
+      const icon = getCombatConditionIconSrc(cond.conditionId);
+      if (!icon || seen.has(icon)) continue;
+      seen.add(icon);
+      out.push(icon);
+    }
     return out;
-  }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers]);
+  }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers, activeCombatConditions]);
 
   const enemyHudStateIconSrcsById = useMemo(() => {
     const byEnemy = new Map<string, string[]>();
@@ -2986,12 +3011,21 @@ export function CombatEncounterShell({
       if (sb.remainingTurns <= 0) continue;
       mergeForEnemy(sb.enemyId, { stateIcons: sb.stateIcons });
     }
+    for (const cond of activeCombatConditions) {
+      if (cond.targetKind !== "enemy") continue;
+      const icon = getCombatConditionIconSrc(cond.conditionId);
+      if (!icon) continue;
+      const prev = byEnemy.get(cond.targetId) ?? [];
+      if (prev.includes(icon)) continue;
+      mergeForEnemy(cond.targetId, { stateIcons: [icon] });
+    }
     return byEnemy;
   }, [
     displayEnemies,
     enemyPlayerTimedEffects,
     enemySelfTimedModifiers,
     enemyTimedStatBuffs,
+    activeCombatConditions,
   ]);
 
   /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
@@ -3030,20 +3064,26 @@ export function CombatEncounterShell({
   }
 
   function applyPlayerSkillCooldown(skillEntry: CombatPlayerSkillView) {
-    const cd = Math.max(1, Math.trunc(skillEntry.skill.cooldownTurns));
-    skipPlayerSkillCooldownTickRef.current = true;
+    const cd = parsePlayerSkillCooldownTurns(skillEntry.skill.cooldownTurns, 0);
+    if (cd <= 0) return;
+    skipPlayerSkillCooldownTickIdRef.current = skillEntry.userCharacterSkillId;
     setPlayerSkillCooldownRemaining((prev) => ({
       ...prev,
       [skillEntry.userCharacterSkillId]: cd,
     }));
   }
 
-  function tickPlayerSkillCooldownsAfterPlayerAction() {
+  function tickPlayerSkillCooldownsAfterPlayerAction(exceptUserCharacterSkillId?: string | null) {
+    const exceptId =
+      typeof exceptUserCharacterSkillId === "string" && exceptUserCharacterSkillId.length > 0
+        ? exceptUserCharacterSkillId
+        : null;
     setPlayerSkillCooldownRemaining((prev) => {
       if (Object.keys(prev).length === 0) return prev;
       let changed = false;
       const next: Record<string, number> = { ...prev };
       for (const key of Object.keys(next)) {
+        if (exceptId != null && key === exceptId) continue;
         const left = Math.trunc(next[key] ?? 0);
         if (left <= 0) continue;
         next[key] = left - 1;
@@ -3296,11 +3336,212 @@ export function CombatEncounterShell({
     );
   }
 
+  function applyPlayerConditionDebuff(
+    step: ParsedPlayerConditionDebuff,
+    skillName: string,
+    livingEnemies: CombatEncounterEnemyView[],
+  ) {
+    const def = getCombatConditionDefinition(step.conditionId);
+    if (!def) {
+      appendCombatLog(`Condición desconocida: ${step.conditionId}.`, "default");
+      return;
+    }
+
+    const targets = resolvePlayerSkillEffectTargetsForPlayer(
+      step.target,
+      selectedEnemy,
+      livingEnemies,
+    );
+    const rowsToAdd: ActiveCombatCondition[] = [];
+    let resistedCount = 0;
+    let appliedCount = 0;
+
+    const tryApply = (
+      targetKind: "player" | "enemy",
+      targetId: string,
+      enemyForResist: CombatEncounterEnemyView | null,
+    ) => {
+      const resisted = rollConditionResisted(step.resist, (statKey) => {
+        if (targetKind === "player") {
+          return getPlayerStatValueForConditionResist(statKey, {
+            playerMr: effectivePlayerMr,
+            playerArmor: effectivePlayerArmor,
+          });
+        }
+        if (!enemyForResist) return 0;
+        const bonuses = getEnemyStatBonuses(enemyForResist.id);
+        return getStatValueForConditionResist(statKey, {
+          enemyMr: effectiveEnemyMr(enemyForResist, bonuses),
+          enemyArmor: effectiveEnemyArmor(enemyForResist, bonuses),
+        });
+      });
+      if (resisted) {
+        resistedCount += 1;
+        return;
+      }
+      appliedCount += 1;
+      rowsToAdd.push({
+        id: `${targetKind}:${targetId}:${step.conditionId}:${turn}:${Math.random().toString(36).slice(2, 9)}`,
+        conditionId: step.conditionId,
+        targetKind,
+        targetId,
+        remainingTurns: step.durationTurns,
+        lastTickTurn: turn,
+        sourceSkillName: skillName,
+      });
+    };
+
+    if (targets.hitPlayer) {
+      tryApply("player", "player", null);
+    }
+    for (const enemy of targets.enemies) {
+      tryApply("enemy", enemy.id, enemy);
+    }
+
+    if (rowsToAdd.length > 0) {
+      setActiveCombatConditions((prev) => {
+        const withoutDupes = prev.filter(
+          (r) =>
+            !rowsToAdd.some(
+              (n) =>
+                n.targetKind === r.targetKind &&
+                n.targetId === r.targetId &&
+                n.conditionId === r.conditionId,
+            ),
+        );
+        return [...withoutDupes, ...rowsToAdd];
+      });
+    }
+
+    if (appliedCount > 0 && resistedCount === 0) {
+      appendCombatLog(`${def.name} aplicado (${skillName}).`, "success");
+    } else if (appliedCount > 0) {
+      appendCombatLog(
+        `${def.name} aplicado a ${appliedCount} objetivo(s); ${resistedCount} resistió.`,
+        "success",
+      );
+    } else if (resistedCount > 0) {
+      appendCombatLog(`El objetivo resistió ${def.name}.`, "default");
+    }
+  }
+
+  function runPlayerSkillDamageEffectOnly(
+    skillEntry: CombatPlayerSkillView,
+    damageEffect: Record<string, unknown>,
+    appendSpellLog: (damageDealtForHighlight: number, enemyHitName?: string | null) => void,
+  ): number {
+    const damageTypes = getEffectDamageTypes(damageEffect);
+    const resistWeakTags = getEffectAttackTypesForResistWeak(
+      damageEffect,
+      playerWeaponAttackFamily,
+    );
+    const magicalCombatDamageFlat = Math.max(
+      0,
+      Math.trunc(
+        playerCombatMagicDamageMinBonus +
+          playerCombatMagicDamageMaxBonus +
+          timedBuffBonusByStat.magic_damage_min +
+          timedBuffBonusByStat.magic_damage_max,
+      ),
+    );
+    const effectiveWeaponDamageMin = Math.max(
+      1,
+      Math.floor(
+        playerWeaponDamageMin +
+          playerCombatWeaponDamageMinBonus +
+          timedBuffBonusByStat.weapon_damage_min,
+      ),
+    );
+    const effectiveWeaponDamageMax = Math.max(
+      effectiveWeaponDamageMin,
+      Math.floor(
+        playerWeaponDamageMax +
+          playerCombatWeaponDamageMaxBonus +
+          timedBuffBonusByStat.weapon_damage_max,
+      ),
+    );
+    const skillDamageBases: PlayerSkillDamageBaseBounds = {
+      weaponMin: effectiveWeaponDamageMin,
+      weaponMax: effectiveWeaponDamageMax,
+      magicMin: playerMagicDamageMin,
+      magicMax: playerMagicDamageMax,
+    };
+
+    const needsSingle =
+      parsePlayerSkillEffectTarget(damageEffect.target, "enemy") === "enemy";
+    const isArea = playerSkillDamageHitsAllEnemies(damageEffect);
+
+    if (needsSingle && !isArea) {
+      const target = selectedEnemy;
+      if (!target || target.hp <= 0) return 0;
+      const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(damageEffect, target, {
+        getCombatStatValue: getCombatStatValueForSkills,
+        skillDamageBases,
+        magicalCombatDamageFlat,
+        resistWeakTags,
+        enemyResistancesResolved: mergedEnemyResistancesForPlayerAttack(
+          target,
+          enemySelfTimedModifiers,
+        ),
+        weaknessesResolved: mergedEnemyWeaknessesForPlayerAttack(
+          target,
+          enemyPlayerTimedEffects,
+          enemySelfTimedModifiers,
+          collectWeaknessTagsFromDamageSkillScalings(damageEffect),
+        ),
+        enemyStatBonuses: getEnemyStatBonuses(target.id),
+      });
+      const damageDone = Math.min(mitigatedFinal, target.hp);
+      setDisplayEnemies((prev) =>
+        prev.map((enemy) =>
+          enemy.id === target.id ? { ...enemy, hp: enemy.hp - damageDone } : enemy,
+        ),
+      );
+      recordPlayerDamageDealt(damageDone);
+      if (damageDone > 0 && target.hp - damageDone <= 0) {
+        appendCombatLog(`Has matado a ${target.name}.`, "success");
+        setSelectedEnemyId(null);
+      }
+      return damageDone;
+    }
+
+    let total = 0;
+    for (const enemy of displayEnemies) {
+      if (enemy.hp <= 0) continue;
+      const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(damageEffect, enemy, {
+        getCombatStatValue: getCombatStatValueForSkills,
+        skillDamageBases,
+        magicalCombatDamageFlat,
+        resistWeakTags,
+        enemyResistancesResolved: mergedEnemyResistancesForPlayerAttack(
+          enemy,
+          enemySelfTimedModifiers,
+        ),
+        weaknessesResolved: mergedEnemyWeaknessesForPlayerAttack(
+          enemy,
+          enemyPlayerTimedEffects,
+          enemySelfTimedModifiers,
+          collectWeaknessTagsFromDamageSkillScalings(damageEffect),
+        ),
+        enemyStatBonuses: getEnemyStatBonuses(enemy.id),
+      });
+      const damageDone = Math.min(mitigatedFinal, enemy.hp);
+      total += damageDone;
+      setDisplayEnemies((prev) =>
+        prev.map((e) => (e.id === enemy.id ? { ...e, hp: e.hp - damageDone } : e)),
+      );
+      recordPlayerDamageDealt(damageDone);
+    }
+    return total;
+  }
+
   /** Elige una habilidad (efectos de combate: próximo paso). */
   function handlePlayerSkillChosen(skillEntry: CombatPlayerSkillView) {
     if (!canUsePlayerSkill(skillEntry)) return;
 
     const effect = skillEntry.skill.effect;
+    const steps = expandPlayerSkillEffectSteps(effect);
+
     const effectTypeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
     const damageKind = getPlayerSkillDamageEffectKind(effect);
     const damageTypes = getEffectDamageTypes(effect);
@@ -3333,6 +3574,30 @@ export function CombatEncounterShell({
         damageDealtForHighlight > 0 ? damageDealtForHighlight : undefined,
       );
     };
+
+    if (playerSkillStepsNeedCompositeHandler(steps)) {
+      const livingEnemies = displayEnemies.filter((e) => e.hp > 0);
+      for (const step of steps) {
+        if (step.mode === "apply_condition") {
+          applyPlayerConditionDebuff(step, skillEntry.skill.name, livingEnemies);
+        }
+      }
+      const damageStep = steps.find(
+        (s): s is { mode: "raw"; effect: Record<string, unknown> } =>
+          s.mode === "raw" && getPlayerSkillDamageEffectKind(s.effect) !== "none",
+      );
+      const totalDamage =
+        damageStep != null
+          ? runPlayerSkillDamageEffectOnly(skillEntry, damageStep.effect, appendSpellLog)
+          : 0;
+      if (damageStep == null) {
+        appendSpellLog(0);
+      } else {
+        appendSpellLog(totalDamage, selectedEnemy?.name ?? null);
+      }
+      scheduleAdvanceTurn();
+      return;
+    }
 
     if (effectTypeRaw === "buff" && isPlayerSelfBuffEffect(effect)) {
       const durationTurns = parseEffectDurationTurns(effect);
@@ -3703,6 +3968,78 @@ export function CombatEncounterShell({
       return changed ? next : prev;
     });
 
+    const prevConditions = activeCombatConditionsRef.current;
+    if (prevConditions.length > 0) {
+      const enemiesNow = displayEnemiesRef.current;
+      const conditionDotEnemyHp = new Map<string, number>();
+      const conditionDotLogs: Array<{ text: string; dmg: number }> = [];
+      let conditionPlayerDot = 0;
+
+      const nextConditions = prevConditions.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const def = getCombatConditionDefinition(row.conditionId);
+        if (def) {
+          for (const eff of def.effects) {
+            if (eff.kind !== "damage_over_time") continue;
+            const rolled = Math.max(0, randomIntInclusive(eff.min, eff.max));
+            if (rolled <= 0) continue;
+            if (row.targetKind === "player") {
+              conditionPlayerDot += rolled;
+              conditionDotLogs.push({
+                text: `${playerDisplayName} sufre ${rolled} de daño (${def.name}).`,
+                dmg: rolled,
+              });
+            } else {
+              const enemy = enemiesNow.find((e) => e.id === row.targetId);
+              if (enemy && enemy.hp > 0) {
+                const nextHp = Math.max(0, enemy.hp - rolled);
+                conditionDotEnemyHp.set(enemy.id, nextHp);
+                conditionDotLogs.push({
+                  text: `${enemy.name} sufre ${rolled} de daño (${def.name}).`,
+                  dmg: rolled,
+                });
+              }
+            }
+          }
+        }
+
+        if (row.remainingTurns === null) {
+          return [{ ...row, lastTickTurn: turn }];
+        }
+        const remainingTurns = row.remainingTurns - 1;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+
+      if (conditionPlayerDot > 0) {
+        setPlayerCurrentHp((hp) => Math.max(0, hp - conditionPlayerDot));
+        recordPlayerDamageTaken(conditionPlayerDot);
+      }
+      if (conditionDotEnemyHp.size > 0) {
+        setDisplayEnemies((prevE) =>
+          prevE.map((e) => {
+            const nextHp = conditionDotEnemyHp.get(e.id);
+            return nextHp != null ? { ...e, hp: nextHp } : e;
+          }),
+        );
+        for (const [enemyId, nextHp] of conditionDotEnemyHp) {
+          const enemy = enemiesNow.find((e) => e.id === enemyId);
+          if (enemy) {
+            recordPlayerDamageDealt(Math.max(0, enemy.hp - nextHp));
+          }
+        }
+      }
+      for (const log of conditionDotLogs) {
+        appendCombatLog(log.text, "default", log.dmg);
+      }
+      if (
+        nextConditions.length !== prevConditions.length ||
+        nextConditions.some((r, i) => r !== prevConditions[i])
+      ) {
+        setActiveCombatConditions(nextConditions);
+      }
+    }
+
     const prevEffects = enemyPlayerTimedEffectsRef.current;
     if (prevEffects.length === 0) return;
 
@@ -3799,11 +4136,9 @@ export function CombatEncounterShell({
 
     const actedId = currentActorIdRef.current;
     if (actedId === "player") {
-      if (skipPlayerSkillCooldownTickRef.current) {
-        skipPlayerSkillCooldownTickRef.current = false;
-      } else {
-        tickPlayerSkillCooldownsAfterPlayerAction();
-      }
+      const exceptSkillId = skipPlayerSkillCooldownTickIdRef.current;
+      skipPlayerSkillCooldownTickIdRef.current = null;
+      tickPlayerSkillCooldownsAfterPlayerAction(exceptSkillId);
     }
     advanceTurn();
     setAtbActionSeq((seq) => seq + 1);
@@ -4019,7 +4354,7 @@ export function CombatEncounterShell({
   }
 
   function handleEscapeClick(event: React.MouseEvent<HTMLAnchorElement>) {
-    if (isEscapeDisabledByEnemyHp) {
+    if (isEscapeDisabled) {
       event.preventDefault();
       return;
     }
@@ -4062,6 +4397,51 @@ export function CombatEncounterShell({
     return null;
   }
 
+  /** Sueño / parálisis / stun: tira despertar si aplica; logs y opcional skip de turno. */
+  function resolveSkipTurnConditionsForActor(
+    targetKind: "player" | "enemy",
+    targetId: string,
+    affectedName: string,
+  ): boolean {
+    const result = evaluateSkipTurnConditionsAtTurnStart(
+      activeCombatConditionsRef.current,
+      targetKind,
+      targetId,
+      affectedName,
+    );
+
+    if (result.removeConditionIds.length > 0) {
+      setActiveCombatConditions((prev) =>
+        prev.filter((c) => !result.removeConditionIds.includes(c.id)),
+      );
+    }
+
+    for (const log of result.logs) {
+      appendCombatLog(log.message, log.tone);
+    }
+
+    if (result.shouldSkipTurn) {
+      scheduleAdvanceTurn();
+      return true;
+    }
+    return false;
+  }
+
+  useEffect(() => {
+    if (combatOutcome !== "active") return;
+    if (!isPlayerTurn || isTurnTransitioning || isInitialCombatDelay) return;
+    if (playerCurrentHp <= 0) return;
+    if (!targetHasSkipTurnCondition(activeCombatConditionsRef.current, "player", "player")) {
+      return;
+    }
+    const skipKey = `player-skip:${atbActionSeq}`;
+    if (playerSkipTurnResolvedRef.current === skipKey) return;
+    playerSkipTurnResolvedRef.current = skipKey;
+
+    resolveSkipTurnConditionsForActor("player", "player", playerDisplayName);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- por acción ATB del PJ
+  }, [atbActionSeq, combatOutcome, isInitialCombatDelay, isPlayerTurn, isTurnTransitioning, playerCurrentHp, playerDisplayName]);
+
   useEffect(() => {
     if (combatOutcome !== "active") return;
     if (!currentActor || currentActor.type !== "enemy") return;
@@ -4092,6 +4472,12 @@ export function CombatEncounterShell({
     if (!enemy || enemy.hp <= 0) {
       scheduleAdvanceTurn();
       return;
+    }
+
+    if (targetHasSkipTurnCondition(activeCombatConditionsRef.current, "enemy", enemy.id)) {
+      if (resolveSkipTurnConditionsForActor("enemy", enemy.id, enemy.name)) {
+        return;
+      }
     }
 
     setEnemyAttackLungeSeq((prev) => ({
@@ -4694,15 +5080,18 @@ export function CombatEncounterShell({
               <Link
                 href={escapeHref}
                 onClick={handleEscapeClick}
-                aria-disabled={isEscapeDisabledByEnemyHp || isEscaping}
+                aria-disabled={isEscapeDisabled || isEscaping}
+                tabIndex={isEscapeDisabled ? -1 : undefined}
                 title={
-                  isEscapeDisabledByEnemyHp
-                    ? "No podés huir cuando la vida total de los enemigos es 60% o menos."
-                    : undefined
+                  escapeDisabled
+                    ? "No podés escapar de este encuentro."
+                    : isEscapeDisabledByEnemyHp
+                      ? "No podés huir cuando la vida total de los enemigos es 60% o menos."
+                      : undefined
                 }
                 className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition sm:px-3 ${
-                  isEscapeDisabledByEnemyHp
-                    ? "cursor-not-allowed border-slate-700/70 bg-slate-900/35 text-slate-500"
+                  isEscapeDisabled
+                    ? "pointer-events-none cursor-not-allowed border-slate-700/70 bg-slate-900/35 text-slate-500"
                     : "border-red-700/60 bg-red-900/15 text-amber-200/90 hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50"
                 }`}
               >
@@ -5471,6 +5860,7 @@ export function CombatEncounterShell({
               dex: playerStatDex,
               int: playerStatInt,
               wis: playerStatWis,
+              level: Math.max(1, Math.trunc(playerLevelCurrent)),
               weaponDamageMinEffective: tooltipWeaponMin,
               weaponDamageMaxEffective: tooltipWeaponMax,
               magicDamageMinSheet: playerMagicDamageMin,
@@ -5494,10 +5884,23 @@ export function CombatEncounterShell({
             const damageTypes = getEffectDamageTypes(skillTooltipEntry.skill.effect);
             const damageTypesLabel = damageTypes.join(", ");
             const skillDescRaw = getPlayerSkillTooltipDescription(skillTooltipEntry.skill);
+            const skillEffect = skillTooltipEntry.skill.effect;
+            let skillDescForTooltip = skillDescRaw
+              .replaceAll("{damage_type}", damageTypesLabel)
+              .replaceAll("{damage_types}", damageTypesLabel);
+            if (isPlayerSelfBuffEffect(skillEffect)) {
+              const buffParts = resolvePlayerSelfBuffParts(
+                skillEffect,
+                getCombatStatValueForSkills,
+              );
+              skillDescForTooltip = formatPlayerSelfBuffCombatLog(
+                skillDescForTooltip,
+                buffParts,
+                parseEffectDurationTurns(skillEffect),
+              );
+            }
             const descFormatted = formatAbilityTooltipStatExpressions(
-              skillDescRaw
-                .replaceAll("{damage_type}", damageTypesLabel)
-                .replaceAll("{damage_types}", damageTypesLabel),
+              skillDescForTooltip,
               getStat,
             );
             return (
@@ -5535,7 +5938,7 @@ export function CombatEncounterShell({
                   <SkillCooldownClockIcon className="h-3.5 w-3.5 shrink-0 opacity-95" />
                   <span>
                     <span className="font-semibold">CD</span>{" "}
-                    {skillTooltipEntry.skill.cooldownTurns} turno(s)
+                    {formatPlayerSkillCooldownText(skillTooltipEntry.skill.cooldownTurns)}
                     {cdRem > 0 ? (
                       <span className="opacity-95"> · Disponible en {cdRem}</span>
                     ) : null}

@@ -4,6 +4,7 @@ import type { EquipmentInstanceTooltip, WeaponInstanceTooltip } from "@/componen
 import Image from "next/image";
 import { Montserrat } from "next/font/google";
 import { redirect } from "next/navigation";
+import { parsePlayerSkillCooldownTurns } from "@/lib/player-skill-effect-combat";
 import { confirmStatAllocation } from "./actions";
 import { StatsPanel } from "./stats-panel";
 
@@ -685,10 +686,7 @@ export default async function CharacterProfilePage() {
       const unlockLevel =
         typeof skill.unlock_level === "number" ? Math.max(0, Math.trunc(skill.unlock_level)) : 0;
       
-        const cooldownTurns =
-        typeof skill.cooldown_turns === "number"
-          ? Math.max(1, Math.trunc(skill.cooldown_turns))
-          : 1;
+      const cooldownTurns = parsePlayerSkillCooldownTurns(skill.cooldown_turns, 0);
       const target =
         typeof skill.target === "string" && skill.target.trim().length > 0
           ? skill.target.trim()
@@ -827,6 +825,7 @@ export default async function CharacterProfilePage() {
             dex: dexEffective,
             int: intEffective,
             wis: wisEffective,
+            level: Math.max(1, Math.trunc(Number(character?.level ?? 1))),
             weaponDamageMin: weaponMin,
             weaponDamageMax: weaponMax,
             magicDamageMin: magicSheetMin,

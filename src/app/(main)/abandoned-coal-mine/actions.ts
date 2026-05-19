@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { resolveInventoryIconPath } from "@/lib/inventory-icon-path";
 import { rollAbandonedCoalMineEnemyCombatCode } from "@/lib/abandoned-coal-mine-enemy-combats";
-import { rollAbandonedMineGatherOutcome } from "@/lib/abandoned-mine-gather-outcomes";
+import {
+  rollAbandonedMineGatherOutcome,
+  rollAbandonedMineGrantQuantity,
+} from "@/lib/abandoned-mine-gather-outcomes";
 import { createClient } from "@/lib/supabase/server";
 
 import type { GatherNearWoodsResult, NearWoodsGrantedItemView } from "@/app/(main)/near-woods/actions";
@@ -18,8 +21,9 @@ const ABANDONED_MINE_DROP_ITEM_IDS: Record<string, string> = {
   piedra: "e2b70f4d-19d5-4406-bcd9-23c8820c1505",
   aguas: "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955",
   coal: "1f85956f-9f81-46d5-a067-c6c6dc6fa398",
-  iron: "45b352bd-4ac3-40fd-b7fc-87b008e9a607",
-  bones: "1d341344-135a-447b-a2cd-6ef7bf3d035f"
+  iron: "0c71cbc8-03b5-4286-b575-98ab10bd7c2b",
+  bones: "1d341344-135a-447b-a2cd-6ef7bf3d035f",
+  cave_crystal: "10770a8b-3aa7-4099-9526-0366f984ca5a"
 };
 
 const RELAXING_WATER_GLOBAL_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
@@ -104,8 +108,8 @@ function mapItemsRowToGrantedView(data: unknown, grantedQuantity = 1): NearWoods
 export type MineAbandonedCoalMineResult = GatherNearWoodsResult;
 
 /**
- * Minar: probabilidades como Bosque Mágico (`ABANDONED_MINE_GATHER_OUTCOMES`), recurso principal `piedra` 1–3,
- * encuentros con `rollAbandonedCoalMineEnemyCombatCode` (`abandoned-coal-mine-1` … `5`).
+ * Minar: `ABANDONED_MINE_GATHER_OUTCOMES`; cantidades variables vía `rollAbandonedMineGrantQuantity`
+ * (piedra 1–4, carbón/hierro 1–3, huesos/cristal 1–2; resto 1).
  */
 export async function mineAbandonedCoalMine(): Promise<MineAbandonedCoalMineResult> {
   const supabase = await createClient();
@@ -211,7 +215,7 @@ export async function mineAbandonedCoalMine(): Promise<MineAbandonedCoalMineResu
     }
   }
 
-  const grantQuantity = result === "piedra" ? Math.floor(Math.random() * 3) + 1 : 1;
+  const grantQuantity = rollAbandonedMineGrantQuantity(result);
 
   const { data: existingRows, error: selectError } = await supabase
     .from("user_inventory")

@@ -72,6 +72,7 @@ export type AbilityTooltipSheetSnapshot = {
   dex: number;
   int: number;
   wis: number;
+  level: number;
   weaponDamageMin: number;
   weaponDamageMax: number;
   magicDamageMin: number;
@@ -90,6 +91,10 @@ export function abilityTooltipStatGetterFromSheet(stats: AbilityTooltipSheetSnap
         return Math.max(0, Math.floor(stats.int));
       case "WIS":
         return Math.max(0, Math.floor(stats.wis));
+      case "LEVEL":
+      case "LV":
+      case "NIVEL":
+        return Math.max(1, Math.floor(stats.level));
       case "ATTACK_DAMAGE":
       case "WEAPON_DAMAGE": {
         const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
@@ -113,6 +118,7 @@ export type AbilityTooltipCombatSnapshot = {
   dex: number;
   int: number;
   wis: number;
+  level: number;
   /** Daño arma efectivo en combate (base + weapon_damage_* de buff). */
   weaponDamageMinEffective: number;
   weaponDamageMaxEffective: number;
@@ -136,6 +142,10 @@ export function abilityTooltipStatGetterFromCombat(snapshot: AbilityTooltipComba
         return Math.max(0, Math.floor(snapshot.int));
       case "WIS":
         return Math.max(0, Math.floor(snapshot.wis));
+      case "LEVEL":
+      case "LV":
+      case "NIVEL":
+        return Math.max(1, Math.floor(snapshot.level));
       case "ATTACK_DAMAGE":
       case "WEAPON_DAMAGE": {
         const wmin = Math.max(

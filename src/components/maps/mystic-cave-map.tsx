@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ExplorationZoneMap, type ExplorationHotspot } from "@/components/maps/exploration-zone-map";
 
 const ABANDONED_MINE_HOTSPOT_ID = "cave-node-5";
+const HIDDEN_HOTSPOT_ID = "cave-node-0";
 
 const MAP_SRC = "/img/resources/maps/map_mystic_cave_floor_1.png";
 
@@ -19,7 +21,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Entrada a la Cueva",
     xPercent: 81,
     yPercent: 18,
-    description: "Nos adentramos en la cueva, se nota que el trasgo no es el único que la habita.",
+    description: "Te adentrás en la cueva, algo te dice que el trasgo no es el único que la habita, sin embargo, parece lo suficientemente seguro como para empezar a avanzar.",
   },
   {
     id: "cave-node-2",
@@ -27,7 +29,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Avanzada Rocosa",
     xPercent: 71,
     yPercent: 37,
-    description: "Salteamos el primer obstaculo, pero hay que estar atentos a lo que se viene.",
+    description: "Cuanto más avanzas, más evidentes se hacen los ruidos a explosivos y el eco de las voces de trasgos comandando pelotones para extraer material. ¿Qué es lo qué estarán buscando acá?",
   },
   {
     id: "cave-node-3",
@@ -35,7 +37,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Descenso a la Mina",
     xPercent: 55,
     yPercent: 55,
-    description: "Confirmamos las sospechas, esto era mucho más complejo que unos simples túneles trasgos.",
+    description: "Cuánto más avanzás, más cantidad de trasgos hay, y más organización. Va a tener que tener mucho cuidado de acá en adelante.",
   },
   {
     id: "cave-node-4",
@@ -43,7 +45,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Bifurcación Oscura",
     xPercent: 45,
     yPercent: 76,
-    description: "El camino se bifurca, uno de los lados es oscuro y parece abandonado, para el otro se ve un puente a lo lejos.",
+    description: "El camino se bifurca, uno de los lados es oscuro y parece abandonado, para el otro se ve un puente a lo lejos. En este punto, volteás y ya no ves la luz de la entrada, solamente está iluminado por unas precarias antorchas trasgas.",
   },
   {
     id: "cave-node-5",
@@ -51,7 +53,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Mina Abandonada",
     xPercent: 73,
     yPercent: 88,
-    description: "Parece que esta parte de la mina no se usa hace bastante tiempo.",
+    description: "Parece que esta parte de la mina no se usa hace bastante tiempo. Cuando te acercás, notás los cadaveres trasgos en el suelo, y un sitio de minería abandonado. Podés entrar a examinar.",
   },
   {
     id: "cave-node-6",
@@ -67,7 +69,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Puente Colgante",
     xPercent: 26,
     yPercent: 50,
-    description: "Si pudiera evitar cruzar por este puente, lo haría. Pero hay que llegar al fondo de esto, ¿Porqué están tan organizados?.",
+    description: "Estos hombres lagarto son mucho mejores combatientes que los Trasgos. Incluso Ka'Tur se sentía improvisado al lado de las tácticas de combate de los Lizardmen.",
   },
   {
     id: "cave-node-8",
@@ -75,7 +77,7 @@ const HOTSPOTS: ExplorationHotspot[] = [
     label: "Final del Camino",
     xPercent: 30,
     yPercent: 30,
-    description: "Llegar hasta acá no fue nada fácil. No podemos darnos por vencidos ahora. El camino se bifurca nuevamente, uno de los lados, parece ser un punto importante, el otro... solo nos lleva más adentro en la mina.",
+    description: "Llegar hasta acá no fue nada fácil, estás cansado pero no es el momento de retroceder ahora. El camino se bifurca nuevamente, uno de los lados, parece ser un punto importante, el otro... solo nos lleva más adentro en la mina.",
   },
   {
     id: "cave-node-9",
@@ -94,12 +96,13 @@ const HOTSPOTS: ExplorationHotspot[] = [
     description: "No se ve nada para adentro. Podría ser eterno este camino, lo unico que se nota, es que va hacia abajo.",
   },
   {
-    id: "cave-node-0",
+    id: HIDDEN_HOTSPOT_ID,
     step: 5,
-    label: "Hidden Step",
+    label: "Punto oculto",
     xPercent: 42,
     yPercent: 88,
-    description: "[Placeholder] Descripción del punto 9 en la cueva.",
+    description: "",
+    hidden: true,
   },
 ];
 
@@ -111,22 +114,68 @@ type MysticCaveMapProps = {
 
 export function MysticCaveMap({ currentCombatStep, zoneCode, initialHotspotId = null }: MysticCaveMapProps) {
   const router = useRouter();
+  const [hiddenModalOpen, setHiddenModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!hiddenModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHiddenModalOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hiddenModalOpen]);
 
   return (
-    <ExplorationZoneMap
-      mapSrc={MAP_SRC}
-      mapAlt="Mapa de la cueva mística — piso 1"
-      hotspots={HOTSPOTS}
-      currentCombatStep={currentCombatStep}
-      zoneCode={zoneCode}
-      initialHotspotId={initialHotspotId}
-      onIrAlla={(hotspot) => {
-        if (hotspot.id !== ABANDONED_MINE_HOTSPOT_ID) {
-          return false;
-        }
-        router.push("/abandoned-coal-mine");
-        return true;
-      }}
-    />
+    <>
+      <ExplorationZoneMap
+        mapSrc={MAP_SRC}
+        mapAlt="Mapa de la cueva mística — piso 1"
+        hotspots={HOTSPOTS}
+        currentCombatStep={currentCombatStep}
+        zoneCode={zoneCode}
+        initialHotspotId={initialHotspotId}
+        onHotspotClick={(hotspot) => {
+          if (hotspot.id !== HIDDEN_HOTSPOT_ID) return false;
+          setHiddenModalOpen(true);
+          return true;
+        }}
+        onIrAlla={(hotspot) => {
+          if (hotspot.id !== ABANDONED_MINE_HOTSPOT_ID) {
+            return false;
+          }
+          router.push("/abandoned-coal-mine");
+          return true;
+        }}
+      />
+
+      {hiddenModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setHiddenModalOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mystic-cave-hidden-modal-title"
+            className="w-full max-w-sm rounded-xl border border-amber-600/80 bg-[#1a100c]/95 p-6 text-center shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
+          >
+            <p id="mystic-cave-hidden-modal-title" className="text-lg font-semibold text-amber-100">
+              HOLA
+            </p>
+            <button
+              type="button"
+              autoFocus
+              className="mt-6 cursor-pointer rounded-md border border-amber-500/80 bg-gradient-to-b from-amber-600 to-amber-800 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-amber-50 transition hover:from-amber-500 hover:to-amber-700"
+              onClick={() => setHiddenModalOpen(false)}
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

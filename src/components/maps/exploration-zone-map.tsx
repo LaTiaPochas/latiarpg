@@ -3,7 +3,14 @@
 import { Montserrat } from "next/font/google";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from "react";
 
 const mapFont = Montserrat({
   subsets: ["latin"],
@@ -18,6 +25,8 @@ export type ExplorationHotspot = {
   xPercent: number;
   yPercent: number;
   description: string;
+  /** Sin marcador visible; solo área clickeable con cursor pointer. */
+  hidden?: boolean;
 };
 
 type ExplorationZoneMapProps = {
@@ -31,6 +40,8 @@ type ExplorationZoneMapProps = {
   initialHotspotId?: string | null;
   /** Si devuelve `true`, no se navega al combate por defecto. */
   onIrAlla?: (hotspot: ExplorationHotspot) => boolean;
+  /** Si devuelve `true`, el clic queda manejado fuera (p. ej. modal en hotspot oculto). */
+  onHotspotClick?: (hotspot: ExplorationHotspot) => boolean;
 };
 
 export function ExplorationZoneMap({
@@ -41,8 +52,13 @@ export function ExplorationZoneMap({
   zoneCode,
   initialHotspotId = null,
   onIrAlla,
+  onHotspotClick,
 }: ExplorationZoneMapProps) {
   const router = useRouter();
+  const visibleHotspots = useMemo(
+    () => hotspots.filter((spot) => !spot.hidden),
+    [hotspots],
+  );
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapNaturalSize, setMapNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [mapFrame, setMapFrame] = useState<{ left: number; top: number; width: number; height: number } | null>(
@@ -51,21 +67,21 @@ export function ExplorationZoneMap({
 
   const requestedHotspot =
     typeof initialHotspotId === "string" && initialHotspotId.trim().length > 0
-      ? hotspots.find((spot) => spot.id === initialHotspotId.trim()) ?? null
+      ? visibleHotspots.find((spot) => spot.id === initialHotspotId.trim()) ?? null
       : null;
   const initialHotspot =
-    hotspots.length === 0
+    visibleHotspots.length === 0
       ? null
       : requestedHotspot && requestedHotspot.step <= currentCombatStep
         ? requestedHotspot
-        : hotspots.find((spot) => spot.step <= currentCombatStep) ?? hotspots[0];
+        : visibleHotspots.find((spot) => spot.step <= currentCombatStep) ?? visibleHotspots[0];
 
   const [selectedHotspotId, setSelectedHotspotId] = useState<string>(initialHotspot?.id ?? "");
 
   const selectedHotspot = useMemo(() => {
-    if (hotspots.length === 0) return null;
-    return hotspots.find((spot) => spot.id === selectedHotspotId) ?? hotspots[0];
-  }, [hotspots, selectedHotspotId]);
+    if (visibleHotspots.length === 0) return null;
+    return visibleHotspots.find((spot) => spot.id === selectedHotspotId) ?? visibleHotspots[0];
+  }, [visibleHotspots, selectedHotspotId]);
 
   const mapAspectRatio = mapNaturalSize
     ? `${mapNaturalSize.width} / ${mapNaturalSize.height}`
@@ -175,7 +191,8 @@ export function ExplorationZoneMap({
             }}
           />
           {hotspots.map((hotspot) => {
-            const isSelected = hotspot.id === selectedHotspot?.id;
+            const isHidden = Boolean(hotspot.hidden);
+            const isSelected = !isHidden && hotspot.id === selectedHotspot?.id;
             const isLocked = hotspot.step > currentCombatStep;
             const hotspotLeft = mapFrame
               ? mapFrame.left + mapFrame.width * (hotspot.xPercent / 100)
@@ -183,6 +200,36 @@ export function ExplorationZoneMap({
             const hotspotTop = mapFrame
               ? mapFrame.top + mapFrame.height * (hotspot.yPercent / 100)
               : 0;
+
+            const handleHotspotPress = (event: MouseEvent<HTMLButtonElement>) => {
+              event.stopPropagation();
+              if (onHotspotClick?.(hotspot)) return;
+              setSelectedHotspotId(hotspot.id);
+            };
+
+            if (isHidden) {
+              return (
+                <div
+                  key={hotspot.id}
+                  className="absolute z-[2]"
+                  style={{
+                    left: mapFrame ? `${hotspotLeft}px` : `${hotspot.xPercent}%`,
+                    top: mapFrame ? `${hotspotTop}px` : `${hotspot.yPercent}%`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    disabled={isLocked}
+                    onClick={handleHotspotPress}
+                    className={`absolute left-1/2 top-1/2 h-11 w-11 -translate-x-1/2 -translate-y-1/2 rounded-full border-0 bg-transparent lg:h-14 lg:w-14 ${
+                      isLocked ? "cursor-not-allowed" : "cursor-pointer"
+                    }`}
+                    aria-label={hotspot.label}
+                  />
+                </div>
+              );
+            }
+
             return (
               <div
                 key={hotspot.id}
@@ -198,10 +245,7 @@ export function ExplorationZoneMap({
                 <button
                   type="button"
                   disabled={isLocked}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedHotspotId(hotspot.id);
-                  }}
+                  onClick={handleHotspotPress}
                   className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 ${
                     isLocked
                       ? "h-4 w-4 cursor-not-allowed border-slate-600 bg-slate-700/80 shadow-[0_0_8px_rgba(51,65,85,0.8)] lg:h-5 lg:w-5"

@@ -13,6 +13,7 @@ import {
   type CombatDefeatLostItem,
 } from "@/components/combat/combat-encounter-shell";
 import {
+  isCombatEscapeDisabledZone,
   mapPathByZoneCode,
   normalizeZoneCodeKey,
   zoneLookupCodeCandidates,
@@ -21,6 +22,7 @@ import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/n
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 import { parseEnemySkillEffectJson } from "@/lib/enemy-skill-combat";
+import { parsePlayerSkillCooldownTurns } from "@/lib/player-skill-effect-combat";
 import { isAmmoConsumableEffect } from "@/lib/combat-ammo";
 import { persistCombatAmmoSpent, type CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
 
@@ -521,7 +523,7 @@ function mapUserCharacterSkillsRow(row: Record<string, unknown>): CombatPlayerSk
       name: firstNonEmptyString(ps.name) ?? "Habilidad",
       description: firstNonEmptyString(ps.description),
       manaCost: Math.max(0, num(ps.mana_cost, 0)),
-      cooldownTurns: Math.max(1, num(ps.cooldown_turns, 1)),
+      cooldownTurns: parsePlayerSkillCooldownTurns(ps.cooldown_turns, 0),
       target: typeof ps.target === "string" && ps.target.trim().length > 0 ? ps.target.trim() : "enemy_single",
       effect,
     },
@@ -1753,6 +1755,7 @@ export default async function CombatEncounterPage({
     hotspotId && mapBaseHref.startsWith("/")
       ? `${mapBaseHref}?hotspot=${encodeURIComponent(hotspotId)}`
       : mapBaseHref;
+  const escapeDisabled = isCombatEscapeDisabledZone(zoneForMapHref);
   const playerDisplayName =
     typeof userCharacter.character_name === "string" && userCharacter.character_name.trim().length > 0
       ? userCharacter.character_name.trim().toUpperCase()
@@ -2668,6 +2671,7 @@ export default async function CombatEncounterPage({
           : null
       }
       escapeHref={escapeToMapHref}
+      escapeDisabled={escapeDisabled}
       playerDisplayName={playerDisplayName}
       playerPortraitSrc={playerPortraitSrc}
       playerSpriteSrc={playerSpriteSrc}
