@@ -5,6 +5,10 @@ import { useState, useTransition } from "react";
 
 import { CaveEntranceDialogue } from "@/components/maps/cave-entrance-dialogue";
 import { ExplorationZoneMap, type ExplorationHotspot } from "@/components/maps/exploration-zone-map";
+import {
+  BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE,
+  DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
+} from "@/lib/daily-boss-combat";
 
 const MAP_SRC = "/img/resources/maps/map_hiddenforest_start.png";
 
@@ -71,6 +75,8 @@ type HiddenForestMapProps = {
   initialHotspotId?: string | null;
   caveEntranceDialogCompleted: boolean;
   onCompleteCaveEntranceDialog: () => Promise<void>;
+  dailyBossDefeatedToday?: boolean;
+  initialDailyBossBlockedMessage?: string | null;
 };
 
 export function HiddenForestMap({
@@ -79,6 +85,8 @@ export function HiddenForestMap({
   initialHotspotId = null,
   caveEntranceDialogCompleted,
   onCompleteCaveEntranceDialog,
+  dailyBossDefeatedToday = false,
+  initialDailyBossBlockedMessage = null,
 }: HiddenForestMapProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -104,6 +112,16 @@ export function HiddenForestMap({
           setCaveDialogueOpen(true);
           return true;
         }}
+        getIrAllaBlockedMessage={(hotspot) => {
+          if (
+            hotspot.id === BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE &&
+            dailyBossDefeatedToday
+          ) {
+            return DAILY_BOSS_ALREADY_DEFEATED_MESSAGE;
+          }
+          return null;
+        }}
+        initialDailyBossBlockedMessage={initialDailyBossBlockedMessage}
       />
       {caveDialogueOpen ? (
         <CaveEntranceDialogue

@@ -25,6 +25,11 @@ import { parseEnemySkillEffectJson } from "@/lib/enemy-skill-combat";
 import { parsePlayerSkillCooldownTurns } from "@/lib/player-skill-effect-combat";
 import { isAmmoConsumableEffect } from "@/lib/combat-ammo";
 import { persistCombatAmmoSpent, type CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
+import {
+  hasUserDefeatedDailyBossToday,
+  isDailyBossLimitedEncounterCode,
+  recordUserDailyBossDefeat,
+} from "@/lib/daily-boss-combat";
 
 const LEVEL_UP_WORLD_EVENT_ICON_SRC = "/img/resources/iconos/icon_lvlup.png";
 
@@ -951,6 +956,7 @@ export default async function CombatEncounterPage({
   if (encounterError || !encounter) {
     notFound();
   }
+
   const encounterRecommendedLevel = Math.max(
     1,
     Math.trunc(
@@ -980,6 +986,20 @@ export default async function CombatEncounterPage({
       combatProgressZoneCode = encounterZoneRow.code.trim();
     }
   }
+
+  if (
+    isDailyBossLimitedEncounterCode(code) &&
+    (await hasUserDefeatedDailyBossToday(supabase, user.id, code))
+  ) {
+    const returnHotspot = hotspotId || code;
+    const mapReturnPath =
+      mapPathByZoneCode(combatProgressZoneCode ?? zoneCode) ?? "/mystic-cave";
+    const separator = mapReturnPath.includes("?") ? "&" : "?";
+    redirect(
+      `${mapReturnPath}${separator}hotspot=${encodeURIComponent(returnHotspot)}&boss_daily=blocked`,
+    );
+  }
+
   const encounterCombatStepForProgress =
     typeof encounter.combat_step === "number" && Number.isFinite(encounter.combat_step)
       ? Math.max(0, Math.trunc(encounter.combat_step))
@@ -2459,6 +2479,10 @@ export default async function CombatEncounterPage({
           is_global_item: true,
         });
       }
+    }
+
+    if (isDailyBossLimitedEncounterCode(code)) {
+      await recordUserDailyBossDefeat(supabaseAction, actionUser.id, code);
     }
 
     const zoneProgressId = combatProgressZoneCode;

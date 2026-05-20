@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { HiddenForestMap } from "@/components/maps/hidden-forest-map";
 import { completeCaveEntranceDialog } from "@/app/(main)/bosque-inexplorado/actions";
+import {
+  BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE,
+  DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
+  hasUserDefeatedDailyBossToday,
+} from "@/lib/daily-boss-combat";
 import { HIDDEN_FOREST_ZONE_CODE } from "@/lib/game-zones";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
 type BosqueInexploradoPageProps = {
-  searchParams?: Promise<{ hotspot?: string }>;
+  searchParams?: Promise<{ hotspot?: string; boss_daily?: string }>;
 };
 
 export default async function BosqueInexploradoPage({ searchParams }: BosqueInexploradoPageProps) {
@@ -44,6 +49,16 @@ export default async function BosqueInexploradoPage({ searchParams }: BosqueInex
     .eq("user_id", user.id)
     .maybeSingle();
   const caveEntranceDialogCompleted = milestones?.cave_entrance_dialog === true;
+  const dailyBossDefeatedToday = await hasUserDefeatedDailyBossToday(
+    supabase,
+    user.id,
+    BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE,
+  );
+  const initialDailyBossBlockedMessage =
+    resolvedSearch?.boss_daily === "blocked" ||
+    (dailyBossDefeatedToday && hotspotQuery === BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE)
+      ? DAILY_BOSS_ALREADY_DEFEATED_MESSAGE
+      : null;
 
   return (
     <div
@@ -74,6 +89,8 @@ export default async function BosqueInexploradoPage({ searchParams }: BosqueInex
           initialHotspotId={hotspotQuery}
           caveEntranceDialogCompleted={caveEntranceDialogCompleted}
           onCompleteCaveEntranceDialog={completeCaveEntranceDialog}
+          dailyBossDefeatedToday={dailyBossDefeatedToday}
+          initialDailyBossBlockedMessage={initialDailyBossBlockedMessage}
         />
       </main>
     </div>
