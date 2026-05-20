@@ -8,6 +8,11 @@ import {
   MYSTIC_CAVE_PLACEHOLDER_DIALOGUES,
   mysticCaveDialoguePortraitAlt,
 } from "@/lib/mystic-cave-placeholders";
+import {
+  DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
+  hasUserDefeatedDailyBossToday,
+  MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE,
+} from "@/lib/daily-boss-combat";
 import { MYSTIC_CAVE_ZONE_CODE } from "@/lib/game-zones";
 import { getUserCombatStepForZone } from "@/lib/user-combat-progress";
 import { createClient } from "@/lib/supabase/server";
@@ -24,7 +29,7 @@ const pageFont = Montserrat({
 });
 
 type MysticCavePageProps = {
-  searchParams?: Promise<{ hotspot?: string }>;
+  searchParams?: Promise<{ hotspot?: string; boss_daily?: string }>;
 };
 
 export const metadata = {
@@ -58,6 +63,16 @@ export default async function MysticCavePage({ searchParams }: MysticCavePagePro
   }
 
   const currentCombatStep = await getUserCombatStepForZone(supabase, user.id, MYSTIC_CAVE_ZONE_CODE);
+  const dailyBossDefeatedToday = await hasUserDefeatedDailyBossToday(
+    supabase,
+    user.id,
+    MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE,
+  );
+  const initialDailyBossBlockedMessage =
+    resolvedSearch?.boss_daily === "blocked" ||
+    (dailyBossDefeatedToday && hotspotQuery === MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE)
+      ? DAILY_BOSS_ALREADY_DEFEATED_MESSAGE
+      : null;
 
   const { data: worldEvents } = await supabase
     .from("global_world_event_log")
@@ -128,6 +143,8 @@ export default async function MysticCavePage({ searchParams }: MysticCavePagePro
           zoneCode={MYSTIC_CAVE_ZONE_CODE}
           initialHotspotId={hotspotQuery}
           meloniFoundCave={milestones?.meloni_found_cave === true}
+          dailyBossDefeatedToday={dailyBossDefeatedToday}
+          initialDailyBossBlockedMessage={initialDailyBossBlockedMessage}
         />
 
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">

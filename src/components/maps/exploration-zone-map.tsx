@@ -12,6 +12,8 @@ import {
   type MouseEvent,
 } from "react";
 
+import { DailyBossBlockedModal } from "@/components/maps/daily-boss-blocked-modal";
+
 const mapFont = Montserrat({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
@@ -42,6 +44,10 @@ type ExplorationZoneMapProps = {
   onIrAlla?: (hotspot: ExplorationHotspot) => boolean;
   /** Si devuelve `true`, el clic queda manejado fuera (p. ej. modal en hotspot oculto). */
   onHotspotClick?: (hotspot: ExplorationHotspot) => boolean;
+  /** Si devuelve texto, «Ir alla» no navega y se abre un modal (p. ej. jefe diario ya derrotado). */
+  getIrAllaBlockedMessage?: (hotspot: ExplorationHotspot) => string | null;
+  /** Abre el modal al cargar (p. ej. redirect desde `/combate` con `boss_daily=blocked`). */
+  initialDailyBossBlockedMessage?: string | null;
 };
 
 export function ExplorationZoneMap({
@@ -53,8 +59,13 @@ export function ExplorationZoneMap({
   initialHotspotId = null,
   onIrAlla,
   onHotspotClick,
+  getIrAllaBlockedMessage,
+  initialDailyBossBlockedMessage = null,
 }: ExplorationZoneMapProps) {
   const router = useRouter();
+  const [dailyBossBlockedModalMessage, setDailyBossBlockedModalMessage] = useState<string | null>(
+    null,
+  );
   const visibleHotspots = useMemo(
     () => hotspots.filter((spot) => !spot.hidden),
     [hotspots],
@@ -91,6 +102,15 @@ export function ExplorationZoneMap({
     if (!initialHotspot?.id) return;
     setSelectedHotspotId(initialHotspot.id);
   }, [initialHotspot?.id]);
+
+  useEffect(() => {
+    if (
+      typeof initialDailyBossBlockedMessage === "string" &&
+      initialDailyBossBlockedMessage.trim().length > 0
+    ) {
+      setDailyBossBlockedModalMessage(initialDailyBossBlockedMessage.trim());
+    }
+  }, [initialDailyBossBlockedMessage]);
 
   useEffect(() => {
     if (!mapContainerRef.current || !mapNaturalSize) return;
@@ -133,6 +153,11 @@ export function ExplorationZoneMap({
 
   const handleIrAlla = () => {
     if (!selectedHotspot) return;
+    const blocked = getIrAllaBlockedMessage?.(selectedHotspot);
+    if (blocked) {
+      setDailyBossBlockedModalMessage(blocked);
+      return;
+    }
     if (onIrAlla?.(selectedHotspot)) return;
 
     const encounterCode = encodeURIComponent(selectedHotspot.id);
@@ -289,6 +314,13 @@ export function ExplorationZoneMap({
             </button>
           </div>
         </div>
+      ) : null}
+
+      {dailyBossBlockedModalMessage ? (
+        <DailyBossBlockedModal
+          message={dailyBossBlockedModalMessage}
+          onClose={() => setDailyBossBlockedModalMessage(null)}
+        />
       ) : null}
     </section>
   );

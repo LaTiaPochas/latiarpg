@@ -7,6 +7,10 @@ import { useRouter } from "next/navigation";
 
 import { completeMeloniFoundCave } from "@/app/(main)/mystic-cave/actions";
 import { ExplorationZoneMap, type ExplorationHotspot } from "@/components/maps/exploration-zone-map";
+import {
+  DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
+  MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE,
+} from "@/lib/daily-boss-combat";
 
 const ABANDONED_MINE_HOTSPOT_ID = "cave-node-5";
 const HIDDEN_HOTSPOT_ID = "cave-node-0";
@@ -140,6 +144,9 @@ type MysticCaveMapProps = {
   zoneCode: string;
   initialHotspotId?: string | null;
   meloniFoundCave?: boolean;
+  /** `true` si el PJ ya ganó hoy contra el jefe diario (`cave-node-9`). */
+  dailyBossDefeatedToday?: boolean;
+  initialDailyBossBlockedMessage?: string | null;
 };
 
 export function MysticCaveMap({
@@ -147,6 +154,8 @@ export function MysticCaveMap({
   zoneCode,
   initialHotspotId = null,
   meloniFoundCave = false,
+  dailyBossDefeatedToday = false,
+  initialDailyBossBlockedMessage = null,
 }: MysticCaveMapProps) {
   const router = useRouter();
   const [hiddenModalOpen, setHiddenModalOpen] = useState(false);
@@ -194,6 +203,16 @@ export function MysticCaveMap({
           router.push("/abandoned-coal-mine");
           return true;
         }}
+        getIrAllaBlockedMessage={(hotspot) => {
+          if (
+            hotspot.id === MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE &&
+            dailyBossDefeatedToday
+          ) {
+            return DAILY_BOSS_ALREADY_DEFEATED_MESSAGE;
+          }
+          return null;
+        }}
+        initialDailyBossBlockedMessage={initialDailyBossBlockedMessage}
       />
 
       {hiddenModalOpen ? (
