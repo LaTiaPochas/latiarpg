@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import type { GatherNearWoodsResult, NearWoodsGrantedItemView } from "@/app/(main)/near-woods/actions";
 
-/** Drops fijos (piedra se resuelve por ítem en BD, igual que herrería). */
+/** Drops fijos por resultado de minar (mismo id de piedra que herrería / altar). */
 const ABANDONED_MINE_DROP_ITEM_IDS: Record<string, string> = {
   potion: "77cc0fd9-3dff-4c10-b127-6b212d2bd9e1",
   medium_potion: "65130711-55e7-461a-a72a-ecc54b7c327f",
@@ -30,19 +30,6 @@ const RELAXING_WATER_GLOBAL_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
 
 /** Pico de Piedra — mismo que `abandoned-coal-mine/page.tsx`. */
 const STONE_PICKAXE_ITEM_ID = "817548a0-9037-4cd7-b03b-0b78ea34f340";
-
-type ServerSupabase = Awaited<ReturnType<typeof createClient>>;
-
-/** Misma búsqueda que la herrería: ítem “piedra” en BD. */
-async function resolveStoneItemId(supabase: ServerSupabase): Promise<string | null> {
-  const { data: stoneItem } = await supabase
-    .from("items")
-    .select("id")
-    .or("icon_path.ilike.%resource_rock%,name.ilike.%piedra%,name.ilike.%stone%")
-    .limit(1)
-    .maybeSingle();
-  return typeof stoneItem?.id === "string" ? stoneItem.id : null;
-}
 
 function mapItemsRowToGrantedView(data: unknown, grantedQuantity = 1): NearWoodsGrantedItemView | null {
   if (!data || typeof data !== "object") return null;
@@ -202,17 +189,9 @@ export async function mineAbandonedCoalMine(): Promise<MineAbandonedCoalMineResu
     };
   }
 
-  let itemId: string | null = null;
-  if (result === "piedra") {
-    itemId = await resolveStoneItemId(supabase);
-    if (!itemId) {
-      return { ok: false, error: "No se encontró el ítem piedra en la base de datos." };
-    }
-  } else {
-    itemId = ABANDONED_MINE_DROP_ITEM_IDS[result] ?? null;
-    if (!itemId) {
-      return { ok: false, error: "Resultado sin ítem configurado." };
-    }
+  const itemId = ABANDONED_MINE_DROP_ITEM_IDS[result] ?? null;
+  if (!itemId) {
+    return { ok: false, error: "Resultado sin ítem configurado." };
   }
 
   const grantQuantity = rollAbandonedMineGrantQuantity(result);

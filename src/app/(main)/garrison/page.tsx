@@ -19,6 +19,7 @@ type GarrisonQuoteOption = {
   faceSrc: string;
   speaker: string;
   text: string;
+  variant?: "default" | "golden";
 };
 
 const GARRISON_QUOTES: GarrisonQuoteOption[] = [
@@ -63,6 +64,24 @@ const GARRISON_QUOTES: GarrisonQuoteOption[] = [
     text: "Habría que ver si esos lobos son comestibles.",
   },
 ];
+
+const MELONI_GARRISON_QUOTE: GarrisonQuoteOption = {
+  faceSrc: "/img/resources/caracters_faces/pj_chane_rpg_face.png",
+  speaker: "Meloni",
+  text: "A Meloni le encantaban las galletas de la fortuna que comprabamos en el barrio chino.",
+  variant: "golden",
+};
+
+function pickRandomGarrisonQuote(
+  meloniFoundCave: boolean,
+  meloniGalletaGiven: boolean,
+): GarrisonQuoteOption {
+  const includeGoldenMeloniQuote = meloniFoundCave && !meloniGalletaGiven;
+  const pool = includeGoldenMeloniQuote
+    ? [...GARRISON_QUOTES, MELONI_GARRISON_QUOTE]
+    : GARRISON_QUOTES;
+  return pool[Math.floor(Math.random() * pool.length)]!;
+}
 
 function globalMilestoneLooksComplete(row: {
   is_completed: boolean | null;
@@ -145,7 +164,23 @@ export default async function GarrisonPage() {
     });
   const isSoulAltarCompleted = isSoulAltarCompletedByGlobalRow || areSoulAltarMaterialsCompleted;
   const showAdvancedHotspots = showWarehouseSprite && showRelaxingWatersSprite;
-  const randomQuote = GARRISON_QUOTES[Math.floor(Math.random() * GARRISON_QUOTES.length)];
+  const { data: userMilestones } = await supabase
+    .from("user_milestones")
+    .select("meloni_found_cave")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const meloniFoundCave = userMilestones?.meloni_found_cave === true;
+  const { data: meloniGalletaMilestone } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed")
+    .eq("title", "meloni_galleta_given")
+    .maybeSingle();
+  const meloniGalletaGiven =
+    typeof meloniGalletaMilestone?.title === "string" &&
+    meloniGalletaMilestone.title.trim().toLowerCase() === "meloni_galleta_given" &&
+    meloniGalletaMilestone.is_completed === true;
+  const randomQuote = pickRandomGarrisonQuote(meloniFoundCave, meloniGalletaGiven);
+  const isGoldenQuote = randomQuote.variant === "golden";
 
   return (
     <div
@@ -159,9 +194,19 @@ export default async function GarrisonPage() {
       <div className="absolute inset-0 bg-gradient-to-b from-slate-950/80 via-slate-900/70 to-black/90" />
       <main className="relative mx-auto w-full max-w-4xl">
         <div
-          className={`mb-3 flex items-start gap-3 rounded-lg border border-[#9f8352]/80 bg-[#d8c7a2]/92 p-1 lg:gap-4 lg:py-1 ${dialogueFont.className}`}
+          className={`mb-3 flex items-start gap-3 rounded-lg border p-1 lg:gap-4 lg:py-1 ${dialogueFont.className} ${
+            isGoldenQuote
+              ? "border-2 border-[#ffd700] bg-gradient-to-br from-[#fff176] via-[#ffc107] to-[#b8860b] shadow-[0_0_24px_rgba(255,215,0,0.75),0_0_48px_rgba(218,165,32,0.45),inset_0_2px_0_rgba(255,248,200,0.85)] ring-2 ring-[#fff59d]/70"
+              : "border-[#9f8352]/80 bg-[#d8c7a2]/92"
+          }`}
         >
-          <div className="shrink-0 rounded-md border border-amber-900/70 bg-[#24130e] p-0">
+          <div
+            className={`shrink-0 rounded-md border p-0 ${
+              isGoldenQuote
+                ? "border-2 border-[#ffeb3b] bg-gradient-to-b from-[#5c4a00] to-[#1a1400] shadow-[0_0_16px_rgba(255,215,0,0.65)]"
+                : "border-amber-900/70 bg-[#24130e]"
+            }`}
+          >
             <Image
               src={randomQuote.faceSrc}
               alt={randomQuote.speaker}
@@ -172,7 +217,13 @@ export default async function GarrisonPage() {
             />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs leading-relaxed text-slate-900/95 lg:text-sm lg:my-1">
+            <p
+              className={`text-xs leading-relaxed lg:text-sm lg:my-1 ${
+                isGoldenQuote
+                  ? "font-semibold text-[#3d2600] drop-shadow-[0_1px_0_rgba(255,255,255,0.35)]"
+                  : "text-slate-900/95"
+              }`}
+            >
               <i>{randomQuote.text}</i>
             </p>
           </div>
@@ -195,6 +246,7 @@ export default async function GarrisonPage() {
             showWarehouseSprite={showWarehouseSprite}
             showRelaxingWatersSprite={showRelaxingWatersSprite}
             showAdvancedHotspots={showAdvancedHotspots}
+            showMeloniSprite={meloniGalletaGiven}
             isCraftingBenchCompleted={isCraftingBenchCompleted}
             isSoulAltarCompleted={isSoulAltarCompleted}
           />

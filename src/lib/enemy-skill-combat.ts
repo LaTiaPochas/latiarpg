@@ -85,6 +85,8 @@ export function rollEnemySkillRawDamage(
 /** Destino de un efecto de skill enemiga (`target` en `effect_json`). */
 export type EnemySkillEffectTarget = "player" | "caster" | "all_enemies" | "all";
 
+export type EnemyHealBasis = "flat" | "damage_dealt_to_player";
+
 export function parseEnemySkillTarget(
   raw: unknown,
   fallback: EnemySkillEffectTarget,
@@ -259,6 +261,8 @@ export type ParsedEnemySkillEffect =
       target: EnemySkillEffectTarget;
       min: number;
       max: number;
+      /** `flat` = tira min–max; `damage_dealt_to_player` = cura lo infligido al PJ en el mismo cast (composite). */
+      healBasis: EnemyHealBasis;
       chance: number;
       useWhen: EnemySkillUseWhen | null;
       logDescription: string | null;
@@ -660,11 +664,25 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
     const target = parseEnemySkillTarget(effect.target, "caster");
     const min = Math.max(0, num(effect.min, 0));
     const max = Math.max(min, num(effect.max, min));
+    const healBasisRaw = effect.heal_basis ?? effect.healBasis;
+    let healBasis: EnemyHealBasis = "flat";
+    if (typeof healBasisRaw === "string") {
+      const h = healBasisRaw.trim().toLowerCase().replace(/-/g, "_");
+      if (
+        h === "damage_dealt" ||
+        h === "damage_dealt_to_player" ||
+        h === "last_damage" ||
+        h === "last_damage_to_player"
+      ) {
+        healBasis = "damage_dealt_to_player";
+      }
+    }
     return {
       mode: "heal",
       target,
       min,
       max,
+      healBasis,
       chance,
       useWhen,
       logDescription: extractLogDescription(effect),

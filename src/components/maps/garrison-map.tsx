@@ -56,6 +56,14 @@ const HOTSPOTS: Hotspot[] = [
     yPercent: 87,
     description: "Una piedra misteriosa, con gran energía mágica.",
   },
+  {
+    id: "meloni",
+    label: "Meloni's",
+    xPercent: 95,
+    yPercent: 55,
+    description:
+      "Meloni se instaló en la base. Parece que tiene un propósito muy particular. Chane le enseño bien.",
+  },
   /*
   {
     id: "tasty-meals",
@@ -113,12 +121,24 @@ const MAP_SPRITES: MapSprite[] = [
     completedAlt: "Altar de almas",
     completedClassName: "w-[84px] sm:w-[112px] lg:w-[160px]",
   },
+  {
+    id: "meloni-sprite",
+    hotspotId: "meloni",
+    src: "/img/resources/characters/pj_meloni.png",
+    alt: "Meloni",
+    width: 170,
+    height: 170,
+    xPercent: 95,
+    yPercent: 54,
+    className: "w-[40px] sm:w-[60px] lg:w-[60px]",
+  },
 ];
 
 type GarrisonMapProps = {
   showWarehouseSprite?: boolean;
   showRelaxingWatersSprite?: boolean;
   showAdvancedHotspots?: boolean;
+  showMeloniSprite?: boolean;
   isCraftingBenchCompleted?: boolean;
   isSoulAltarCompleted?: boolean;
 };
@@ -127,6 +147,7 @@ export function GarrisonMap({
   showWarehouseSprite = false,
   showRelaxingWatersSprite = false,
   showAdvancedHotspots = false,
+  showMeloniSprite = false,
   isCraftingBenchCompleted = false,
   isSoulAltarCompleted = false,
 }: GarrisonMapProps) {
@@ -138,12 +159,14 @@ export function GarrisonMap({
         spot.id === "soul-altar" && isSoulAltarCompleted
           ? { ...spot, label: "Altar de Almas" }
           : spot,
-      ).filter(
-        (spot) =>
+      ).filter((spot) => {
+        if (spot.id === "meloni") return showMeloniSprite;
+        return (
           showAdvancedHotspots ||
-          (spot.id !== "crafting-table" && spot.id !== "lesser-shop"),
-      ),
-    [isSoulAltarCompleted, showAdvancedHotspots],
+          (spot.id !== "crafting-table" && spot.id !== "lesser-shop")
+        );
+      }),
+    [isSoulAltarCompleted, showAdvancedHotspots, showMeloniSprite],
   );
   const selectedHotspot = useMemo(
     () =>
@@ -161,9 +184,10 @@ export function GarrisonMap({
         (sprite) =>
           (sprite.id !== "warehouse-spot-sprite" || showWarehouseSprite) &&
           (sprite.id !== "relaxing-waters-tent-sprite" || showRelaxingWatersSprite) &&
-          (sprite.id !== "crafting-table-sprite" || showAdvancedHotspots),
+          (sprite.id !== "crafting-table-sprite" || showAdvancedHotspots) &&
+          (sprite.id !== "meloni-sprite" || showMeloniSprite),
       ),
-    [showAdvancedHotspots, showRelaxingWatersSprite, showWarehouseSprite],
+    [showAdvancedHotspots, showMeloniSprite, showRelaxingWatersSprite, showWarehouseSprite],
   );
 
   return (
@@ -215,6 +239,9 @@ export function GarrisonMap({
                 ? sprite.completedAlt
                 : sprite.alt;
           const defaultSpriteWidthClass = "w-[70px] sm:w-[110px] lg:w-[130px]";
+          const spriteWidthClass = isCraftingCompleted
+            ? (sprite.completedClassName ?? sprite.className ?? defaultSpriteWidthClass)
+            : (sprite.className ?? defaultSpriteWidthClass);
           return (
           <div
             key={sprite.id}
@@ -224,35 +251,15 @@ export function GarrisonMap({
               top: `${sprite.yPercent}%`,
             }}
           >
-            {isSoulAltarSpriteCompleted && sprite.completedSrc ? (
-              <div
-                className={
-                  sprite.completedClassName ??
-                  sprite.className ??
-                  defaultSpriteWidthClass
-                }
-              >
-                <Image
-                  src={imageSrc}
-                  alt={imageAlt}
-                  width={sprite.width}
-                  height={sprite.height}
-                  className="h-auto w-full max-w-full object-contain"
-                />
-              </div>
-            ) : (
+            <div className={spriteWidthClass}>
               <Image
                 src={imageSrc}
                 alt={imageAlt}
                 width={sprite.width}
                 height={sprite.height}
-                className={`h-auto object-contain ${
-                  isCraftingCompleted
-                    ? (sprite.completedClassName ?? sprite.className ?? defaultSpriteWidthClass)
-                    : (sprite.className ?? defaultSpriteWidthClass)
-                }`}
+                className="h-auto w-full max-w-full object-contain"
               />
-            )}
+            </div>
           </div>
           );
         })}
@@ -299,6 +306,7 @@ export function GarrisonMap({
           <p className="flex-1 text-xs text-slate-800 lg:text-sm">{selectedHotspot.description}</p>
           <button
             type="button"
+            disabled={selectedHotspot.id === "meloni"}
             onClick={() => {
               if (selectedHotspot.id === "warehouse-spot") {
                 router.push("/warehouse");
@@ -314,6 +322,9 @@ export function GarrisonMap({
               }
               if (selectedHotspot.id === "soul-altar") {
                 router.push("/soul-altar");
+                return;
+              }
+              if (selectedHotspot.id === "meloni") {
                 return;
               }
               router.push(`/?destino=${encodeURIComponent(selectedHotspot.id)}`);

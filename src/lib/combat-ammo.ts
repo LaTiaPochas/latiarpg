@@ -14,10 +14,20 @@ export const DEFAULT_COMBAT_AMMO_ATTACK_FAMILY = "perforante";
 /** Mitigación por defecto de la munición básica (armor del enemigo). */
 export const DEFAULT_COMBAT_AMMO_ATTACK_TYPE: AmmoAttackType = "physical";
 
+/** Sinónimos históricos → clave canónica en `DEFAULT_COMBAT_AMMO_BY_KIND`. */
+const CANONICAL_AMMO_KIND_ALIASES: Record<string, string> = {
+  crossbow: "bolt",
+};
+
+function canonicalAmmoKind(kind: string): string {
+  const normalized = kind.trim().toLowerCase();
+  return CANONICAL_AMMO_KIND_ALIASES[normalized] ?? normalized;
+}
+
 /** IDs negativos: munición básica de combate (no está en inventario, no se persiste al gastar). */
 const DEFAULT_COMBAT_AMMO_INVENTORY_ID = {
   arrow: -1,
-  crossbow: -2,
+  bolt: -2,
 } as const;
 
 const DEFAULT_COMBAT_AMMO_BY_KIND: Record<
@@ -42,13 +52,13 @@ const DEFAULT_COMBAT_AMMO_BY_KIND: Record<
       attack_type: DEFAULT_COMBAT_AMMO_ATTACK_TYPE,
     },
   },
-  crossbow: {
-    inventoryId: DEFAULT_COMBAT_AMMO_INVENTORY_ID.crossbow,
+  bolt: {
+    inventoryId: DEFAULT_COMBAT_AMMO_INVENTORY_ID.bolt,
     itemId: "__combat_default_wooden_bolt__",
     name: "Birote de Madera",
     effect: {
       kind: "ammo",
-      ammo_kind: "crossbow",
+      ammo_kind: "bolt",
       damage_min: 0,
       damage_max: 0,
       attack_family: DEFAULT_COMBAT_AMMO_ATTACK_FAMILY,
@@ -68,7 +78,7 @@ export type CombatAmmoMenuEntry = {
 };
 
 function normalizeAmmoKindKey(kind: string): string {
-  return kind.trim().toLowerCase();
+  return canonicalAmmoKind(kind);
 }
 
 export function isDefaultCombatAmmoInventoryId(inventoryId: number): boolean {
@@ -124,7 +134,9 @@ export function isAmmoCompatibleWithWeapon(
   if (!weaponRequiresAmmo(weaponAmmoKind)) return false;
   const parsed = parseAmmoEffect(effect);
   if (!parsed) return false;
-  return parsed.ammoKind === weaponAmmoKind!.trim();
+  return (
+    canonicalAmmoKind(parsed.ammoKind) === canonicalAmmoKind(weaponAmmoKind!)
+  );
 }
 
 export function parseAmmoEffect(effect: Record<string, unknown> | null): ParsedAmmoEffect | null {
