@@ -13,6 +13,8 @@ import { SoulAltarGloballyCompletedPanel } from "./soul-altar-globally-completed
 import { SoulAltarScene } from "./soul-altar-scene";
 
 const STONE_FALLBACK_ICON = "/img/resources/items/resource_rock.png";
+/** Mismo ítem que herrería y mina abandonada. */
+const STONE_ITEM_ID = "e2b70f4d-19d5-4406-bcd9-23c8820c1505";
 const GOLD_ITEM_ID = "8438bdcd-b4b6-412c-8a54-0dcdb6636289";
 const GOLD_FALLBACK_ICON = "/img/resources/items/resource_gold.png";
 const SOUL_FALLBACK_ICON = "/img/resources/items/resource_soul_fragment.png";
@@ -102,13 +104,15 @@ function milestoneProgress(
 
 async function resolveSoulAltarMaterialItemId(kind: SoulAltarMaterialKind): Promise<string | null> {
   if (kind === "gold") return GOLD_ITEM_ID;
+  if (kind === "stone") return STONE_ITEM_ID;
 
   const supabase = await createClient();
-  const query =
-    kind === "stone"
-      ? "icon_path.ilike.%resource_rock%,name.ilike.%piedra%,name.ilike.%stone%"
-      : "icon_path.ilike.%resource_soul_fragment%,name.ilike.%soul%,name.ilike.%alma%";
-  const { data: item } = await supabase.from("items").select("id").or(query).limit(1).maybeSingle();
+  const { data: item } = await supabase
+    .from("items")
+    .select("id")
+    .or("icon_path.ilike.%resource_soul_fragment%,name.ilike.%soul%,name.ilike.%alma%")
+    .limit(1)
+    .maybeSingle();
   return typeof item?.id === "string" ? item.id : null;
 }
 
@@ -305,9 +309,8 @@ export default async function SoulAltarPage() {
     .in("title", Object.values(SOUL_ALTAR_MATERIAL_TITLES));
   const { data: stoneItem } = await supabase
     .from("items")
-    .select("id, icon_path")
-    .or("icon_path.ilike.%resource_rock%,name.ilike.%piedra%,name.ilike.%stone%")
-    .limit(1)
+    .select("icon_path")
+    .eq("id", STONE_ITEM_ID)
     .maybeSingle();
   const { data: goldItem } = await supabase
     .from("items")
@@ -320,7 +323,7 @@ export default async function SoulAltarPage() {
     .or("icon_path.ilike.%resource_soul_fragment%,name.ilike.%soul%,name.ilike.%alma%")
     .limit(1)
     .maybeSingle();
-  const stoneItemId = typeof stoneItem?.id === "string" ? stoneItem.id : null;
+  const stoneItemId = STONE_ITEM_ID;
   const goldItemId = typeof goldItem?.id === "string" ? goldItem.id : GOLD_ITEM_ID;
   const soulItemId = typeof soulItem?.id === "string" ? soulItem.id : null;
   const materialItemIds = Array.from(
