@@ -1965,7 +1965,9 @@ function CombatHudStateIconStrip({
               event.stopPropagation();
               setPinnedTooltipKey((prev) => (prev === icon.key ? null : icon.key));
             }}
-            className="group relative z-20 h-6 w-6 shrink-0 cursor-help overflow-visible rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
+            className={`group relative z-20 h-6 w-6 shrink-0 overflow-visible rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7 ${
+              tooltip ? "cursor-pointer" : "cursor-default"
+            }`}
           >
             {tooltip ? (
               <span
