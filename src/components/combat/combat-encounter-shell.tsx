@@ -4171,8 +4171,9 @@ export function CombatEncounterShell({
 
     const acted = new Set(actedThisRoundRef.current);
     acted.add(actedId);
-    const alive = combatants.filter((c) => c.alive).map((c) => c.id);
-    if (alive.length > 0 && alive.every((id) => acted.has(id))) {
+    /** Misma regla que ATB (`combat-atb.ts`): speed ≤ 0 no actúa ni bloquea el cierre de ronda. */
+    const aliveCanAct = combatants.filter((c) => c.alive && c.speed > 0).map((c) => c.id);
+    if (aliveCanAct.length > 0 && aliveCanAct.every((id) => acted.has(id))) {
       actedThisRoundRef.current = new Set();
       setTurn((t) => t + 1);
     } else {
