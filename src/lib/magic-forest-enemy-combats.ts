@@ -10,7 +10,7 @@ export type MagicForestEnemyCombatEntry = {
 export const MAGIC_FOREST_ENEMY_COMBAT_WEIGHTS: MagicForestEnemyCombatEntry[] = [
   { combatCode: "magic-forest", chance: 0.30 },
   { combatCode: "magic-forest2", chance: 0.18 },
-  { combatCode: "magic-forest3", chance: 0.7 },
+  { combatCode: "magic-forest3", chance: 0.07 },
   { combatCode: "magic-forest4", chance: 0.15 },
   { combatCode: "magic-forest5", chance: 0.15 },
   { combatCode: "magic-forest6", chance: 0.15 },
