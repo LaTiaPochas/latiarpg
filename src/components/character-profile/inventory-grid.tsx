@@ -22,10 +22,10 @@ import {
   equipInventoryItem,
 } from "@/app/(main)/character_profile/actions";
 import {
-  formatInstanceStatRollTooltipLine,
+  collectInstanceStatTooltipRollLines,
   formatWeaponAttackTypeLabel,
+  instanceStatRollTooltipLineClassName,
   inventoryTooltipSubtitleUnderName,
-  isInstanceStatWeakTooltipKey,
   type EquipmentInstanceTooltip,
   type WeaponInstanceTooltip,
 } from "@/components/character-profile/inventory-types";
@@ -35,6 +35,7 @@ import {
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
+import { formatPlayerSkillCooldownLabel, sumSelfBuffScalingTotals } from "@/lib/player-skill-effect-combat";
 
 type InventoryItem = {
   id: number;
@@ -82,6 +83,7 @@ type AbilityStatSnapshot = {
   dex: number;
   int: number;
   wis: number;
+  level: number;
   /** Base de perfil (arma equipada); sin buffs de combate. */
   weaponDamageMin: number;
   weaponDamageMax: number;
@@ -255,6 +257,9 @@ function abilityScalingStatValue(stat: string, stats: AbilityStatSnapshot): numb
   if (stat === "DEX") return stats.dex;
   if (stat === "INT") return stats.int;
   if (stat === "WIS") return stats.wis;
+  if (stat === "LEVEL" || stat === "LV" || stat === "NIVEL") {
+    return Math.max(1, Math.floor(stats.level));
+  }
   if (stat === "ATTACK_DAMAGE" || stat === "WEAPON_DAMAGE") {
     const wmin = Math.max(1, Math.floor(stats.weaponDamageMin));
     const wmax = Math.max(wmin, Math.floor(stats.weaponDamageMax));
@@ -283,6 +288,35 @@ function abilityScalingBonus(scaling: unknown, stats: AbilityStatSnapshot): numb
   if (typeof scaling === "object") return abilityScalingEntryBonus(scaling, stats);
   return 0;
 }
+function abilityStatGetterFromSnapshot(stats: AbilityStatSnapshot) {
+  return (key: string) => abilityScalingStatValue(key.trim().toUpperCase(), stats);
+}
+
+function abilitySelfBuffTotalAmount(
+  effect: Record<string, unknown>,
+  stats: AbilityStatSnapshot,
+): number {
+  const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  if (typeRaw !== "buff") return 0;
+  const targetRaw = typeof effect.target === "string" ? effect.target.trim().toLowerCase() : "";
+  if (targetRaw !== "self" && targetRaw !== "player") return 0;
+  return Math.trunc(sumSelfBuffScalingTotals(effect.scaling, abilityStatGetterFromSnapshot(stats)));
+}
+
+function formatAbilityDescriptionText(
+  description: string,
+  effect: Record<string, unknown>,
+  stats: AbilityStatSnapshot,
+  getStat: ReturnType<typeof abilityTooltipStatGetterFromSheet>,
+): string {
+  let text = description;
+  const buffAmount = abilitySelfBuffTotalAmount(effect, stats);
+  if (buffAmount > 0 && text.includes("{amount}")) {
+    text = text.replaceAll("{amount}", String(buffAmount));
+  }
+  return formatAbilityTooltipStatExpressions(text, getStat);
+}
+
 function abilityDamageRange(
   effect: Record<string, unknown>,
   stats: AbilityStatSnapshot,
@@ -1364,7 +1398,7 @@ export function InventoryGrid({
                             <span>{ability.manaCost} MP</span>
                             <span className="inline-flex items-center gap-1">
                               <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
-                              CD {ability.cooldownTurns}
+                              {formatPlayerSkillCooldownLabel(ability.cooldownTurns)}
                             </span>
                           </div>
                         </div>
@@ -1389,7 +1423,7 @@ export function InventoryGrid({
                           </p>
                           <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
                             <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
-                            CD {ability.cooldownTurns}
+                            {formatPlayerSkillCooldownLabel(ability.cooldownTurns)}
                           </span>
                         </div>
                         {dmg ? (
@@ -1409,7 +1443,12 @@ export function InventoryGrid({
                           </>
                         ) : null}
                         <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                          {formatAbilityTooltipStatExpressions(ability.description, abilityTooltipGetStat)}
+                          {formatAbilityDescriptionText(
+                            ability.description,
+                            ability.effect,
+                            abilityStats,
+                            abilityTooltipGetStat,
+                          )}
                         </p>
                       </div>
                       {isMobileTooltipOpen &&
@@ -1445,7 +1484,7 @@ export function InventoryGrid({
                                 </p>
                                 <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300/90">
                                   <SkillCooldownClockIcon className="h-3 w-3 shrink-0 opacity-95" />
-                                  CD {ability.cooldownTurns}
+                                  {formatPlayerSkillCooldownLabel(ability.cooldownTurns)}
                                 </span>
                               </div>
                               {dmg ? (
@@ -1465,7 +1504,12 @@ export function InventoryGrid({
                                 </>
                               ) : null}
                               <p className="mt-1 text-xs leading-relaxed text-amber-100/75">
-                                {formatAbilityTooltipStatExpressions(ability.description, abilityTooltipGetStat)}
+                                {formatAbilityDescriptionText(
+                                  ability.description,
+                                  ability.effect,
+                                  abilityStats,
+                                  abilityTooltipGetStat,
+                                )}
                               </p>
                             </div>,
                             document.body,
@@ -1564,24 +1608,20 @@ export function InventoryGrid({
                           </p>
                         </>
                       ) : null}
-                      {(
-                        [
-                          [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
-                          [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
-                          [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
-                          [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
-                          [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
-                        ] as const
-                      )
-                        .filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]))
-                        .map(([statKey, line], index) => (
+                      {collectInstanceStatTooltipRollLines(roll).map(
+                        ({ statKey, valueFlat, valuePct, line }, index) => (
                           <p
                             key={`${line}-${index}`}
-                            className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                            className={instanceStatRollTooltipLineClassName(
+                              statKey,
+                              valueFlat,
+                              valuePct,
+                            )}
                           >
                             {line}
                           </p>
-                        ))}
+                        ),
+                      )}
                     </div>
                   );
                 })()}

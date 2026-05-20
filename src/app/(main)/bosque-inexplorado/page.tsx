@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { HiddenForestMap } from "@/components/maps/hidden-forest-map";
+import { completeCaveEntranceDialog } from "@/app/(main)/bosque-inexplorado/actions";
 import { HIDDEN_FOREST_ZONE_CODE } from "@/lib/game-zones";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -37,6 +38,13 @@ export default async function BosqueInexploradoPage({ searchParams }: BosqueInex
       ? progressRow.combat_step
       : 1;
 
+  const { data: milestones } = await supabase
+    .from("user_milestones")
+    .select("cave_entrance_dialog")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const caveEntranceDialogCompleted = milestones?.cave_entrance_dialog === true;
+
   return (
     <div
       className="relative min-h-[calc(100dvh-3.5rem)] overflow-hidden bg-slate-950 px-4 pb-8 pt-4 text-amber-50 lg:px-6 lg:pt-6"
@@ -64,6 +72,8 @@ export default async function BosqueInexploradoPage({ searchParams }: BosqueInex
           currentCombatStep={currentCombatStep}
           zoneCode={HIDDEN_FOREST_ZONE_CODE}
           initialHotspotId={hotspotQuery}
+          caveEntranceDialogCompleted={caveEntranceDialogCompleted}
+          onCompleteCaveEntranceDialog={completeCaveEntranceDialog}
         />
       </main>
     </div>

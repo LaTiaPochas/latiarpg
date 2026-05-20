@@ -11,8 +11,86 @@ import {
   formatAbilityTooltipStatExpressions,
   formatAbilityTooltipTotalDamageRange,
 } from "@/lib/ability-tooltip-description";
+import type {
+  EnemyCombatStatBonuses,
+  EnemySkillEffectTarget,
+  EnemyStatBuffPart,
+  ParsedEnemySkillEffect,
+} from "@/lib/enemy-skill-combat";
+import {
+  emptyEnemyCombatStatBonuses,
+  enemySkillMatchesUseWhen,
+  parsedEnemySkillChance,
+  parsedEnemySkillUseWhen,
+  orderCompositeStepsForExecution,
+  resolveEnemySkillLogDescription,
+  rollEnemySkillRawDamage,
+  mergeEnemyStatBuffParts,
+  stackEnemyTimedStatBuffs,
+  sumEnemyTimedStatBonuses,
+} from "@/lib/enemy-skill-combat";
+import {
+  type ActiveCombatCondition,
+  evaluateSkipTurnConditionsAtTurnStart,
+  getCombatConditionDefinition,
+  resolveActiveCombatConditionIconSrc,
+  targetHasSkipTurnCondition,
+} from "@/lib/combat-conditions";
+import {
+  createCombatDebugLogger,
+  isCombatDebugEnabled,
+  type CombatDebugLogger,
+} from "@/lib/combat-debug";
+import {
+  expandPlayerSkillEffectSteps,
+  getPlayerStatValueForConditionResist,
+  getStatValueForConditionResist,
+  formatPlayerSkillCooldownText,
+  parsePlayerSkillCooldownTurns,
+  parsePlayerSkillEffectTarget,
+  playerSkillStepsNeedCompositeHandler,
+  rollConditionResisted,
+  sumSelfBuffScalingTotals,
+  type ParsedPlayerConditionDebuff,
+  type PlayerSkillEffectTarget,
+} from "@/lib/player-skill-effect-combat";
+import {
+  createDefaultCombatAmmoEntry,
+  formatAmmoMenuButtonLabel,
+  isAmmoCompatibleWithWeapon,
+  isAmmoConsumableEffect,
+  parseAmmoEffect,
+  resolveAmmoAttackFamilyForHit,
+  resolveAmmoAttackTypeForHit,
+  rollAmmoDamage,
+  weaponRequiresAmmo,
+  type AmmoAttackType,
+  type CombatAmmoMenuEntry,
+} from "@/lib/combat-ammo";
+import {
+  collectResistWeakIconSrcsForEnemyTags,
+  getCombatResistWeakIconSrc,
+  preloadCombatResistWeakIcons,
+  resolveCombatStateIconSrcs,
+} from "@/lib/combat-resist-weak-icons";
+import {
+  advanceAtbAfterAction,
+  createInitialAtbGauges,
+  predictAtbTimeline,
+  pruneAtbGaugesForCombatants,
+  resolveNextAtbActor,
+  type AtbCombatant,
+  type AtbGaugeMap,
+} from "@/lib/combat-atb";
 import { normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
-import { formatInstanceStatRollTooltipLine, isInstanceStatWeakTooltipKey } from "@/components/character-profile/inventory-types";
+import {
+  CombatAtbTimeline,
+  type CombatAtbTimelineEntry,
+} from "@/components/combat/combat-atb-timeline";
+import {
+  collectInstanceStatTooltipRollLines,
+  instanceStatRollTooltipLineClassName,
+} from "@/components/character-profile/inventory-types";
 import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 
 const BG_INTRO_FOREST = "/img/resources/background/bg_intro_forest.png";
@@ -21,9 +99,10 @@ const PJ_FEDE_RPG_FIGHT_STICK =
 const PJ_FEDE_FACE_COMBAT =
   "/img/resources/caracters_faces/pj_fede_rpg_face_fight.png";
 
-const MAX_ENEMIES_ON_FIELD = 3;
+const MAX_ENEMIES_ON_FIELD = 4;
 const ACTION_DELAY_MS = 1000;
 const FIRST_ACTION_DELAY_MS = 3000;
+
 /** Igual que tutorial: deja terminar la animación de barra HP antes del modal de derrota. */
 const DEFEAT_MODAL_DELAY_MS = 300;
 /** Espera breve tras eliminar al último enemigo antes de abrir el modal de victoria. */
@@ -165,26 +244,47 @@ type PlayerEnemyTimedEffect = {
   dotEffectJson: Record<string, unknown> | null;
 };
 
+/** Modificadores temporales que un enemigo aplica al PJ (elementos en resistencia / debilidad). */
+type EnemyAppliedPlayerTimedModifier = {
+  id: string;
+  remainingTurns: number;
+  lastTickTurn: number;
+  sourceSkillName: string;
+  stateIcons: string[];
+  extraWeaknessTags: string[];
+  extraResistanceTags: string[];
+};
+
+/** Buffs/debuffs temporales en el propio enemigo (caster). */
+type EnemySelfTimedModifier = {
+  id: string;
+  enemyId: string;
+  remainingTurns: number;
+  lastTickTurn: number;
+  skillName: string;
+  stateIcons: string[];
+  resistanceTags: string[];
+  weaknessTags: string[];
+};
+
+/** Buff de stats temporales en el enemigo (`type: buff`, `modifier.kind: buff`). */
+type EnemyTimedStatBuff = {
+  id: string;
+  enemyId: string;
+  parts: EnemyStatBuffPart[];
+  remainingTurns: number;
+  lastTickTurn: number;
+  skillName: string;
+  stateIcons: string[];
+};
+
 export type CombatEncounterEnemySkill = {
   id: string;
   name: string;
   description: string | null;
   cooldownTurns: number;
   manaCost: number;
-  effect: {
-    type: "damage";
-    target: "player";
-    min: number;
-    max: number;
-    /** Mitigación vs armor (physical/neutral/buff) o MR (magical) del PJ. */
-    subtype: PlayerSkillEffectSubtype;
-    /** `damage_type`/`damage_types` del JSON original, normalizado como etiquetas. */
-    damageTypes?: string[];
-    /** `state_icon` del JSON original, reservado para estados visuales futuros. */
-    stateIcon?: string | null;
-    /** Probabilidad [0..1] de lanzar la skill cuando está disponible. */
-    chance: number;
-  };
+  parsedEffect: ParsedEnemySkillEffect;
 };
 
 /** Skill del PJ aprendido (`user_character_skills`) + datos de `player_skills` para combate. */
@@ -487,18 +587,25 @@ function formatEnemySkillCombatLogDescription(
   damageDealt: number,
   attackerEnemyName: string,
   damageTypes: string[] = [],
+  targetName = "",
 ): string {
   const s = String(Math.max(0, Math.trunc(damageDealt)));
   const enemyLabel =
     typeof attackerEnemyName === "string" && attackerEnemyName.trim().length > 0
       ? attackerEnemyName.trim()
       : "";
+  const targetLabel =
+    typeof targetName === "string" && targetName.trim().length > 0
+      ? targetName.trim()
+      : enemyLabel;
   const damageTypeLabel = damageTypes.join(", ");
   return template
     .replaceAll("{daño}", s)
     .replaceAll("{dano}", s)
     .replaceAll("{damage}", s)
     .replaceAll("{enemigo}", enemyLabel)
+    .replaceAll("{objetivo}", targetLabel)
+    .replaceAll("{target}", targetLabel)
     .replaceAll("{damage_type}", damageTypeLabel)
     .replaceAll("{damage_types}", damageTypeLabel);
 }
@@ -550,6 +657,71 @@ function buffEffectTargetIsSelf(effect: Record<string, unknown>): boolean {
 function isPlayerSelfBuffEffect(effect: Record<string, unknown>): boolean {
   const t = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
   return t === "buff" && buffEffectTargetIsSelf(effect);
+}
+
+function isPlayerConditionDebuffEffect(effect: Record<string, unknown>): boolean {
+  const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  if (typeRaw !== "debuff") return false;
+  const modRaw = effect.modifier;
+  if (!modRaw || typeof modRaw !== "object" || Array.isArray(modRaw)) return false;
+  const kindRaw = (modRaw as Record<string, unknown>).kind ?? (modRaw as Record<string, unknown>).modifier_kind;
+  const kind =
+    typeof kindRaw === "string" ? kindRaw.trim().toLowerCase().replace(/-/g, "_") : "";
+  return kind === "condition";
+}
+
+/** Debuff/buff de stats temporales sobre enemigo(s); distinto de `modifier.kind: condition` (sleep, stun, etc.). */
+function isPlayerEnemyTimedStatEffect(effect: Record<string, unknown>): boolean {
+  const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  if (typeRaw !== "buff" && typeRaw !== "debuff") return false;
+  if (buffEffectTargetIsSelf(effect)) return false;
+  if (isPlayerConditionDebuffEffect(effect)) return false;
+  const target = parsePlayerSkillEffectTarget(effect.target, "enemy");
+  if (target !== "enemy" && target !== "all_enemies" && target !== "all") return false;
+  const parts = resolvePlayerSelfBuffParts(effect, () => 0);
+  return playerSelfBuffPartsToEnemyStatParts(parts).length > 0;
+}
+
+function playerSelfBuffPartsToEnemyStatParts(
+  parts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>,
+): EnemyStatBuffPart[] {
+  const draft: EnemyStatBuffPart[] = [];
+  let weaponDelta = 0;
+  let magicDelta = 0;
+  for (const p of parts) {
+    const a = Math.trunc(p.amount);
+    if (a === 0) continue;
+    switch (p.stat) {
+      case "armor":
+        draft.push({ stat: "armor", amount: a });
+        break;
+      case "mr":
+        draft.push({ stat: "mr", amount: a });
+        break;
+      case "speed":
+        draft.push({ stat: "speed", amount: a });
+        break;
+      case "hp":
+        draft.push({ stat: "hp", amount: a });
+        break;
+      case "mana":
+        draft.push({ stat: "mana", amount: a });
+        break;
+      case "weapon_damage_min":
+      case "weapon_damage_max":
+        weaponDelta += a;
+        break;
+      case "magic_damage_min":
+      case "magic_damage_max":
+        magicDelta += a;
+        break;
+      default:
+        break;
+    }
+  }
+  if (weaponDelta !== 0) draft.push({ stat: "damage", amount: weaponDelta });
+  if (magicDelta !== 0) draft.push({ stat: "magic_damage", amount: magicDelta });
+  return mergeEnemyStatBuffParts([], draft);
 }
 
 function buffScalingRatioParsed(value: unknown): number {
@@ -736,196 +908,6 @@ function splitSelfBuffPartsForTimedAndInstant(
   };
 }
 
-type CombatBuffStatDebugNumbers = {
-  armor: number;
-  mr: number;
-  speed: number;
-  weaponMin: number;
-  weaponMax: number;
-  magicMin: number;
-  magicMax: number;
-  /** Mismo criterio que `MAGIC_DAMAGE` en scaling de skills. */
-  magicAvgForScaling: number;
-  hp: number;
-  mana: number;
-};
-
-function addTimedBuffPartsToStatTotals(
-  base: Record<PlayerTimedSelfBuffStat, number>,
-  parts: PlayerTimedSelfBuffPart[],
-): Record<PlayerTimedSelfBuffStat, number> {
-  const out: Record<PlayerTimedSelfBuffStat, number> = { ...base };
-  for (const p of parts) {
-    out[p.stat] = out[p.stat] + Math.trunc(p.amount);
-  }
-  return out;
-}
-
-function sumInstantSelfBuffCombatDeltas(
-  instantParts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>,
-): {
-  armor: number;
-  mr: number;
-  speed: number;
-  weaponMin: number;
-  weaponMax: number;
-  magicMin: number;
-  magicMax: number;
-  hpHeal: number;
-  manaDelta: number;
-} {
-  const d = {
-    armor: 0,
-    mr: 0,
-    speed: 0,
-    weaponMin: 0,
-    weaponMax: 0,
-    magicMin: 0,
-    magicMax: 0,
-    hpHeal: 0,
-    manaDelta: 0,
-  };
-  for (const p of instantParts) {
-    const a = Math.trunc(p.amount);
-    switch (p.stat) {
-      case "armor":
-        d.armor += a;
-        break;
-      case "mr":
-        d.mr += a;
-        break;
-      case "speed":
-        d.speed += a;
-        break;
-      case "weapon_damage_min":
-        d.weaponMin += a;
-        break;
-      case "weapon_damage_max":
-        d.weaponMax += a;
-        break;
-      case "magic_damage_min":
-        d.magicMin += a;
-        break;
-      case "magic_damage_max":
-        d.magicMax += a;
-        break;
-      case "hp":
-        if (a > 0) d.hpHeal += a;
-        break;
-      case "mana":
-        d.manaDelta += a;
-        break;
-      default:
-        break;
-    }
-  }
-  return d;
-}
-
-function computeCombatBuffStatNumbers(args: {
-  playerArmor: number;
-  playerCombatArmorBonus: number;
-  timed: Record<PlayerTimedSelfBuffStat, number>;
-  playerMr: number;
-  playerCombatMrBonus: number;
-  playerSpeed: number;
-  playerCombatSpeedBonus: number;
-  playerWeaponDamageMin: number;
-  playerWeaponDamageMax: number;
-  playerCombatWeaponDamageMinBonus: number;
-  playerCombatWeaponDamageMaxBonus: number;
-  playerMagicDamageMin: number;
-  playerMagicDamageMax: number;
-  playerCombatMagicDamageMinBonus: number;
-  playerCombatMagicDamageMaxBonus: number;
-  playerCurrentHp: number;
-  displayPlayerMana: number;
-  playerHpMax: number;
-  playerManaMax: number;
-}): CombatBuffStatDebugNumbers {
-  const t = args.timed;
-  const armor = Math.max(
-    0,
-    Math.trunc(args.playerArmor + args.playerCombatArmorBonus + t.armor),
-  );
-  const mr = Math.max(0, Math.trunc(args.playerMr + args.playerCombatMrBonus + t.mr));
-  const speed = Math.max(
-    0,
-    Math.trunc(args.playerSpeed + args.playerCombatSpeedBonus + t.speed),
-  );
-  const weaponMin = Math.max(
-    1,
-    Math.floor(
-      args.playerWeaponDamageMin +
-        args.playerCombatWeaponDamageMinBonus +
-        t.weapon_damage_min,
-    ),
-  );
-  const weaponMax = Math.max(
-    weaponMin,
-    Math.floor(
-      args.playerWeaponDamageMax +
-        args.playerCombatWeaponDamageMaxBonus +
-        t.weapon_damage_max,
-    ),
-  );
-  const magicMin = Math.max(
-    0,
-    Math.floor(
-      args.playerMagicDamageMin +
-        args.playerCombatMagicDamageMinBonus +
-        t.magic_damage_min,
-    ),
-  );
-  const magicMax = Math.max(
-    magicMin,
-    Math.floor(
-      args.playerMagicDamageMax +
-        args.playerCombatMagicDamageMaxBonus +
-        t.magic_damage_max,
-    ),
-  );
-  const magicAvgForScaling = Math.floor((magicMin + magicMax) / 2);
-  return {
-    armor,
-    mr,
-    speed,
-    weaponMin,
-    weaponMax,
-    magicMin,
-    magicMax,
-    magicAvgForScaling,
-    hp: args.playerCurrentHp,
-    mana: args.displayPlayerMana,
-  };
-}
-
-function logCombatBuffStatDebug(payload: {
-  skillName: string;
-  turn: number;
-  durationTurns: number | null;
-  parts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>;
-  timedParts: PlayerTimedSelfBuffPart[];
-  instantParts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>;
-  antes: CombatBuffStatDebugNumbers;
-  despues: CombatBuffStatDebugNumbers;
-  timedTotalsAntes: Record<PlayerTimedSelfBuffStat, number>;
-  timedTotalsDespues: Record<PlayerTimedSelfBuffStat, number>;
-  instantDeltas: ReturnType<typeof sumInstantSelfBuffCombatDeltas>;
-}): void {
-  console.log("[combate][buff][stats] antes → después (previsto mismo tick)", {
-    skill: payload.skillName,
-    turn: payload.turn,
-    duration_turns: payload.durationTurns,
-    efectivo: { antes: payload.antes, despues: payload.despues },
-    partes_resueltas: payload.parts,
-    timed_parts_nuevos: payload.timedParts,
-    instant_parts: payload.instantParts,
-    timed_totals: { antes: payload.timedTotalsAntes, despues: payload.timedTotalsDespues },
-    bonos_instantaneos_sumados: payload.instantDeltas,
-  });
-}
-
 function getPlayerSkillDamageEffectKind(
   effect: Record<string, unknown>,
 ): "none" | "damage" | "damage_dot" {
@@ -1012,6 +994,63 @@ function mergeEnemyWeaknessesWithExtraTags(
   return out;
 }
 
+function dedupeNormalizedTagStrings(values: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const n = normalizeDamageTypeLabel(raw);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+function mergePlayerResistWeakForIncoming(
+  baseRes: string[],
+  baseWeak: string[],
+  timedMods: EnemyAppliedPlayerTimedModifier[],
+): { resistances: string[]; weaknesses: string[] } {
+  const resistances = dedupeNormalizedTagStrings([
+    ...baseRes,
+    ...timedMods.flatMap((m) => m.extraResistanceTags),
+  ]);
+  const weaknesses = dedupeNormalizedTagStrings([
+    ...baseWeak,
+    ...timedMods.flatMap((m) => m.extraWeaknessTags),
+  ]);
+  return { resistances, weaknesses };
+}
+
+function selfTimedModifiersForEnemy(
+  enemyId: string,
+  selfMods: EnemySelfTimedModifier[],
+): EnemySelfTimedModifier[] {
+  return selfMods.filter((m) => m.enemyId === enemyId);
+}
+
+function mergedEnemyResistancesForPlayerAttack(
+  enemy: CombatEncounterEnemyView,
+  selfMods: EnemySelfTimedModifier[],
+): string[] {
+  const own = selfTimedModifiersForEnemy(enemy.id, selfMods);
+  return dedupeNormalizedTagStrings([
+    ...enemy.resistances,
+    ...own.flatMap((m) => m.resistanceTags),
+  ]);
+}
+
+function mergedEnemyWeaknessesForPlayerAttack(
+  enemy: CombatEncounterEnemyView,
+  effects: PlayerEnemyTimedEffect[],
+  selfMods: EnemySelfTimedModifier[],
+  additionalTags: string[],
+): string[] {
+  const baseMerged = mergeEnemyWeaknessesWithExtraTags(enemy, effects, additionalTags);
+  const own = selfTimedModifiersForEnemy(enemy.id, selfMods);
+  return dedupeNormalizedTagStrings([...baseMerged, ...own.flatMap((m) => m.weaknessTags)]);
+}
+
 function computePlayerSkillMitigatedDamageToEnemy(
   effect: Record<string, unknown>,
   enemy: CombatEncounterEnemyView,
@@ -1020,68 +1059,31 @@ function computePlayerSkillMitigatedDamageToEnemy(
     skillDamageBases: PlayerSkillDamageBaseBounds;
     magicalCombatDamageFlat: number;
     resistWeakTags: string[];
+    /** Resistencias efectivas (base + temporales del enemigo). */
+    enemyResistancesResolved: string[];
     /** Lista completa de debilidades (base + temporales) para RES/WEAK. */
     weaknessesResolved: string[];
+    enemyStatBonuses?: EnemyCombatStatBonuses;
   },
 ): number {
   const subtype = getPlayerSkillEffectSubtype(effect);
-  const defenseStat = enemyDefenseStatForPlayerSkill(subtype, enemy);
+  const defenseStat = enemyDefenseStatForPlayerSkill(
+    subtype,
+    enemy,
+    opts.enemyStatBonuses ?? emptyEnemyCombatStatBonuses(),
+  );
   let rawDamage = rollDamageFromPlayerSkillEffect(effect, opts.getCombatStatValue, opts.skillDamageBases);
   rawDamage =
     subtype === "magical"
       ? Math.max(0, Math.trunc(rawDamage + opts.magicalCombatDamageFlat))
       : rawDamage;
-  const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
+  const mitigated = mitigateDamageBySubtype(rawDamage, defenseStat, subtype);
   return applyEnemyResistWeakTagsToMitigatedDamage(
     mitigated,
     opts.resistWeakTags,
-    enemy.resistances,
+    opts.enemyResistancesResolved,
     opts.weaknessesResolved,
   );
-}
-
-/**
- * Contribución de una línea de `scaling`:
- * - `stat: Fixed` → `amount` entero ≥ 0
- * - `stat: STR|DEX|INT|WIS` → `floor(amount + stat × ratio)`
- */
-function selfBuffScalingLineValue(
-  entry: unknown,
-  getCombatStatValue: (statKeyUpper: string) => number,
-): number {
-  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return 0;
-  const o = entry as Record<string, unknown>;
-  const statRaw = typeof o.stat === "string" ? o.stat.trim() : "";
-  if (statRaw === "") return 0;
-  const upper = statRaw.toUpperCase();
-  const amount = coerceEffectNumber(o.amount, 0);
-  const ratio = buffScalingRatioParsed(o.ratio);
-
-  if (upper === "FIXED") {
-    return Math.max(0, Math.floor(amount));
-  }
-  if (["STR", "DEX", "INT", "WIS"].includes(upper)) {
-    const fromStat = Math.max(0, getCombatStatValue(upper)) * ratio;
-    return Math.max(0, Math.floor(amount + fromStat));
-  }
-  return 0;
-}
-
-function sumSelfBuffScalingTotals(
-  scalingRaw: unknown,
-  getCombatStatValue: (statKeyUpper: string) => number,
-): number {
-  if (scalingRaw == null) return 0;
-  if (Array.isArray(scalingRaw)) {
-    return scalingRaw.reduce(
-      (sum, item) => sum + selfBuffScalingLineValue(item, getCombatStatValue),
-      0,
-    );
-  }
-  if (typeof scalingRaw === "object") {
-    return selfBuffScalingLineValue(scalingRaw, getCombatStatValue);
-  }
-  return 0;
 }
 
 function formatPlayerSelfBuffCombatLog(
@@ -1188,17 +1190,35 @@ function computePlayerSkillDamageRangeBeforeArmor(
   };
 }
 
-/** Daño bruto menos armadura/MR (resultado no negativo). */
-function mitigateDamageByDefense(rawDamage: number, defense: number): number {
+/** Daño bruto menos armadura 1:1 (resultado no negativo). */
+function mitigateDamageByDefense(rawDamage: number, armor: number): number {
   const raw = Math.max(0, Math.trunc(rawDamage));
-  const def = Math.max(0, Math.trunc(defense));
+  const def = Math.max(0, Math.trunc(armor));
   return Math.max(0, raw - def);
 }
 
+/** Daño bruto menos MR×2 (resultado no negativo). */
+function mitigateDamageByMr(rawDamage: number, mr: number): number {
+  const raw = Math.max(0, Math.trunc(rawDamage));
+  const mrVal = Math.max(0, Math.trunc(mr));
+  return Math.max(0, raw - mrVal * 2);
+}
+
+function mitigateDamageBySubtype(
+  rawDamage: number,
+  defenseStat: number,
+  subtype: PlayerSkillEffectSubtype,
+): number {
+  if (subtype === "magical") return mitigateDamageByMr(rawDamage, defenseStat);
+  return mitigateDamageByDefense(rawDamage, defenseStat);
+}
+
 /**
- * Tras (daño - armadura/MR): si algún tag está en resistencias del enemigo ×0.5;
- * si no, si algún tag está en debilidades ×2; si no coincide ninguno, sin cambio.
- * Resistencia tiene prioridad si un mismo tag figurara en ambas listas (no debería).
+ * Tras (daño - armadura/MR), por cada tag del ataque:
+ * - Si el mismo tipo está en resistencias y debilidades → se cancelan (sin efecto).
+ * - Si solo en resistencias → candidato a ×0.5.
+ * - Si solo en debilidades → candidato a ×2.
+ * Con varios tags activos: resistencia antes que debilidad (misma prioridad que antes, pero sin el mismo tipo).
  */
 function applyEnemyResistWeakTagsToMitigatedDamage(
   damageAfterDefense: number,
@@ -1211,10 +1231,21 @@ function applyEnemyResistWeakTagsToMitigatedDamage(
   if (tags.length === 0) return base;
   const norm = (arr: string[]) =>
     arr.map((s) => String(s).trim().toLowerCase()).filter((s) => s.length > 0);
-  const res = norm(resistances);
-  const weak = norm(weaknesses);
-  if (tags.some((t) => res.includes(t))) return Math.max(0, Math.floor(base * 0.5));
-  if (tags.some((t) => weak.includes(t))) return Math.max(0, Math.floor(base * 2));
+  const res = new Set(norm(resistances));
+  const weak = new Set(norm(weaknesses));
+
+  let hasResistOnly = false;
+  let hasWeakOnly = false;
+  for (const t of tags) {
+    const inRes = res.has(t);
+    const inWeak = weak.has(t);
+    if (inRes && inWeak) continue;
+    if (inRes) hasResistOnly = true;
+    else if (inWeak) hasWeakOnly = true;
+  }
+
+  if (hasResistOnly) return Math.max(0, Math.floor(base * 0.5));
+  if (hasWeakOnly) return Math.max(0, Math.floor(base * 2));
   return base;
 }
 
@@ -1239,13 +1270,160 @@ function applyEnemyAttackFamilyToMitigatedDamage(
   );
 }
 
+function effectiveEnemyArmor(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.armor + bonuses.armor));
+}
+
+function effectiveEnemyMr(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.mr + bonuses.mr));
+}
+
+function effectiveEnemySpeed(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.speed + bonuses.speed));
+}
+
+function effectiveEnemyAttackRange(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): { min: number; max: number } {
+  const min = Math.max(0, Math.trunc(enemy.attackMin + bonuses.attackMin));
+  const max = Math.max(min, Math.trunc(enemy.attackMax + bonuses.attackMax));
+  return { min, max };
+}
+
+function effectiveEnemyHpMax(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(1, Math.trunc(enemy.hpMax + bonuses.hp));
+}
+
+function effectiveEnemyMana(
+  enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  return Math.max(0, Math.trunc(enemy.mana + bonuses.mana));
+}
+
+function resolveEnemySkillEffectTargets(
+  target: EnemySkillEffectTarget,
+  casterEnemyId: string,
+  livingEnemies: CombatEncounterEnemyView[],
+): { hitPlayer: boolean; enemies: CombatEncounterEnemyView[] } {
+  switch (target) {
+    case "player":
+      return { hitPlayer: true, enemies: [] };
+    case "caster": {
+      const caster = livingEnemies.find((e) => e.id === casterEnemyId);
+      return { hitPlayer: false, enemies: caster ? [caster] : [] };
+    }
+    case "all_enemies":
+      return { hitPlayer: false, enemies: livingEnemies };
+    case "all":
+      return { hitPlayer: true, enemies: livingEnemies };
+    default:
+      return { hitPlayer: false, enemies: [] };
+  }
+}
+
+function resolvePlayerSkillEffectTargetsForPlayer(
+  target: PlayerSkillEffectTarget,
+  selectedEnemy: CombatEncounterEnemyView | null,
+  livingEnemies: CombatEncounterEnemyView[],
+): { hitPlayer: boolean; enemies: CombatEncounterEnemyView[] } {
+  switch (target) {
+    case "self":
+      return { hitPlayer: true, enemies: [] };
+    case "enemy": {
+      if (!selectedEnemy || selectedEnemy.hp <= 0) {
+        return { hitPlayer: false, enemies: [] };
+      }
+      return { hitPlayer: false, enemies: [selectedEnemy] };
+    }
+    case "all_enemies":
+      return { hitPlayer: false, enemies: livingEnemies.filter((e) => e.hp > 0) };
+    case "all":
+      return {
+        hitPlayer: true,
+        enemies: livingEnemies.filter((e) => e.hp > 0),
+      };
+    default:
+      return { hitPlayer: false, enemies: [] };
+  }
+}
+
+function enemyStatPartsToPlayerTimedParts(parts: EnemyStatBuffPart[]): PlayerTimedSelfBuffPart[] {
+  const out: PlayerTimedSelfBuffPart[] = [];
+  for (const part of parts) {
+    const a = Math.trunc(part.amount);
+    if (a === 0) continue;
+    switch (part.stat) {
+      case "armor":
+        out.push({ stat: "armor", amount: a });
+        break;
+      case "mr":
+        out.push({ stat: "mr", amount: a });
+        break;
+      case "speed":
+        out.push({ stat: "speed", amount: a });
+        break;
+      case "damage":
+        out.push({ stat: "weapon_damage_min", amount: a });
+        out.push({ stat: "weapon_damage_max", amount: a });
+        break;
+      case "magic_damage":
+        out.push({ stat: "magic_damage_min", amount: a });
+        out.push({ stat: "magic_damage_max", amount: a });
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+type ParsedEnemyDamageLeaf = Extract<ParsedEnemySkillEffect, { mode: "damage" }>;
+
+function mitigatedEnemySkillDamageToEnemy(
+  leaf: ParsedEnemyDamageLeaf,
+  victim: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses,
+): number {
+  const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
+  const rawDamageRoll = Math.max(
+    0,
+    rollEnemySkillRawDamage(
+      leaf.min,
+      leaf.max,
+      leaf.damageBasis,
+      victim.hp,
+      victim.hpMax,
+    ),
+  );
+  const defenseStat =
+    incomingSubtype === "magical"
+      ? effectiveEnemyMr(victim, bonuses)
+      : effectiveEnemyArmor(victim, bonuses);
+  return Math.max(0, Math.trunc(mitigateDamageBySubtype(rawDamageRoll, defenseStat, incomingSubtype)));
+}
+
 /** Daño del PJ al enemigo: físico/neutral/buff usa armor del monstruo; mágico usa MR. */
 function enemyDefenseStatForPlayerSkill(
   subtype: PlayerSkillEffectSubtype,
   enemy: CombatEncounterEnemyView,
+  bonuses: EnemyCombatStatBonuses = emptyEnemyCombatStatBonuses(),
 ): number {
-  if (subtype === "magical") return Math.max(0, Math.trunc(enemy.mr));
-  return Math.max(0, Math.trunc(enemy.armor));
+  if (subtype === "magical") return effectiveEnemyMr(enemy, bonuses);
+  return effectiveEnemyArmor(enemy, bonuses);
 }
 
 /** Daño que recibe el PJ: físico/neutral/buff usa armor del PJ; mágico usa MR. */
@@ -1258,8 +1436,11 @@ function playerDefenseStatVsIncoming(
   return Math.max(0, Math.trunc(playerArmor));
 }
 
-/** Normaliza subtype de skills enemigas para decidir mitigación (armor vs MR). */
-function enemySkillIncomingSubtype(effect: CombatEncounterEnemySkill["effect"]): PlayerSkillEffectSubtype {
+/** Mitigación (armor vs MR) para daño de skill enemiga hacia el PJ. */
+function enemySkillIncomingSubtypeFromParsed(
+  effect: ParsedEnemySkillEffect,
+): PlayerSkillEffectSubtype {
+  if (effect.mode !== "damage" && effect.mode !== "weapon_attack") return "physical";
   const raw = effect.subtype;
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (s === "physical") return "physical";
@@ -1496,6 +1677,10 @@ export type CombatConsumeResult = {
   error?: string;
 };
 
+import type { CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
+
+export type { CombatAmmoSpentEntry };
+
 export type CombatEncounterStatsPayload = {
   didWin: boolean;
   enemiesDefeated: number;
@@ -1507,36 +1692,8 @@ export type CombatEncounterStatsPayload = {
   highestHitReceived: number;
   finalHp: number;
   finalMana: number;
-};
-
-export type CombatEncounterDebugPayload = {
-  encounterCode: string;
-  /** `zones.code` usado en la URL (?zone=), o null si no se filtró por zona. */
-  zoneFilter: string | null;
-  encounterId: string;
-  rowsError: {
-    message: string;
-    code?: string;
-    details?: string;
-    hint?: string;
-  } | null;
-  rawRowCount: number;
-  mappedEnemyCount: number;
-  enemies: CombatEncounterEnemyView[];
-  /** Resistencias / debilidades del PJ al iniciar el encuentro (desde `user_character`). */
-  playerResistances?: string[];
-  playerWeaknesses?: string[];
-  /** `weapon_instance.attack_family` del arma equipada en slot `weapon` al iniciar el encuentro. */
-  playerWeaponAttackFamily?: string | null;
-  rawRows: Array<{
-    index: number;
-    spawn_index: number | null;
-    hp_override: number | null;
-    mana_override: number | null;
-    ai_profile: string | null;
-    enemyTemplate: Record<string, unknown> | null;
-  }>;
-  lootDebug?: Record<string, unknown>;
+  /** Munición gastada en combate (se persiste en inventario al cerrar victoria/derrota). */
+  ammoSpent?: CombatAmmoSpentEntry[];
 };
 
 export type CombatEncounterShellProps = {
@@ -1547,7 +1704,6 @@ export type CombatEncounterShellProps = {
   recommendedLevel: number | null;
   backgroundSrc: string | null;
   enemies: CombatEncounterEnemyView[];
-  combatDebug?: CombatEncounterDebugPayload | null;
   combatStartMessage?: string | null;
   /** Overrides opcionales del PJ (más adelante desde `user_character`). */
   playerDisplayName?: string;
@@ -1575,10 +1731,8 @@ export type CombatEncounterShellProps = {
   playerWeaknesses?: string[];
   /** `weapon_instance.attack_family` del arma equipada (ataque normal). */
   playerWeaponAttackFamily?: string | null;
-  /** Con `?debug=1`: `console.log` en cliente con resistencias PJ + enemigos al montar / al cambiar props. */
-  combatResistWeakDebug?: boolean;
-  /** Con `?debug=1`: al usar un buff self, `console.log` con stats efectivas antes / después (previsto mismo tick). */
-  combatBuffStatDebug?: boolean;
+  /** `weapon_instance.ammo_kind` del arma equipada; si tiene valor, el ataque exige munición compatible. */
+  playerWeaponAmmoKind?: string | null;
   playerExperienceToNext?: number;
   playerLevelCurrent?: number;
   playerLevelAfterVictory?: number;
@@ -1594,8 +1748,12 @@ export type CombatEncounterShellProps = {
   victoryGoldFromLoot?: number;
   /** Acción servidor para consumir 1 unidad en inventario. */
   onConsumeConsumable?: (inventoryId: number) => Promise<CombatConsumeResult>;
-  /** Persiste estado actual (HP/Mana) cuando el usuario escapa. */
-  onEscapePersistState?: (payload: { finalHp: number; finalMana: number }) => Promise<void>;
+  /** Persiste estado actual (HP/Mana y munición gastada) cuando el usuario escapa. */
+  onEscapePersistState?: (payload: {
+    finalHp: number;
+    finalMana: number;
+    ammoSpent?: CombatAmmoSpentEntry[];
+  }) => Promise<void>;
   /** Registra en el log global cuando el PJ cae en combate. */
   onPlayerDefeatedGlobalLog?: () => Promise<void>;
   /** Registra en el log global cuando el PJ sube de nivel. */
@@ -1604,6 +1762,10 @@ export type CombatEncounterShellProps = {
   onCombatFinishedStats?: (payload: CombatEncounterStatsPayload) => Promise<void>;
   /** Destino para "Escapar" (normalmente el mapa de la zona origen). */
   escapeHref?: string;
+  /** Si true, "Escapar" queda deshabilitado todo el combate (encuentros por recolectar/minar). */
+  escapeDisabled?: boolean;
+  /** Activa logs `[enemy-dmg]` (también con `?debug=1` en la URL). */
+  combatDebugEnabled?: boolean;
 };
 
 function EncounterRasterMedia({
@@ -1707,19 +1869,57 @@ function enemyNameLevelColorClass(recommendedLevel: number | null, playerLevel: 
   return "text-white";
 }
 
-function PlayerBuffStateIconStrip({ srcs }: { srcs: string[] }) {
-  if (srcs.length === 0) return null;
+type CombatHudStateIcon = {
+  key: string;
+  src: string;
+  /** Si es > 0, muestra contador abajo a la izquierda del icono. */
+  remainingTurns?: number | null;
+};
+
+function pushResolvedHudStateIcons(
+  list: CombatHudStateIcon[],
+  keyPrefix: string,
+  opts: Parameters<typeof resolveCombatStateIconSrcs>[0],
+  remainingTurns?: number | null,
+) {
+  let index = 0;
+  for (const src of resolveCombatStateIconSrcs(opts)) {
+    const turns =
+      remainingTurns != null && Number.isFinite(remainingTurns)
+        ? Math.max(0, Math.trunc(remainingTurns))
+        : null;
+    list.push({
+      key: `${keyPrefix}:${index}:${src}`,
+      src,
+      ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+    });
+    index += 1;
+  }
+}
+
+function CombatHudStateIconStrip({ icons }: { icons: CombatHudStateIcon[] }) {
+  if (icons.length === 0) return null;
   return (
     <div
       className="flex flex-wrap justify-start gap-0.5 px-2 sm:px-2"
       aria-label="Estados activos"
     >
-      {srcs.map((src, idx) => (
+      {icons.map((icon) => (
         <div
-          key={`${idx}:${src}`}
-          className="relative h-6 w-6 shrink-0 overflow-hidden rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
+          key={icon.key}
+          className="relative h-6 w-6 shrink-0 overflow-visible rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
         >
-          <Image src={src} alt="" fill className="object-contain p-px" sizes="16px" />
+          <div className="relative h-full w-full overflow-hidden rounded-[inherit]">
+            <Image src={icon.src} alt="" fill className="object-contain p-px" sizes="16px" />
+          </div>
+          {icon.remainingTurns != null && icon.remainingTurns > 0 ? (
+            <span
+              className="pointer-events-none absolute -bottom-px -left-px z-[1] min-w-[0.7rem] rounded-tr border border-amber-900/80 bg-black/90 px-[2px] text-center text-[8px] font-bold leading-tight text-amber-50 tabular-nums shadow-sm sm:text-[9px]"
+              aria-hidden
+            >
+              {icon.remainingTurns}
+            </span>
+          ) : null}
         </div>
       ))}
     </div>
@@ -1808,14 +2008,14 @@ function EnemyStatusModal({
   onSelect,
   isDefeated,
   nameColorClass,
-  stateIconSrcs = [],
+  stateIcons = [],
 }: {
   enemy: CombatEncounterEnemyView;
   isSelected: boolean;
   onSelect: () => void;
   isDefeated: boolean;
   nameColorClass: string;
-  stateIconSrcs?: string[];
+  stateIcons?: CombatHudStateIcon[];
 }) {
   const pct = enemyHpPercent(enemy);
   return (
@@ -1868,9 +2068,9 @@ function EnemyStatusModal({
           <p className="mt-1 text-[9px] tabular-nums text-red-100/90 sm:text-[10px]">
             HP {enemy.hp} / {enemy.hpMax}
           </p>
-          {stateIconSrcs.length > 0 ? (
+          {stateIcons.length > 0 ? (
             <div className="mt-1 flex justify-center sm:justify-start">
-              <PlayerBuffStateIconStrip srcs={stateIconSrcs} />
+              <CombatHudStateIconStrip icons={stateIcons} />
             </div>
           ) : null}
         </div>
@@ -1880,6 +2080,9 @@ function EnemyStatusModal({
 }
 
 function enemySpriteHeightClass(count: number) {
+  if (count >= 4) {
+    return "h-[min(14vh,88px)] w-auto sm:h-[min(19vh,120px)]";
+  }
   if (count >= 3) {
     return "h-[min(18vh,110px)] w-auto sm:h-[min(24vh,150px)]";
   }
@@ -1897,7 +2100,6 @@ export function CombatEncounterShell({
   recommendedLevel,
   backgroundSrc,
   enemies,
-  combatDebug,
   combatStartMessage = null,
   playerDisplayName = "Fede",
   playerPortraitSrc = PJ_FEDE_FACE_COMBAT,
@@ -1920,8 +2122,7 @@ export function CombatEncounterShell({
   playerResistances = [],
   playerWeaknesses = [],
   playerWeaponAttackFamily = null,
-  combatResistWeakDebug = false,
-  combatBuffStatDebug = false,
+  playerWeaponAmmoKind = null,
   playerExperienceToNext = 0,
   playerLevelCurrent = 1,
   playerLevelAfterVictory = 1,
@@ -1936,8 +2137,25 @@ export function CombatEncounterShell({
   onPlayerLevelUpGlobalLog,
   onCombatFinishedStats,
   escapeHref = "/",
+  escapeDisabled = false,
+  combatDebugEnabled: combatDebugEnabledProp = false,
 }: CombatEncounterShellProps) {
   const router = useRouter();
+  const combatDebugRef = useRef<CombatDebugLogger>(() => {});
+  combatDebugRef.current = createCombatDebugLogger(
+    isCombatDebugEnabled(combatDebugEnabledProp),
+    "enemy-dmg",
+  );
+  const debugEnemy = useCallback((label: string, payload?: Record<string, unknown>) => {
+    combatDebugRef.current(label, payload);
+  }, []);
+  useEffect(() => {
+    if (!isCombatDebugEnabled(combatDebugEnabledProp)) return;
+    debugEnemy("debug-activo", {
+      encounterCode,
+      urlHint: "Añadí ?debug=1 a la URL del combate",
+    });
+  }, [combatDebugEnabledProp, debugEnemy, encounterCode]);
   const backgroundResolved = backgroundSrc?.trim() || BG_INTRO_FOREST;
 
   const playerResistancesRef = useRef<string[]>([...playerResistances]);
@@ -1946,24 +2164,6 @@ export function CombatEncounterShell({
     playerResistancesRef.current = [...playerResistances];
     playerWeaknessesRef.current = [...playerWeaknesses];
   }, [playerResistances, playerWeaknesses]);
-
-  useEffect(() => {
-    if (!combatResistWeakDebug) return;
-    console.log("[combate][resist-weak][cliente] PJ (props + ref)", {
-      resistances: [...playerResistances],
-      weaknesses: [...playerWeaknesses],
-      weaponAttackFamily: playerWeaponAttackFamily,
-      refResistances: [...playerResistancesRef.current],
-      refWeaknesses: [...playerWeaknessesRef.current],
-    });
-    enemies.slice(0, MAX_ENEMIES_ON_FIELD).forEach((e, i) => {
-      console.log(`[combate][resist-weak][cliente] enemigo[${i}]`, e.name, {
-        templateId: e.templateId,
-        resistances: e.resistances,
-        weaknesses: e.weaknesses,
-      });
-    });
-  }, [combatResistWeakDebug, playerResistances, playerWeaknesses, playerWeaponAttackFamily, enemies]);
 
   /** Copia en memoria del combate para uso al activar habilidades del PJ. */
   const playerCombatSkills = useMemo(() => [...playerSkills], [playerSkills]);
@@ -1978,11 +2178,71 @@ export function CombatEncounterShell({
     setCombatConsumables([...playerConsumables]);
   }, [playerConsumables]);
 
+  const [selectedAmmoInventoryId, setSelectedAmmoInventoryId] = useState<number | null>(null);
+
+  const weaponAmmoKindNorm = useMemo(() => {
+    const kind =
+      typeof playerWeaponAmmoKind === "string" ? playerWeaponAmmoKind.trim() : "";
+    return kind.length > 0 ? kind : null;
+  }, [playerWeaponAmmoKind]);
+
+  const requiresAmmo = weaponRequiresAmmo(weaponAmmoKindNorm);
+
+  const combatAmmoItems = useMemo((): CombatAmmoMenuEntry[] => {
+    if (!requiresAmmo || !weaponAmmoKindNorm) return [];
+    const defaultAmmo = createDefaultCombatAmmoEntry(weaponAmmoKindNorm);
+    const fromInventory: CombatAmmoMenuEntry[] = combatConsumables
+      .filter(
+        (entry) =>
+          entry.quantity > 0 &&
+          isAmmoCompatibleWithWeapon(weaponAmmoKindNorm, entry.effect),
+      )
+      .map((entry) => ({ ...entry, isDefaultAmmo: false }));
+    return defaultAmmo ? [defaultAmmo, ...fromInventory] : fromInventory;
+  }, [combatConsumables, requiresAmmo, weaponAmmoKindNorm]);
+
+  const combatPotionItems = useMemo(
+    () => combatConsumables.filter((entry) => !isAmmoConsumableEffect(entry.effect)),
+    [combatConsumables],
+  );
+
+  useEffect(() => {
+    if (!requiresAmmo) {
+      setSelectedAmmoInventoryId(null);
+      return;
+    }
+    if (combatAmmoItems.length === 0) {
+      setSelectedAmmoInventoryId(null);
+      return;
+    }
+    setSelectedAmmoInventoryId((prev) => {
+      if (prev != null && combatAmmoItems.some((entry) => entry.inventoryId === prev)) {
+        return prev;
+      }
+      return combatAmmoItems[0]?.inventoryId ?? null;
+    });
+  }, [requiresAmmo, combatAmmoItems]);
+
   const initialEnemies = useMemo(
     () => enemies.slice(0, MAX_ENEMIES_ON_FIELD),
     [enemies],
   );
   const [displayEnemies, setDisplayEnemies] = useState<CombatEncounterEnemyView[]>(initialEnemies);
+
+  /** Catálogo RES/WEAK en memoria + precarga al entrar (encuentro + PJ). */
+  useEffect(() => {
+    const encounterSrcs = collectResistWeakIconSrcsForEnemyTags(enemies);
+    const playerTagSrcs: string[] = [];
+    for (const tag of playerResistances) {
+      const src = getCombatResistWeakIconSrc(tag, "up");
+      if (src) playerTagSrcs.push(src);
+    }
+    for (const tag of playerWeaknesses) {
+      const src = getCombatResistWeakIconSrc(tag, "down");
+      if (src) playerTagSrcs.push(src);
+    }
+    preloadCombatResistWeakIcons([...encounterSrcs, ...playerTagSrcs]);
+  }, [enemies, playerResistances, playerWeaknesses]);
   /** Evita que un re-render del servidor (p. ej. tras guardar stats) reviva enemigos y cancele victoria. */
   const [combatOutcome, setCombatOutcome] = useState<"active" | "won" | "lost">("active");
   const [selectedEnemyId, setSelectedEnemyId] = useState<string | null>(null);
@@ -2000,12 +2260,21 @@ export function CombatEncounterShell({
   const [isCombatLogPanelOpen, setIsCombatLogPanelOpen] = useState(false);
   const [isEscaping, setIsEscaping] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory">("main");
+  const [actionMenu, setActionMenu] = useState<"main" | "skills" | "inventory" | "ammo">("main");
   const [isTurnTransitioning, setIsTurnTransitioning] = useState(true);
+  /** Solo los primeros 3s al cargar el encuentro; no bloquea el turno enemigo entre acciones. */
+  const [isInitialCombatDelay, setIsInitialCombatDelay] = useState(true);
   const combatLogMobileRef = useRef<HTMLDivElement | null>(null);
   const combatLogDesktopRef = useRef<HTMLDivElement | null>(null);
+  /** Munición gastada en este combate (persiste en BD solo al terminar victoria/derrota). */
+  const ammoSpentByInventoryIdRef = useRef<Map<number, number>>(new Map());
   const combatLogIdRef = useRef(0);
+  /** Última entrada del log con daño entrante al PJ (causa de derrota). */
+  const lastIncomingDamageLogRef = useRef<CombatLogEntry | null>(null);
   const advanceTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Evita doble `advanceTurn` si el timeout y el safety disparan a la vez. */
+  const turnAdvanceGenerationRef = useRef(0);
+  const lastCommittedTurnAdvanceGenRef = useRef(0);
   const initialActionDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const defeatModalDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const victoryModalDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2071,9 +2340,12 @@ export function CombatEncounterShell({
   }, [combatStartMessage, initialEnemies]);
 
   const [combatLog, setCombatLog] = useState<CombatLogEntry[]>(initialLog);
+  const combatLogEncounterCodeRef = useRef<string | null>(null);
   useEffect(() => {
+    if (combatLogEncounterCodeRef.current === encounterCode) return;
+    combatLogEncounterCodeRef.current = encounterCode;
     setCombatLog(initialLog);
-  }, [initialLog]);
+  }, [encounterCode, initialLog]);
 
   const [playerCurrentHp, setPlayerCurrentHp] = useState(playerHp);
   const [displayPlayerMana, setDisplayPlayerMana] = useState(playerMana);
@@ -2118,6 +2390,17 @@ export function CombatEncounterShell({
   );
 
   const [enemyPlayerTimedEffects, setEnemyPlayerTimedEffects] = useState<PlayerEnemyTimedEffect[]>([]);
+  const [activeCombatConditions, setActiveCombatConditions] = useState<ActiveCombatCondition[]>([]);
+  const activeCombatConditionsRef = useRef(activeCombatConditions);
+  useEffect(() => {
+    activeCombatConditionsRef.current = activeCombatConditions;
+  }, [activeCombatConditions]);
+  const playerSkipTurnResolvedRef = useRef<string | null>(null);
+  const [enemyAppliedPlayerTimedModifiers, setEnemyAppliedPlayerTimedModifiers] = useState<
+    EnemyAppliedPlayerTimedModifier[]
+  >([]);
+  const [enemySelfTimedModifiers, setEnemySelfTimedModifiers] = useState<EnemySelfTimedModifier[]>([]);
+  const [enemyTimedStatBuffs, setEnemyTimedStatBuffs] = useState<EnemyTimedStatBuff[]>([]);
   const displayEnemiesRef = useRef(displayEnemies);
   useEffect(() => {
     displayEnemiesRef.current = displayEnemies;
@@ -2126,6 +2409,31 @@ export function CombatEncounterShell({
   useEffect(() => {
     enemyPlayerTimedEffectsRef.current = enemyPlayerTimedEffects;
   }, [enemyPlayerTimedEffects]);
+  const enemyAppliedPlayerTimedModifiersRef = useRef(enemyAppliedPlayerTimedModifiers);
+  useEffect(() => {
+    enemyAppliedPlayerTimedModifiersRef.current = enemyAppliedPlayerTimedModifiers;
+  }, [enemyAppliedPlayerTimedModifiers]);
+  const enemySelfTimedModifiersRef = useRef(enemySelfTimedModifiers);
+  useEffect(() => {
+    enemySelfTimedModifiersRef.current = enemySelfTimedModifiers;
+  }, [enemySelfTimedModifiers]);
+  const enemyTimedStatBuffsRef = useRef(enemyTimedStatBuffs);
+  useEffect(() => {
+    enemyTimedStatBuffsRef.current = enemyTimedStatBuffs;
+  }, [enemyTimedStatBuffs]);
+
+  const enemyStatBonusesById = useMemo(() => {
+    const map = new Map<string, EnemyCombatStatBonuses>();
+    for (const enemy of displayEnemies) {
+      map.set(enemy.id, sumEnemyTimedStatBonuses(enemyTimedStatBuffs, enemy.id));
+    }
+    return map;
+  }, [displayEnemies, enemyTimedStatBuffs]);
+
+  const getEnemyStatBonuses = useCallback(
+    (enemyId: string) => enemyStatBonusesById.get(enemyId) ?? emptyEnemyCombatStatBonuses(),
+    [enemyStatBonusesById],
+  );
 
   const getCombatStatValueForSkills = useCallback(
     (key: string): number => {
@@ -2139,6 +2447,10 @@ export function CombatEncounterShell({
           return Math.max(0, Math.floor(playerStatInt));
         case "WIS":
           return Math.max(0, Math.floor(playerStatWis));
+        case "LEVEL":
+        case "LV":
+        case "NIVEL":
+          return Math.max(1, Math.trunc(playerLevelCurrent));
         case "ATTACK_DAMAGE":
         case "WEAPON_DAMAGE": {
           const wmin = Math.max(
@@ -2187,6 +2499,7 @@ export function CombatEncounterShell({
       playerStatDex,
       playerStatInt,
       playerStatWis,
+      playerLevelCurrent,
       playerWeaponDamageMin,
       playerWeaponDamageMax,
       playerCombatWeaponDamageMinBonus,
@@ -2254,10 +2567,12 @@ export function CombatEncounterShell({
   const [enemySkillNextAvailableTurn, setEnemySkillNextAvailableTurn] = useState<
     Record<string, Record<string, number>>
   >({});
-  /** `user_character_skills.id` → primer turno en el que la habilidad vuelve a estar disponible. */
-  const [playerSkillNextAvailableTurn, setPlayerSkillNextAvailableTurn] = useState<
+  /** `user_character_skills.id` → turnos de acción del PJ restantes antes de poder reusar la skill. */
+  const [playerSkillCooldownRemaining, setPlayerSkillCooldownRemaining] = useState<
     Record<string, number>
   >({});
+  /** Skill usada en esta acción: no bajar su CD en el mismo avance (recién se aplicó). */
+  const skipPlayerSkillCooldownTickIdRef = useRef<string | null>(null);
   useEffect(() => {
     setPlayerCurrentHp(Math.min(Math.max(0, playerHp), Math.max(1, playerHpMax)));
   }, [playerHp, playerHpMax]);
@@ -2300,6 +2615,13 @@ export function CombatEncounterShell({
     setPlayerCombatMagicDamageMaxBonus(0);
     setPlayerTimedSelfBuffs([]);
     setEnemyPlayerTimedEffects([]);
+    setActiveCombatConditions([]);
+    setEnemyAppliedPlayerTimedModifiers([]);
+    setEnemySelfTimedModifiers([]);
+    setEnemyTimedStatBuffs([]);
+    setPlayerSkillCooldownRemaining({});
+    skipPlayerSkillCooldownTickIdRef.current = null;
+    setAtbActionSeq(0);
     setTurn(1);
     if (defeatModalDelayRef.current) {
       clearTimeout(defeatModalDelayRef.current);
@@ -2356,6 +2678,7 @@ export function CombatEncounterShell({
   );
   const isEscapeDisabledByEnemyHp =
     totalEnemyHpMax > 0 && totalEnemyHp / totalEnemyHpMax <= 0.6;
+  const isEscapeDisabled = escapeDisabled || isEscapeDisabledByEnemyHp;
   const recordPlayerDamageDealt = (amount: number) => {
     const safe = Math.max(0, Math.trunc(amount));
     if (safe <= 0) return;
@@ -2458,6 +2781,7 @@ export function CombatEncounterShell({
       highestHitReceived: combatStatsRef.current.highestHitReceived,
       finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
       finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+      ammoSpent: getAmmoSpentForPersist(),
     }).catch(() => {
       // Si falla el guardado de stats no se bloquea la resolución visual del combate.
     });
@@ -2469,140 +2793,175 @@ export function CombatEncounterShell({
     setEnemySkillNextAvailableTurn({});
   }, [encounterCode]);
   useEffect(() => {
-    setPlayerSkillNextAvailableTurn({});
+    setPlayerSkillCooldownRemaining({});
+    skipPlayerSkillCooldownTickIdRef.current = null;
   }, [encounterCode]);
-  const turnOrder = useMemo<TurnActor[]>(() => {
-    const actors: TurnActor[] = [
-      {
+  useEffect(() => {
+    ammoSpentByInventoryIdRef.current = new Map();
+    lastIncomingDamageLogRef.current = null;
+  }, [encounterCode]);
+  const atbCombatants = useMemo<AtbCombatant[]>(() => {
+    const list: AtbCombatant[] = [];
+    if (playerCurrentHp > 0) {
+      list.push({
         id: "player",
-        type: "player",
         speed: Math.max(
           0,
           Math.trunc(playerSpeed + playerCombatSpeedBonus + timedBuffBonusByStat.speed),
         ),
-      },
-      ...displayEnemies
-        .filter((enemy) => enemy.hp > 0)
-        .map((enemy) => ({
-          id: `enemy:${enemy.id}`,
-          type: "enemy" as const,
-          speed: Math.max(0, Math.trunc(enemy.speed)),
-          enemyId: enemy.id,
-        })),
-    ];
-    return actors.sort((a, b) => b.speed - a.speed);
-  }, [displayEnemies, playerCombatSpeedBonus, playerSpeed, timedBuffBonusByStat]);
-  const turnOrderRef = useRef(turnOrder);
-  useEffect(() => {
-    turnOrderRef.current = turnOrder;
-  }, [turnOrder]);
-  /** Firma estable del orden de iniciativa (quién actúa). Cambia al morir un enemigo o variar velocidades. */
-  const initiativeOrderSig = useMemo(
-    () => turnOrder.map((a) => a.id).join(">"),
-    [turnOrder],
-  );
-  const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
-  const previousTurnIndexRef = useRef(0);
-  const prevInitiativeSigRef = useRef<string | null>(null);
-  const prevTurnOrderSnapshotRef = useRef<TurnActor[]>([]);
-  const resolvedEnemyTurnRef = useRef<string | null>(null);
-  const prevEncounterCodeForInitiativeRef = useRef(encounterCode);
-  /**
-   * Al morir un enemigo solo hacer `min(índice, length-1)` rompe la iniciativa:
-   * el mismo número de índice puede pasar a otro actor (p. ej. de PJ a enemigo).
-   * Re-mapeamos por `TurnActor.id` y limpiamos la deduplicación del turno enemigo.
-   */
-  useLayoutEffect(() => {
-    if (prevEncounterCodeForInitiativeRef.current !== encounterCode) {
-      prevEncounterCodeForInitiativeRef.current = encounterCode;
-      prevInitiativeSigRef.current = null;
-      prevTurnOrderSnapshotRef.current = [];
-      resolvedEnemyTurnRef.current = null;
+        alive: true,
+      });
     }
+    for (const enemy of displayEnemies) {
+      if (enemy.hp <= 0) continue;
+      list.push({
+        id: `enemy:${enemy.id}`,
+        speed: effectiveEnemySpeed(enemy, getEnemyStatBonuses(enemy.id)),
+        alive: true,
+      });
+    }
+    return list;
+  }, [
+    displayEnemies,
+    getEnemyStatBonuses,
+    playerCombatSpeedBonus,
+    playerCurrentHp,
+    playerSpeed,
+    timedBuffBonusByStat.speed,
+  ]);
+  const atbCombatantsRef = useRef(atbCombatants);
+  useEffect(() => {
+    atbCombatantsRef.current = atbCombatants;
+  }, [atbCombatants]);
 
-    if (turnOrder.length === 0) {
-      setCurrentTurnIndex(0);
-      previousTurnIndexRef.current = 0;
-      prevInitiativeSigRef.current = initiativeOrderSig;
-      prevTurnOrderSnapshotRef.current = [];
+  const atbRosterSig = useMemo(
+    () => atbCombatants.map((c) => `${c.id}:${c.speed}`).join("|"),
+    [atbCombatants],
+  );
+
+  const [atbGauges, setAtbGauges] = useState<AtbGaugeMap>({});
+  const [currentActorId, setCurrentActorId] = useState<string | null>(null);
+  /** Sube en cada acción ATB completada; permite 2+ turnos seguidos del mismo actor. */
+  const [atbActionSeq, setAtbActionSeq] = useState(0);
+  const atbGaugesRef = useRef(atbGauges);
+  const currentActorIdRef = useRef(currentActorId);
+  const actedThisRoundRef = useRef<Set<string>>(new Set());
+  const prevEncounterCodeForAtbRef = useRef(encounterCode);
+  const resolvedEnemyTurnRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    atbGaugesRef.current = atbGauges;
+  }, [atbGauges]);
+  useEffect(() => {
+    currentActorIdRef.current = currentActorId;
+  }, [currentActorId]);
+
+  useLayoutEffect(() => {
+    const needsFullInit =
+      prevEncounterCodeForAtbRef.current !== encounterCode ||
+      Object.keys(atbGaugesRef.current).length === 0;
+
+    if (needsFullInit) {
+      prevEncounterCodeForAtbRef.current = encounterCode;
+      actedThisRoundRef.current = new Set();
       resolvedEnemyTurnRef.current = null;
+      setAtbActionSeq(0);
+      const gauges = createInitialAtbGauges(atbCombatants);
+      const nextId = resolveNextAtbActor({ ...gauges }, atbCombatants);
+      setAtbGauges(gauges);
+      setCurrentActorId(nextId);
       return;
     }
 
-    const prevSig = prevInitiativeSigRef.current;
-    const prevOrder = prevTurnOrderSnapshotRef.current;
+    const pruned = pruneAtbGaugesForCombatants(atbGaugesRef.current, atbCombatants);
+    const aliveIds = new Set(atbCombatants.filter((c) => c.alive).map((c) => c.id));
+    let nextGauges = pruned;
+    let nextActorId = currentActorIdRef.current;
 
-    if (prevSig !== null && prevSig !== initiativeOrderSig) {
+    if (!nextActorId || !aliveIds.has(nextActorId)) {
+      const sim = { ...pruned };
+      nextActorId = resolveNextAtbActor(sim, atbCombatants);
+      nextGauges = sim;
       resolvedEnemyTurnRef.current = null;
-      setCurrentTurnIndex((prevIndex) => {
-        const prevEffective = Math.min(prevIndex, Math.max(0, prevOrder.length - 1));
-        const actorAtTurn = prevOrder[prevEffective];
-        if (!actorAtTurn) {
-          return Math.min(prevIndex, turnOrder.length - 1);
-        }
-        const newIdx = turnOrder.findIndex((a) => a.id === actorAtTurn.id);
-        if (newIdx >= 0) return newIdx;
-        return Math.min(prevIndex, turnOrder.length - 1);
-      });
-    } else {
-      setCurrentTurnIndex((prev) => Math.min(prev, turnOrder.length - 1));
     }
 
-    prevInitiativeSigRef.current = initiativeOrderSig;
-    prevTurnOrderSnapshotRef.current = turnOrder;
-  }, [encounterCode, turnOrder, initiativeOrderSig]);
-  const effectiveTurnIndex =
-    turnOrder.length === 0 ? 0 : Math.min(currentTurnIndex, turnOrder.length - 1);
-  const currentActor = turnOrder[effectiveTurnIndex] ?? null;
-  const runtimeInitiativeDebug = useMemo(
-    () => ({
-      playerSpeed: Math.max(
+    setAtbGauges(nextGauges);
+    if (nextActorId !== currentActorIdRef.current) {
+      setCurrentActorId(nextActorId);
+    }
+  }, [encounterCode, atbRosterSig, atbCombatants]);
+
+  const currentActor = useMemo((): TurnActor | null => {
+    if (!currentActorId) return null;
+    if (currentActorId === "player") {
+      const speed = Math.max(
         0,
         Math.trunc(playerSpeed + playerCombatSpeedBonus + timedBuffBonusByStat.speed),
-      ),
-      enemies: displayEnemies.map((enemy) => ({
-        id: enemy.id,
-        name: enemy.name,
-        speed: Math.max(0, Math.trunc(enemy.speed)),
-        hp: enemy.hp,
-        alive: enemy.hp > 0,
-      })),
-      turnOrder: turnOrder.map((actor, idx) => ({
-        idx,
-        actorId: actor.id,
-        actorType: actor.type,
-        speed: actor.speed,
-        isCurrent: idx === effectiveTurnIndex,
-      })),
-      currentTurnIndex: effectiveTurnIndex,
-      currentActorId: currentActor?.id ?? null,
-      currentActorType: currentActor?.type ?? null,
-      turn,
-    }),
-    [
-      playerCombatSpeedBonus,
-      playerSpeed,
-      timedBuffBonusByStat,
-      displayEnemies,
-      turnOrder,
-      effectiveTurnIndex,
-      currentActor,
-      turn,
-    ],
-  );
-  useEffect(() => {
-    if (turnOrder.length === 0) return;
-    const previous = previousTurnIndexRef.current;
-    const wrapped =
-      turnOrder.length > 1 &&
-      previous === turnOrder.length - 1 &&
-      currentTurnIndex === 0;
-    if (wrapped) {
-      setTurn((current) => current + 1);
+      );
+      return { id: "player", type: "player", speed };
     }
-    previousTurnIndexRef.current = currentTurnIndex;
-  }, [currentTurnIndex, turnOrder.length]);
-  const turnOwner = currentActor?.type ?? "enemy";
+    const enemyId = currentActorId.startsWith("enemy:")
+      ? currentActorId.slice("enemy:".length)
+      : null;
+    if (!enemyId) return null;
+    const enemy = displayEnemies.find((e) => e.id === enemyId);
+    if (!enemy || enemy.hp <= 0) return null;
+    return {
+      id: currentActorId,
+      type: "enemy",
+      speed: effectiveEnemySpeed(enemy, getEnemyStatBonuses(enemy.id)),
+      enemyId,
+    };
+  }, [
+    currentActorId,
+    displayEnemies,
+    getEnemyStatBonuses,
+    playerCombatSpeedBonus,
+    playerSpeed,
+    timedBuffBonusByStat.speed,
+  ]);
+
+  const playerPortraitForAtb =
+    typeof playerPortraitSrc === "string" && playerPortraitSrc.trim().length > 0
+      ? playerPortraitSrc.trim()
+      : PJ_FEDE_FACE_COMBAT;
+
+  const atbTimelineEntries = useMemo((): CombatAtbTimelineEntry[] => {
+    const slotCount = Math.min(8, Math.max(3, atbCombatants.length + 2));
+    const order = predictAtbTimeline(atbGauges, atbCombatants, slotCount);
+    return order.map((id) => {
+      if (id === "player") {
+        return {
+          id,
+          label: playerDisplayName,
+          portraitSrc: playerPortraitForAtb,
+          isPlayer: true,
+          isCurrent: id === currentActorId,
+          gauge: atbGauges[id] ?? 0,
+        };
+      }
+      const enemyId = id.startsWith("enemy:") ? id.slice("enemy:".length) : "";
+      const enemy = displayEnemies.find((e) => e.id === enemyId);
+      return {
+        id,
+        label: enemy?.name ?? "Enemigo",
+        portraitSrc:
+          enemy?.portraitSrc && enemy.portraitSrc.trim().length > 0
+            ? enemy.portraitSrc.trim()
+            : null,
+        isPlayer: false,
+        isCurrent: id === currentActorId,
+        gauge: atbGauges[id] ?? 0,
+      };
+    });
+  }, [
+    atbCombatants,
+    atbGauges,
+    currentActorId,
+    displayEnemies,
+    playerDisplayName,
+    playerPortraitForAtb,
+  ]);
   /** Por enemigo: sube en cada ataque para reiniciar la animación de embestida hacia el PJ. */
   const [enemyAttackLungeSeq, setEnemyAttackLungeSeq] = useState<Record<string, number>>({});
   useEffect(
@@ -2642,13 +3001,18 @@ export function CombatEncounterShell({
     }
     /** Si se canceló un avance de turno pendiente, no dejar la UI bloqueada ni el turno enemigo sin reintentar. */
     resolvedEnemyTurnRef.current = null;
+    turnAdvanceGenerationRef.current = 0;
+    lastCommittedTurnAdvanceGenRef.current = 0;
+    setAtbActionSeq(0);
 
+    setIsInitialCombatDelay(true);
     setIsTurnTransitioning(true);
     initialActionDelayTimeoutRef.current = setTimeout(() => {
+      setIsInitialCombatDelay(false);
       setIsTurnTransitioning(false);
       initialActionDelayTimeoutRef.current = null;
     }, FIRST_ACTION_DELAY_MS);
-  }, [encounterCode, combatStartMessage]);
+  }, [encounterCode]);
 
   function appendCombatLog(
     text: string,
@@ -2658,17 +3022,38 @@ export function CombatEncounterShell({
   ) {
     combatLogIdRef.current += 1;
     const entryId = `log-${combatLogIdRef.current}`;
-    setCombatLog((prev) => [
-      ...prev,
-      {
-        id: entryId,
-        text,
-        tone,
-        damageValue,
-        incomingDamageValue,
-      },
-    ]);
+    const entry: CombatLogEntry = {
+      id: entryId,
+      text,
+      tone,
+      damageValue,
+      incomingDamageValue,
+    };
+    const incoming =
+      incomingDamageValue != null && Number.isFinite(incomingDamageValue)
+        ? Math.max(0, Math.trunc(incomingDamageValue))
+        : 0;
+    if (incoming > 0) {
+      lastIncomingDamageLogRef.current = entry;
+    }
+    setCombatLog((prev) => [...prev, entry]);
   }
+
+  const defeatCauseLogEntry = useMemo(() => {
+    if (!isDefeatOverlayVisible || playerCurrentHp > 0) return null;
+    const fromRef = lastIncomingDamageLogRef.current;
+    if (fromRef) return fromRef;
+    for (let i = combatLog.length - 1; i >= 0; i -= 1) {
+      const entry = combatLog[i];
+      if (
+        entry.incomingDamageValue != null &&
+        Math.trunc(entry.incomingDamageValue) > 0
+      ) {
+        return entry;
+      }
+    }
+    return null;
+  }, [combatLog, isDefeatOverlayVisible, playerCurrentHp]);
 
   useEffect(() => {
     if (combatLogMobileRef.current) {
@@ -2691,39 +3076,119 @@ export function CombatEncounterShell({
   const playerManaPercent = Math.round(
     (displayPlayerMana / Math.max(1, playerManaMax)) * 100,
   );
-  const playerActiveBuffStateIconSrcs = useMemo(() => {
-    const out: string[] = [];
+  const playerActiveBuffStateIcons = useMemo(() => {
+    const out: CombatHudStateIcon[] = [];
     for (const buff of playerTimedSelfBuffs) {
-      for (const raw of buff.stateIcons) {
-        if (typeof raw !== "string" || raw.trim().length === 0) continue;
-        const url = normalizePublicAssetUrl(raw);
-        if (url) out.push(url);
-      }
+      if (buff.remainingTurns <= 0) continue;
+      pushResolvedHudStateIcons(out, `pbuff:${buff.id}`, { stateIcons: buff.stateIcons }, buff.remainingTurns);
+    }
+    for (const deb of enemyAppliedPlayerTimedModifiers) {
+      if (deb.remainingTurns <= 0) continue;
+      pushResolvedHudStateIcons(
+        out,
+        `pmod:${deb.id}`,
+        {
+          stateIcons: deb.stateIcons,
+          resistanceTags: deb.extraResistanceTags,
+          weaknessTags: deb.extraWeaknessTags,
+        },
+        deb.remainingTurns,
+      );
+    }
+    for (const cond of activeCombatConditions) {
+      if (cond.targetKind !== "player" || cond.targetId !== "player") continue;
+      const icon = resolveActiveCombatConditionIconSrc(cond);
+      if (!icon) continue;
+      const turns = cond.remainingTurns;
+      if (turns != null && turns <= 0) continue;
+      out.push({
+        key: `pcond:${cond.id}`,
+        src: icon,
+        ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+      });
     }
     return out;
-  }, [playerTimedSelfBuffs]);
+  }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers, activeCombatConditions]);
 
-  const enemyHudStateIconSrcsById = useMemo(() => {
-    const byEnemy = new Map<string, Set<string>>();
+  const enemyHudStateIconsById = useMemo(() => {
+    const byEnemy = new Map<string, CombatHudStateIcon[]>();
+    const listFor = (enemyId: string) => {
+      let list = byEnemy.get(enemyId);
+      if (!list) {
+        list = [];
+        byEnemy.set(enemyId, list);
+      }
+      return list;
+    };
+
+    for (const enemy of displayEnemies) {
+      pushResolvedHudStateIcons(listFor(enemy.id), `base:${enemy.id}`, {
+        resistanceTags: enemy.resistances,
+        weaknessTags: enemy.weaknesses,
+      });
+    }
+
     for (const eff of enemyPlayerTimedEffects) {
       if (eff.debuffRemainingTurns <= 0 && eff.dotTicksRemaining <= 0) continue;
-      let bucket = byEnemy.get(eff.enemyId);
-      if (!bucket) {
-        bucket = new Set();
-        byEnemy.set(eff.enemyId, bucket);
-      }
-      for (const raw of eff.stateIcons) {
-        if (typeof raw !== "string" || raw.trim().length === 0) continue;
-        const url = normalizePublicAssetUrl(raw);
-        if (url) bucket.add(url);
-      }
+      const turns =
+        eff.debuffRemainingTurns > 0
+          ? eff.debuffRemainingTurns
+          : eff.dotTicksRemaining > 0
+            ? eff.dotTicksRemaining
+            : null;
+      pushResolvedHudStateIcons(
+        listFor(eff.enemyId),
+        `ept:${eff.id}`,
+        { stateIcons: eff.stateIcons, weaknessTags: eff.extraWeaknessTags },
+        turns,
+      );
     }
-    const out = new Map<string, string[]>();
-    for (const [enemyId, set] of byEnemy) {
-      out.set(enemyId, Array.from(set));
+
+    for (const sm of enemySelfTimedModifiers) {
+      if (sm.remainingTurns <= 0) continue;
+      pushResolvedHudStateIcons(
+        listFor(sm.enemyId),
+        `esm:${sm.id}`,
+        {
+          stateIcons: sm.stateIcons,
+          resistanceTags: sm.resistanceTags,
+          weaknessTags: sm.weaknessTags,
+        },
+        sm.remainingTurns,
+      );
     }
-    return out;
-  }, [enemyPlayerTimedEffects]);
+
+    for (const sb of enemyTimedStatBuffs) {
+      if (sb.remainingTurns <= 0) continue;
+      pushResolvedHudStateIcons(
+        listFor(sb.enemyId),
+        `esb:${sb.id}`,
+        { stateIcons: sb.stateIcons },
+        sb.remainingTurns,
+      );
+    }
+
+    for (const cond of activeCombatConditions) {
+      if (cond.targetKind !== "enemy") continue;
+      const icon = resolveActiveCombatConditionIconSrc(cond);
+      if (!icon) continue;
+      const turns = cond.remainingTurns;
+      if (turns != null && turns <= 0) continue;
+      listFor(cond.targetId).push({
+        key: `econd:${cond.id}`,
+        src: icon,
+        ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+      });
+    }
+
+    return byEnemy;
+  }, [
+    displayEnemies,
+    enemyPlayerTimedEffects,
+    enemySelfTimedModifiers,
+    enemyTimedStatBuffs,
+    activeCombatConditions,
+  ]);
 
   /** Panel de acciones mobile (ancha) queda bajo la tarjeta HP/Mana para que siga visible. */
   const floatPlayerStatusOverActionsMobile = isActionsPanelOpen && isMobileViewport;
@@ -2736,6 +3201,11 @@ export function CombatEncounterShell({
     (selectedEnemyId ? displayEnemies.find((enemy) => enemy.id === selectedEnemyId) : null) ??
     null;
   const isPlayerTurn = currentActor?.type === "player";
+  const selectedAmmoItem =
+    selectedAmmoInventoryId != null
+      ? (combatAmmoItems.find((entry) => entry.inventoryId === selectedAmmoInventoryId) ?? null)
+      : null;
+
   const attackBlockReason =
     playerCurrentHp <= 0
       ? null
@@ -2745,14 +3215,44 @@ export function CombatEncounterShell({
           ? "Todavía no es tu turno."
           : selectedEnemy == null || selectedEnemy.hp <= 0
             ? "Tenés que seleccionar un enemigo vivo para atacar."
-            : null;
+            : requiresAmmo && selectedAmmoItem == null
+                ? "Seleccioná munición compatible para atacar."
+                : null;
   const canAttack =
     combatOutcome === "active" && attackBlockReason === null && playerCurrentHp > 0;
 
   function playerSkillCooldownTurnsRemaining(skill: CombatPlayerSkillView): number {
-    const nextAvailable = playerSkillNextAvailableTurn[skill.userCharacterSkillId] ?? 1;
-    if (turn >= nextAvailable) return 0;
-    return nextAvailable - turn;
+    return Math.max(0, Math.trunc(playerSkillCooldownRemaining[skill.userCharacterSkillId] ?? 0));
+  }
+
+  function applyPlayerSkillCooldown(skillEntry: CombatPlayerSkillView) {
+    const cd = parsePlayerSkillCooldownTurns(skillEntry.skill.cooldownTurns, 0);
+    if (cd <= 0) return;
+    skipPlayerSkillCooldownTickIdRef.current = skillEntry.userCharacterSkillId;
+    setPlayerSkillCooldownRemaining((prev) => ({
+      ...prev,
+      [skillEntry.userCharacterSkillId]: cd,
+    }));
+  }
+
+  function tickPlayerSkillCooldownsAfterPlayerAction(exceptUserCharacterSkillId?: string | null) {
+    const exceptId =
+      typeof exceptUserCharacterSkillId === "string" && exceptUserCharacterSkillId.length > 0
+        ? exceptUserCharacterSkillId
+        : null;
+    setPlayerSkillCooldownRemaining((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      let changed = false;
+      const next: Record<string, number> = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (exceptId != null && key === exceptId) continue;
+        const left = Math.trunc(next[key] ?? 0);
+        if (left <= 0) continue;
+        next[key] = left - 1;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
   }
 
   function canUsePlayerSkill(skill: CombatPlayerSkillView) {
@@ -2811,6 +3311,7 @@ export function CombatEncounterShell({
   }
 
   function canUseConsumable(item: CombatPlayerConsumableView): boolean {
+    if (isAmmoConsumableEffect(item.effect)) return false;
     if (isPlayerActionsLocked) return false;
     if (item.quantity <= 0) return false;
     if (!item.effect) return false;
@@ -2997,11 +3498,292 @@ export function CombatEncounterShell({
     );
   }
 
+  function applyPlayerConditionDebuff(
+    step: ParsedPlayerConditionDebuff,
+    skillName: string,
+    livingEnemies: CombatEncounterEnemyView[],
+    effectForIcons: Record<string, unknown> = {},
+  ) {
+    const def = getCombatConditionDefinition(step.conditionId);
+    if (!def) {
+      appendCombatLog(`Condición desconocida: ${step.conditionId}.`, "default");
+      return;
+    }
+
+    const targets = resolvePlayerSkillEffectTargetsForPlayer(
+      step.target,
+      selectedEnemy,
+      livingEnemies,
+    );
+    const rowsToAdd: ActiveCombatCondition[] = [];
+    let resistedCount = 0;
+    let appliedCount = 0;
+    const conditionStateIcons = getEffectStateIcons(effectForIcons);
+    const isSleepCondition = step.conditionId === "sleep";
+    const sleepTargetLogs: Array<{ message: string; tone: "default" | "success" }> = [];
+
+    const targetDisplayName = (
+      targetKind: "player" | "enemy",
+      enemyForResist: CombatEncounterEnemyView | null,
+    ) => (targetKind === "player" ? playerDisplayName : (enemyForResist?.name ?? "Enemigo"));
+
+    const tryApply = (
+      targetKind: "player" | "enemy",
+      targetId: string,
+      enemyForResist: CombatEncounterEnemyView | null,
+    ) => {
+      const displayName = targetDisplayName(targetKind, enemyForResist);
+      const resisted = rollConditionResisted(step.resist, (statKey) => {
+        if (targetKind === "player") {
+          return getPlayerStatValueForConditionResist(statKey, {
+            playerMr: effectivePlayerMr,
+            playerArmor: effectivePlayerArmor,
+          });
+        }
+        if (!enemyForResist) return 0;
+        const bonuses = getEnemyStatBonuses(enemyForResist.id);
+        return getStatValueForConditionResist(statKey, {
+          enemyMr: effectiveEnemyMr(enemyForResist, bonuses),
+          enemyArmor: effectiveEnemyArmor(enemyForResist, bonuses),
+        });
+      });
+      if (resisted) {
+        resistedCount += 1;
+        if (isSleepCondition) {
+          sleepTargetLogs.push({
+            message: `${displayName} resistió el encantamiento.`,
+            tone: "default",
+          });
+        }
+        return;
+      }
+      appliedCount += 1;
+      if (isSleepCondition) {
+        sleepTargetLogs.push({
+          message: `${displayName} está dormido.`,
+          tone: "success",
+        });
+      }
+      rowsToAdd.push({
+        id: `${targetKind}:${targetId}:${step.conditionId}:${turn}:${Math.random().toString(36).slice(2, 9)}`,
+        conditionId: step.conditionId,
+        targetKind,
+        targetId,
+        remainingTurns: step.durationTurns,
+        lastTickTurn: turn,
+        sourceSkillName: skillName,
+        ...(conditionStateIcons.length > 0 ? { stateIcons: conditionStateIcons } : {}),
+      });
+    };
+
+    if (targets.hitPlayer) {
+      tryApply("player", "player", null);
+    }
+    for (const enemy of targets.enemies) {
+      tryApply("enemy", enemy.id, enemy);
+    }
+
+    if (rowsToAdd.length > 0) {
+      setActiveCombatConditions((prev) => {
+        const withoutDupes = prev.filter(
+          (r) =>
+            !rowsToAdd.some(
+              (n) =>
+                n.targetKind === r.targetKind &&
+                n.targetId === r.targetId &&
+                n.conditionId === r.conditionId,
+            ),
+        );
+        return [...withoutDupes, ...rowsToAdd];
+      });
+    }
+
+    if (isSleepCondition) {
+      for (const log of sleepTargetLogs) {
+        appendCombatLog(log.message, log.tone);
+      }
+    } else if (appliedCount > 0 && resistedCount === 0) {
+      appendCombatLog(`${def.name} aplicado (${skillName}).`, "success");
+    } else if (appliedCount > 0) {
+      appendCombatLog(
+        `${def.name} aplicado a ${appliedCount} objetivo(s); ${resistedCount} resistió.`,
+        "success",
+      );
+    } else if (resistedCount > 0) {
+      appendCombatLog(`El objetivo resistió ${def.name}.`, "default");
+    }
+  }
+
+  function applyPlayerEnemyTimedStatDebuff(
+    effect: Record<string, unknown>,
+    skillName: string,
+    livingEnemies: CombatEncounterEnemyView[],
+  ) {
+    const durationTurns = parseEffectDurationTurns(effect);
+    const enemyParts = playerSelfBuffPartsToEnemyStatParts(
+      resolvePlayerSelfBuffParts(effect, getCombatStatValueForSkills),
+    );
+    if (durationTurns == null || enemyParts.length === 0) {
+      appendCombatLog(`No se pudo aplicar el efecto de ${skillName}.`, "default");
+      return;
+    }
+
+    const targets = resolvePlayerSkillEffectTargetsForPlayer(
+      parsePlayerSkillEffectTarget(effect.target, "enemy"),
+      selectedEnemy,
+      livingEnemies,
+    );
+    if (targets.enemies.length === 0) {
+      appendCombatLog("No hay enemigos válidos para el efecto.", "default");
+      return;
+    }
+
+    const stateIcons = getEffectStateIcons(effect);
+    const newRows: EnemyTimedStatBuff[] = targets.enemies.map((enemy, index) => ({
+      id: `player:${skillName}:${enemy.id}:${turn}:${index}:${Math.random().toString(36).slice(2, 9)}`,
+      enemyId: enemy.id,
+      parts: enemyParts,
+      remainingTurns: durationTurns,
+      lastTickTurn: turn,
+      skillName,
+      stateIcons,
+    }));
+
+    const stacked = stackEnemyTimedStatBuffs(enemyTimedStatBuffsRef.current, newRows, turn);
+    enemyTimedStatBuffsRef.current = stacked;
+    setEnemyTimedStatBuffs(stacked);
+
+    const affectedNames = targets.enemies.map((e) => e.name).join(", ");
+    const hasSpeedDebuff = enemyParts.some((p) => p.stat === "speed" && p.amount < 0);
+    appendCombatLog(
+      targets.enemies.length === 1
+        ? hasSpeedDebuff
+          ? `${affectedNames} está ralentizado.`
+          : `${affectedNames} recibe el efecto de ${skillName}.`
+        : hasSpeedDebuff
+          ? `${affectedNames} están ralentizados.`
+          : `${affectedNames} reciben el efecto de ${skillName}.`,
+      "success",
+    );
+  }
+
+  function runPlayerSkillDamageEffectOnly(
+    skillEntry: CombatPlayerSkillView,
+    damageEffect: Record<string, unknown>,
+    appendSpellLog: (damageDealtForHighlight: number, enemyHitName?: string | null) => void,
+  ): number {
+    const damageTypes = getEffectDamageTypes(damageEffect);
+    const resistWeakTags = getEffectAttackTypesForResistWeak(
+      damageEffect,
+      playerWeaponAttackFamily,
+    );
+    const magicalCombatDamageFlat = Math.max(
+      0,
+      Math.trunc(
+        playerCombatMagicDamageMinBonus +
+          playerCombatMagicDamageMaxBonus +
+          timedBuffBonusByStat.magic_damage_min +
+          timedBuffBonusByStat.magic_damage_max,
+      ),
+    );
+    const effectiveWeaponDamageMin = Math.max(
+      1,
+      Math.floor(
+        playerWeaponDamageMin +
+          playerCombatWeaponDamageMinBonus +
+          timedBuffBonusByStat.weapon_damage_min,
+      ),
+    );
+    const effectiveWeaponDamageMax = Math.max(
+      effectiveWeaponDamageMin,
+      Math.floor(
+        playerWeaponDamageMax +
+          playerCombatWeaponDamageMaxBonus +
+          timedBuffBonusByStat.weapon_damage_max,
+      ),
+    );
+    const skillDamageBases: PlayerSkillDamageBaseBounds = {
+      weaponMin: effectiveWeaponDamageMin,
+      weaponMax: effectiveWeaponDamageMax,
+      magicMin: playerMagicDamageMin,
+      magicMax: playerMagicDamageMax,
+    };
+
+    const needsSingle =
+      parsePlayerSkillEffectTarget(damageEffect.target, "enemy") === "enemy";
+    const isArea = playerSkillDamageHitsAllEnemies(damageEffect);
+
+    if (needsSingle && !isArea) {
+      const target = selectedEnemy;
+      if (!target || target.hp <= 0) return 0;
+      const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(damageEffect, target, {
+        getCombatStatValue: getCombatStatValueForSkills,
+        skillDamageBases,
+        magicalCombatDamageFlat,
+        resistWeakTags,
+        enemyResistancesResolved: mergedEnemyResistancesForPlayerAttack(
+          target,
+          enemySelfTimedModifiers,
+        ),
+        weaknessesResolved: mergedEnemyWeaknessesForPlayerAttack(
+          target,
+          enemyPlayerTimedEffects,
+          enemySelfTimedModifiers,
+          collectWeaknessTagsFromDamageSkillScalings(damageEffect),
+        ),
+        enemyStatBonuses: getEnemyStatBonuses(target.id),
+      });
+      const damageDone = Math.min(mitigatedFinal, target.hp);
+      setDisplayEnemies((prev) =>
+        prev.map((enemy) =>
+          enemy.id === target.id ? { ...enemy, hp: enemy.hp - damageDone } : enemy,
+        ),
+      );
+      recordPlayerDamageDealt(damageDone);
+      if (damageDone > 0 && target.hp - damageDone <= 0) {
+        appendCombatLog(`Has matado a ${target.name}.`, "success");
+        setSelectedEnemyId(null);
+      }
+      return damageDone;
+    }
+
+    let total = 0;
+    for (const enemy of displayEnemies) {
+      if (enemy.hp <= 0) continue;
+      const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(damageEffect, enemy, {
+        getCombatStatValue: getCombatStatValueForSkills,
+        skillDamageBases,
+        magicalCombatDamageFlat,
+        resistWeakTags,
+        enemyResistancesResolved: mergedEnemyResistancesForPlayerAttack(
+          enemy,
+          enemySelfTimedModifiers,
+        ),
+        weaknessesResolved: mergedEnemyWeaknessesForPlayerAttack(
+          enemy,
+          enemyPlayerTimedEffects,
+          enemySelfTimedModifiers,
+          collectWeaknessTagsFromDamageSkillScalings(damageEffect),
+        ),
+        enemyStatBonuses: getEnemyStatBonuses(enemy.id),
+      });
+      const damageDone = Math.min(mitigatedFinal, enemy.hp);
+      total += damageDone;
+      setDisplayEnemies((prev) =>
+        prev.map((e) => (e.id === enemy.id ? { ...e, hp: e.hp - damageDone } : e)),
+      );
+      recordPlayerDamageDealt(damageDone);
+    }
+    return total;
+  }
+
   /** Elige una habilidad (efectos de combate: próximo paso). */
   function handlePlayerSkillChosen(skillEntry: CombatPlayerSkillView) {
     if (!canUsePlayerSkill(skillEntry)) return;
 
     const effect = skillEntry.skill.effect;
+    const steps = expandPlayerSkillEffectSteps(effect);
+
     const effectTypeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
     const damageKind = getPlayerSkillDamageEffectKind(effect);
     const damageTypes = getEffectDamageTypes(effect);
@@ -3014,11 +3796,7 @@ export function CombatEncounterShell({
         : null;
 
     setDisplayPlayerMana((m) => Math.max(0, m - Math.max(0, skillEntry.skill.manaCost)));
-    const nextTurnForSkill = turn + Math.max(1, skillEntry.skill.cooldownTurns);
-    setPlayerSkillNextAvailableTurn((prev) => ({
-      ...prev,
-      [skillEntry.userCharacterSkillId]: nextTurnForSkill,
-    }));
+    applyPlayerSkillCooldown(skillEntry);
 
     const appendSpellLog = (damageDealtForHighlight: number, enemyHitName?: string | null) => {
       const text =
@@ -3039,82 +3817,50 @@ export function CombatEncounterShell({
       );
     };
 
+    if (playerSkillStepsNeedCompositeHandler(steps)) {
+      const livingEnemies = displayEnemies.filter((e) => e.hp > 0);
+      for (const step of steps) {
+        if (step.mode === "apply_condition") {
+          applyPlayerConditionDebuff(step, skillEntry.skill.name, livingEnemies, effect);
+        } else if (step.mode === "raw" && isPlayerEnemyTimedStatEffect(step.effect)) {
+          applyPlayerEnemyTimedStatDebuff(step.effect, skillEntry.skill.name, livingEnemies);
+        }
+      }
+      const damageStep = steps.find(
+        (s): s is { mode: "raw"; effect: Record<string, unknown> } =>
+          s.mode === "raw" && getPlayerSkillDamageEffectKind(s.effect) !== "none",
+      );
+      const totalDamage =
+        damageStep != null
+          ? runPlayerSkillDamageEffectOnly(skillEntry, damageStep.effect, appendSpellLog)
+          : 0;
+      if (damageStep == null) {
+        appendSpellLog(0);
+      } else {
+        appendSpellLog(totalDamage, selectedEnemy?.name ?? null);
+      }
+      scheduleAdvanceTurn();
+      return;
+    }
+
+    if (isPlayerEnemyTimedStatEffect(effect)) {
+      const livingEnemies = displayEnemies.filter((e) => e.hp > 0);
+      applyPlayerEnemyTimedStatDebuff(effect, skillEntry.skill.name, livingEnemies);
+      if (descTemplate != null) {
+        appendCombatLog(
+          formatPlayerSkillCombatLogDescription(descTemplate, 0, null, damageTypes),
+          "default",
+        );
+      }
+      scheduleAdvanceTurn();
+      return;
+    }
+
     if (effectTypeRaw === "buff" && isPlayerSelfBuffEffect(effect)) {
       const durationTurns = parseEffectDurationTurns(effect);
       const parts = resolvePlayerSelfBuffParts(effect, getCombatStatValueForSkills);
       const stateIconsList = getEffectStateIcons(effect);
       const { timedParts, instantParts } = splitSelfBuffPartsForTimedAndInstant(parts, durationTurns);
-
-      if (combatBuffStatDebug) {
-        const timedTotalsAntes: Record<PlayerTimedSelfBuffStat, number> = { ...timedBuffBonusByStat };
-        const timedTotalsDespues = addTimedBuffPartsToStatTotals(timedTotalsAntes, timedParts);
-        const instantDeltas = sumInstantSelfBuffCombatDeltas(instantParts);
-        const antes = computeCombatBuffStatNumbers({
-          playerArmor,
-          playerCombatArmorBonus,
-          timed: timedTotalsAntes,
-          playerMr,
-          playerCombatMrBonus,
-          playerSpeed,
-          playerCombatSpeedBonus,
-          playerWeaponDamageMin,
-          playerWeaponDamageMax,
-          playerCombatWeaponDamageMinBonus,
-          playerCombatWeaponDamageMaxBonus,
-          playerMagicDamageMin,
-          playerMagicDamageMax,
-          playerCombatMagicDamageMinBonus,
-          playerCombatMagicDamageMaxBonus,
-          playerCurrentHp,
-          displayPlayerMana,
-          playerHpMax,
-          playerManaMax,
-        });
-        const despues = computeCombatBuffStatNumbers({
-          playerArmor,
-          playerCombatArmorBonus: playerCombatArmorBonus + instantDeltas.armor,
-          timed: timedTotalsDespues,
-          playerMr,
-          playerCombatMrBonus: playerCombatMrBonus + instantDeltas.mr,
-          playerSpeed,
-          playerCombatSpeedBonus: playerCombatSpeedBonus + instantDeltas.speed,
-          playerWeaponDamageMin,
-          playerWeaponDamageMax,
-          playerCombatWeaponDamageMinBonus:
-            playerCombatWeaponDamageMinBonus + instantDeltas.weaponMin,
-          playerCombatWeaponDamageMaxBonus:
-            playerCombatWeaponDamageMaxBonus + instantDeltas.weaponMax,
-          playerMagicDamageMin,
-          playerMagicDamageMax,
-          playerCombatMagicDamageMinBonus:
-            playerCombatMagicDamageMinBonus + instantDeltas.magicMin,
-          playerCombatMagicDamageMaxBonus:
-            playerCombatMagicDamageMaxBonus + instantDeltas.magicMax,
-          playerCurrentHp: Math.min(
-            Math.max(1, playerHpMax),
-            playerCurrentHp + instantDeltas.hpHeal,
-          ),
-          displayPlayerMana: Math.min(
-            Math.max(0, playerManaMax),
-            Math.max(0, displayPlayerMana + instantDeltas.manaDelta),
-          ),
-          playerHpMax,
-          playerManaMax,
-        });
-        logCombatBuffStatDebug({
-          skillName: skillEntry.skill.name,
-          turn,
-          durationTurns,
-          parts,
-          timedParts,
-          instantParts,
-          antes,
-          despues,
-          timedTotalsAntes,
-          timedTotalsDespues,
-          instantDeltas,
-        });
-      }
 
       if (timedParts.length > 0 && durationTurns != null) {
         setPlayerTimedSelfBuffs((prev) => [
@@ -3261,17 +4007,24 @@ export function CombatEncounterShell({
       if (!target || target.hp <= 0) return;
 
       const weakThis = collectWeaknessTagsFromDamageSkillScalings(effect);
-      const weaknessesResolved = mergeEnemyWeaknessesWithExtraTags(
+      const weaknessesResolved = mergedEnemyWeaknessesForPlayerAttack(
         target,
         enemyPlayerTimedEffects,
+        enemySelfTimedModifiers,
         weakThis,
+      );
+      const enemyResistancesResolved = mergedEnemyResistancesForPlayerAttack(
+        target,
+        enemySelfTimedModifiers,
       );
       const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(effect, target, {
         getCombatStatValue: getCombatStatValueForSkills,
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        enemyResistancesResolved,
         weaknessesResolved,
+        enemyStatBonuses: getEnemyStatBonuses(target.id),
       });
       const damageDone = Math.min(mitigatedFinal, target.hp);
       const updatedHp = target.hp - damageDone;
@@ -3306,17 +4059,24 @@ export function CombatEncounterShell({
     for (const enemy of displayEnemies) {
       if (enemy.hp <= 0) continue;
       const weakThis = collectWeaknessTagsFromDamageSkillScalings(effect);
-      const weaknessesResolved = mergeEnemyWeaknessesWithExtraTags(
+      const weaknessesResolved = mergedEnemyWeaknessesForPlayerAttack(
         enemy,
         enemyPlayerTimedEffects,
+        enemySelfTimedModifiers,
         weakThis,
+      );
+      const enemyResistancesResolved = mergedEnemyResistancesForPlayerAttack(
+        enemy,
+        enemySelfTimedModifiers,
       );
       const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(effect, enemy, {
         getCombatStatValue: getCombatStatValueForSkills,
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        enemyResistancesResolved,
         weaknessesResolved,
+        enemyStatBonuses: getEnemyStatBonuses(enemy.id),
       });
       const damageDone = Math.min(mitigatedFinal, enemy.hp);
       const hpNext = enemy.hp - damageDone;
@@ -3402,16 +4162,140 @@ export function CombatEncounterShell({
   }
 
   function advanceTurn() {
-    setCurrentTurnIndex((prev) => {
-      const order = turnOrderRef.current;
-      if (order.length === 0) return 0;
-      const effective = Math.min(prev, order.length - 1);
-      return (effective + 1) % order.length;
-    });
+    const actedId = currentActorIdRef.current;
+    if (!actedId) return;
+
+    const combatants = atbCombatantsRef.current;
+    const gauges = { ...atbGaugesRef.current };
+    const nextId = advanceAtbAfterAction(gauges, combatants, actedId);
+
+    const acted = new Set(actedThisRoundRef.current);
+    acted.add(actedId);
+    const alive = combatants.filter((c) => c.alive).map((c) => c.id);
+    if (alive.length > 0 && alive.every((id) => acted.has(id))) {
+      actedThisRoundRef.current = new Set();
+      setTurn((t) => t + 1);
+    } else {
+      actedThisRoundRef.current = acted;
+    }
+
+    setAtbGauges(gauges);
+    if (nextId) setCurrentActorId(nextId);
   }
 
   useEffect(() => {
     tickPlayerTimedBuffs(turn);
+
+    setEnemyAppliedPlayerTimedModifiers((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const remainingTurns = row.remainingTurns - 1;
+        changed = true;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+      return changed ? next : prev;
+    });
+
+    setEnemySelfTimedModifiers((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const remainingTurns = row.remainingTurns - 1;
+        changed = true;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+      return changed ? next : prev;
+    });
+
+    setEnemyTimedStatBuffs((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const remainingTurns = row.remainingTurns - 1;
+        changed = true;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+      return changed ? next : prev;
+    });
+
+    const prevConditions = activeCombatConditionsRef.current;
+    if (prevConditions.length > 0) {
+      const enemiesNow = displayEnemiesRef.current;
+      const conditionDotEnemyHp = new Map<string, number>();
+      const conditionDotLogs: Array<{ text: string; dmg: number }> = [];
+      let conditionPlayerDot = 0;
+
+      const nextConditions = prevConditions.flatMap((row) => {
+        if (row.lastTickTurn >= turn) return [row];
+        const def = getCombatConditionDefinition(row.conditionId);
+        if (def) {
+          for (const eff of def.effects) {
+            if (eff.kind !== "damage_over_time") continue;
+            const rolled = Math.max(0, randomIntInclusive(eff.min, eff.max));
+            if (rolled <= 0) continue;
+            if (row.targetKind === "player") {
+              conditionPlayerDot += rolled;
+              conditionDotLogs.push({
+                text: `${playerDisplayName} sufre ${rolled} de daño (${def.name}).`,
+                dmg: rolled,
+              });
+            } else {
+              const enemy = enemiesNow.find((e) => e.id === row.targetId);
+              if (enemy && enemy.hp > 0) {
+                const nextHp = Math.max(0, enemy.hp - rolled);
+                conditionDotEnemyHp.set(enemy.id, nextHp);
+                conditionDotLogs.push({
+                  text: `${enemy.name} sufre ${rolled} de daño (${def.name}).`,
+                  dmg: rolled,
+                });
+              }
+            }
+          }
+        }
+
+        if (row.remainingTurns === null) {
+          return [{ ...row, lastTickTurn: turn }];
+        }
+        const remainingTurns = row.remainingTurns - 1;
+        if (remainingTurns <= 0) return [];
+        return [{ ...row, remainingTurns, lastTickTurn: turn }];
+      });
+
+      if (conditionPlayerDot > 0) {
+        setPlayerCurrentHp((hp) => Math.max(0, hp - conditionPlayerDot));
+        recordPlayerDamageTaken(conditionPlayerDot);
+      }
+      if (conditionDotEnemyHp.size > 0) {
+        setDisplayEnemies((prevE) =>
+          prevE.map((e) => {
+            const nextHp = conditionDotEnemyHp.get(e.id);
+            return nextHp != null ? { ...e, hp: nextHp } : e;
+          }),
+        );
+        for (const [enemyId, nextHp] of conditionDotEnemyHp) {
+          const enemy = enemiesNow.find((e) => e.id === enemyId);
+          if (enemy) {
+            recordPlayerDamageDealt(Math.max(0, enemy.hp - nextHp));
+          }
+        }
+      }
+      for (const log of conditionDotLogs) {
+        appendCombatLog(log.text, "default", log.dmg);
+      }
+      if (
+        nextConditions.length !== prevConditions.length ||
+        nextConditions.some((r, i) => r !== prevConditions[i])
+      ) {
+        setActiveCombatConditions(nextConditions);
+      }
+    }
 
     const prevEffects = enemyPlayerTimedEffectsRef.current;
     if (prevEffects.length === 0) return;
@@ -3430,13 +4314,27 @@ export function CombatEncounterShell({
           eff.dotEffectJson,
           ctx.playerWeaponAttackFamily,
         );
-        const extraWeak = mergeEnemyWeaknessesForPlayerAttackFromEffects(enemy, prevEffects);
+        const extraWeak = mergedEnemyWeaknessesForPlayerAttack(
+          enemy,
+          prevEffects,
+          enemySelfTimedModifiersRef.current,
+          [],
+        );
+        const enemyResistancesResolved = mergedEnemyResistancesForPlayerAttack(
+          enemy,
+          enemySelfTimedModifiersRef.current,
+        );
         const mitigatedFinal = computePlayerSkillMitigatedDamageToEnemy(eff.dotEffectJson, enemy, {
           getCombatStatValue: ctx.getCombatStatValue,
           skillDamageBases: ctx.skillDamageBases,
           magicalCombatDamageFlat: ctx.magicalCombatDamageFlat,
           resistWeakTags: resistTags,
+          enemyResistancesResolved,
           weaknessesResolved: extraWeak,
+          enemyStatBonuses: sumEnemyTimedStatBonuses(
+            enemyTimedStatBuffsRef.current,
+            enemy.id,
+          ),
         });
         const damageDone = Math.min(mitigatedFinal, enemy.hp);
         if (damageDone > 0) {
@@ -3482,26 +4380,51 @@ export function CombatEncounterShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick alineado a `turn`; logs/stats leen cierre actual
   }, [turn]);
 
+  function commitScheduledTurnAdvance(generation: number) {
+    if (generation !== turnAdvanceGenerationRef.current) return;
+    if (generation === lastCommittedTurnAdvanceGenRef.current) return;
+    lastCommittedTurnAdvanceGenRef.current = generation;
+
+    if (advanceTurnTimeoutRef.current) {
+      clearTimeout(advanceTurnTimeoutRef.current);
+      advanceTurnTimeoutRef.current = null;
+    }
+    resolvedEnemyTurnRef.current = null;
+
+    const actedId = currentActorIdRef.current;
+    if (actedId === "player") {
+      const exceptSkillId = skipPlayerSkillCooldownTickIdRef.current;
+      skipPlayerSkillCooldownTickIdRef.current = null;
+      tickPlayerSkillCooldownsAfterPlayerAction(exceptSkillId);
+    }
+    advanceTurn();
+    setAtbActionSeq((seq) => seq + 1);
+    setIsTurnTransitioning(false);
+  }
+
   function scheduleAdvanceTurn() {
     if (advanceTurnTimeoutRef.current) {
       clearTimeout(advanceTurnTimeoutRef.current);
       advanceTurnTimeoutRef.current = null;
-      resolvedEnemyTurnRef.current = null;
     }
+    turnAdvanceGenerationRef.current += 1;
+    const generation = turnAdvanceGenerationRef.current;
     setIsTurnTransitioning(true);
     advanceTurnTimeoutRef.current = setTimeout(() => {
-      resolvedEnemyTurnRef.current = null;
-      advanceTurn();
-      setIsTurnTransitioning(false);
-      advanceTurnTimeoutRef.current = null;
+      commitScheduledTurnAdvance(generation);
     }, ACTION_DELAY_MS);
   }
 
-  /** Evita quedar con `isTurnTransitioning` o turno enemigo colgado si un timeout se cancela sin avanzar. */
+  /** Si el timeout se cancela sin avanzar, forzar `advanceTurn` y liberar el turno enemigo. */
   useEffect(() => {
     if (!isTurnTransitioning) return;
-    const safetyMs = ACTION_DELAY_MS + 2500;
+    const generationAtTransition = turnAdvanceGenerationRef.current;
+    const safetyMs = ACTION_DELAY_MS + 800;
     const safetyId = setTimeout(() => {
+      if (lastCommittedTurnAdvanceGenRef.current < generationAtTransition) {
+        commitScheduledTurnAdvance(turnAdvanceGenerationRef.current);
+        return;
+      }
       if (advanceTurnTimeoutRef.current) {
         clearTimeout(advanceTurnTimeoutRef.current);
         advanceTurnTimeoutRef.current = null;
@@ -3511,6 +4434,25 @@ export function CombatEncounterShell({
     }, safetyMs);
     return () => clearTimeout(safetyId);
   }, [isTurnTransitioning]);
+
+  function recordAmmoSpentInCombat(inventoryId: number, amount = 1) {
+    const id = Math.max(0, Math.trunc(inventoryId));
+    const delta = Math.max(0, Math.trunc(amount));
+    if (id <= 0 || delta <= 0) return;
+    ammoSpentByInventoryIdRef.current.set(
+      id,
+      (ammoSpentByInventoryIdRef.current.get(id) ?? 0) + delta,
+    );
+  }
+
+  function getAmmoSpentForPersist(): CombatAmmoSpentEntry[] {
+    return Array.from(ammoSpentByInventoryIdRef.current.entries())
+      .map(([inventoryId, quantitySpent]) => ({
+        inventoryId,
+        quantitySpent: Math.max(0, Math.trunc(quantitySpent)),
+      }))
+      .filter((entry) => entry.quantitySpent > 0);
+  }
 
   function handleAttack() {
     if (isTurnTransitioning) return;
@@ -3525,6 +4467,10 @@ export function CombatEncounterShell({
     }
     if (target.hp <= 0) {
       appendCombatLog(`${target.name} ya está derrotado.`);
+      return;
+    }
+    if (requiresAmmo && !selectedAmmoItem) {
+      appendCombatLog("Seleccioná munición compatible para atacar.");
       return;
     }
 
@@ -3544,13 +4490,57 @@ export function CombatEncounterShell({
           timedBuffBonusByStat.weapon_damage_max,
       ),
     );
-    const rawDamage = randomIntInclusive(damageMin, damageMax);
-    const afterArmor = mitigateDamageByDefense(rawDamage, target.armor);
+    let rawDamage = randomIntInclusive(damageMin, damageMax);
+    let attackFamilyForHit = playerWeaponAttackFamily;
+
+    let ammoItemForAttack: CombatAmmoMenuEntry | null = null;
+    let ammoAttackType: AmmoAttackType | null = null;
+    if (requiresAmmo && selectedAmmoItem) {
+      const parsedAmmo = parseAmmoEffect(selectedAmmoItem.effect);
+      if (!parsedAmmo) {
+        appendCombatLog("La munición seleccionada no es válida.", "danger");
+        return;
+      }
+      ammoItemForAttack = selectedAmmoItem;
+      rawDamage += rollAmmoDamage(parsedAmmo);
+      attackFamilyForHit = resolveAmmoAttackFamilyForHit(parsedAmmo);
+      ammoAttackType = resolveAmmoAttackTypeForHit(parsedAmmo);
+
+      if (!selectedAmmoItem.isDefaultAmmo) {
+        setCombatConsumables((prev) =>
+          prev
+            .map((entry) =>
+              entry.inventoryId === selectedAmmoItem.inventoryId
+                ? { ...entry, quantity: Math.max(0, entry.quantity - 1) }
+                : entry,
+            )
+            .filter((entry) => entry.quantity > 0),
+        );
+        recordAmmoSpentInCombat(selectedAmmoItem.inventoryId, 1);
+      }
+    }
+
+    const targetBonuses = getEnemyStatBonuses(target.id);
+    const enemyDefenseForHit =
+      ammoAttackType === "magical"
+        ? effectiveEnemyMr(target, targetBonuses)
+        : effectiveEnemyArmor(target, targetBonuses);
+    const afterArmor =
+      ammoAttackType === "magical"
+        ? mitigateDamageByMr(rawDamage, enemyDefenseForHit)
+        : mitigateDamageByDefense(rawDamage, enemyDefenseForHit);
+    const resistMerged = mergedEnemyResistancesForPlayerAttack(target, enemySelfTimedModifiers);
+    const weakMerged = mergedEnemyWeaknessesForPlayerAttack(
+      target,
+      enemyPlayerTimedEffects,
+      enemySelfTimedModifiers,
+      [],
+    );
     const mitigated = applyEnemyAttackFamilyToMitigatedDamage(
       afterArmor,
-      playerWeaponAttackFamily,
-      target.resistances,
-      target.weaknesses,
+      attackFamilyForHit,
+      resistMerged,
+      weakMerged,
     );
     const updatedHp = Math.max(0, target.hp - mitigated);
     const damageDone = target.hp - updatedHp;
@@ -3558,8 +4548,10 @@ export function CombatEncounterShell({
     setDisplayEnemies((prev) =>
       prev.map((enemy) => (enemy.id === target.id ? { ...enemy, hp: updatedHp } : enemy)),
     );
+    const ammoSuffix =
+      ammoItemForAttack != null ? ` (con ${ammoItemForAttack.name})` : "";
     appendCombatLog(
-      `Atacaste a ${target.name} y le infligiste ${damageDone} de daño.`,
+      `Atacaste a ${target.name}${ammoSuffix} y le infligiste ${damageDone} de daño.`,
       "default",
       damageDone,
     );
@@ -3579,8 +4571,50 @@ export function CombatEncounterShell({
     setAttackHint((prev) => (prev.visible ? { ...prev, visible: false } : prev));
   }
 
+  function renderAmmoMenuPanel(textSizeClass = "text-[11px]") {
+    if (combatAmmoItems.length === 0) {
+      return (
+        <p
+          className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center ${textSizeClass} text-amber-200/75`}
+        >
+          No hay munición para este arma.
+        </p>
+      );
+    }
+    return (
+      <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
+        <div className="grid gap-1 sm:gap-1.5">
+          {combatAmmoItems.map((item) => {
+            const selected = item.inventoryId === selectedAmmoInventoryId;
+            const label = formatAmmoMenuButtonLabel(item.name, item.quantity, item.effect, {
+              unlimitedQuantity: item.isDefaultAmmo,
+            });
+            return (
+              <button
+                key={item.inventoryId}
+                type="button"
+                disabled={isPlayerActionsLocked}
+                onClick={() => {
+                  setSelectedAmmoInventoryId(item.inventoryId);
+                  setActionMenu("main");
+                }}
+                className={`w-full rounded-md border px-1.5 py-0.5 text-left ${textSizeClass} font-semibold leading-snug transition ${
+                  selected
+                    ? "cursor-pointer border-amber-400/90 bg-amber-700/55 text-amber-50 shadow-[inset_0_1px_0_rgba(253,224,71,0.22),0_0_10px_rgba(217,119,6,0.28)] hover:bg-amber-600/60"
+                    : "cursor-pointer border-yellow-600/65 bg-yellow-900/40 text-yellow-100/90 hover:border-yellow-500/75 hover:bg-yellow-800/50"
+                } ${isPlayerActionsLocked ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   function handleEscapeClick(event: React.MouseEvent<HTMLAnchorElement>) {
-    if (isEscapeDisabledByEnemyHp) {
+    if (isEscapeDisabled) {
       event.preventDefault();
       return;
     }
@@ -3591,11 +4625,13 @@ export function CombatEncounterShell({
     void onEscapePersistState({
       finalHp: Math.max(0, Math.trunc(playerCurrentHp)),
       finalMana: Math.max(0, Math.trunc(displayPlayerMana)),
+      ammoSpent: getAmmoSpentForPersist(),
     })
       .catch(() => {
         // Si falla el guardado no bloquea escape.
       })
       .finally(() => {
+        ammoSpentByInventoryIdRef.current = new Map();
         router.push(escapeHref);
       });
   }
@@ -3605,8 +4641,10 @@ export function CombatEncounterShell({
     for (const skill of enemy.skills) {
       const nextAvailableTurn = skillState[skill.id] ?? 1;
       if (turn < nextAvailableTurn) continue;
-      if (enemy.mana < skill.manaCost) continue;
-      const chance = Math.max(0, Math.min(1, skill.effect.chance));
+      if (effectiveEnemyMana(enemy, getEnemyStatBonuses(enemy.id)) < skill.manaCost) continue;
+      const root = skill.parsedEffect;
+      if (!enemySkillMatchesUseWhen(enemy.hp, enemy.hpMax, parsedEnemySkillUseWhen(root))) continue;
+      const chance = parsedEnemySkillChance(root);
       const roll = Math.random();
       return {
         chosenSkill: roll <= chance ? skill : null,
@@ -3619,20 +4657,87 @@ export function CombatEncounterShell({
     return null;
   }
 
+  /** Sueño / parálisis / stun: tira despertar si aplica; logs y opcional skip de turno. */
+  function resolveSkipTurnConditionsForActor(
+    targetKind: "player" | "enemy",
+    targetId: string,
+    affectedName: string,
+  ): boolean {
+    const result = evaluateSkipTurnConditionsAtTurnStart(
+      activeCombatConditionsRef.current,
+      targetKind,
+      targetId,
+      affectedName,
+    );
+
+    if (result.removeConditionIds.length > 0) {
+      setActiveCombatConditions((prev) =>
+        prev.filter((c) => !result.removeConditionIds.includes(c.id)),
+      );
+    }
+
+    for (const log of result.logs) {
+      appendCombatLog(log.message, log.tone);
+    }
+
+    if (result.shouldSkipTurn) {
+      scheduleAdvanceTurn();
+      return true;
+    }
+    return false;
+  }
+
+  useEffect(() => {
+    if (combatOutcome !== "active") return;
+    if (!isPlayerTurn || isTurnTransitioning || isInitialCombatDelay) return;
+    if (playerCurrentHp <= 0) return;
+    if (!targetHasSkipTurnCondition(activeCombatConditionsRef.current, "player", "player")) {
+      return;
+    }
+    const skipKey = `player-skip:${atbActionSeq}`;
+    if (playerSkipTurnResolvedRef.current === skipKey) return;
+    playerSkipTurnResolvedRef.current = skipKey;
+
+    resolveSkipTurnConditionsForActor("player", "player", playerDisplayName);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- por acción ATB del PJ
+  }, [atbActionSeq, combatOutcome, isInitialCombatDelay, isPlayerTurn, isTurnTransitioning, playerCurrentHp, playerDisplayName]);
+
   useEffect(() => {
     if (combatOutcome !== "active") return;
     if (!currentActor || currentActor.type !== "enemy") return;
-    if (isTurnTransitioning) return;
+    if (isInitialCombatDelay) {
+      debugEnemy("turno-enemigo-esperando-intro", {
+        turn,
+        actorId: currentActorId,
+        enemyId: currentActor.enemyId,
+        isTurnTransitioning,
+      });
+      return;
+    }
     if (playerCurrentHp <= 0) return;
 
-    const resolvedKey = `${turn}:${effectiveTurnIndex}:${currentActor.id}`;
+    const resolvedKey = `${atbActionSeq}:${currentActorId ?? ""}`;
     if (resolvedEnemyTurnRef.current === resolvedKey) return;
     resolvedEnemyTurnRef.current = resolvedKey;
+
+    debugEnemy("turno-enemigo-ejecutando", {
+      turn,
+      atbActionSeq,
+      actorId: currentActorId,
+      enemyId: currentActor.enemyId,
+      isTurnTransitioning,
+    });
 
     const enemy = displayEnemies.find((entry) => entry.id === currentActor.enemyId);
     if (!enemy || enemy.hp <= 0) {
       scheduleAdvanceTurn();
       return;
+    }
+
+    if (targetHasSkipTurnCondition(activeCombatConditionsRef.current, "enemy", enemy.id)) {
+      if (resolveSkipTurnConditionsForActor("enemy", enemy.id, enemy.name)) {
+        return;
+      }
     }
 
     setEnemyAttackLungeSeq((prev) => ({
@@ -3642,76 +4747,554 @@ export function CombatEncounterShell({
 
     const skillDecision = pickAvailableEnemySkill(enemy);
     const skill = skillDecision?.chosenSkill ?? null;
-    let incomingSubtype: PlayerSkillEffectSubtype = "physical";
-    let rawDamage = 0;
-    if (skill) {
-      incomingSubtype = enemySkillIncomingSubtype(skill.effect);
-      rawDamage = Math.max(0, randomIntInclusive(skill.effect.min, skill.effect.max));
-      const nextTurnForSkill = turn + Math.max(1, skill.cooldownTurns);
+
+    const spendSkillResources = (sk: CombatEncounterEnemySkill) => {
+      const nextTurnForSkill = turn + Math.max(1, sk.cooldownTurns);
       setEnemySkillNextAvailableTurn((prev) => ({
         ...prev,
         [enemy.id]: {
           ...(prev[enemy.id] ?? {}),
-          [skill.id]: nextTurnForSkill,
+          [sk.id]: nextTurnForSkill,
         },
       }));
       setDisplayEnemies((prev) =>
         prev.map((entry) =>
           entry.id === enemy.id
-            ? { ...entry, mana: Math.max(0, entry.mana - Math.max(0, skill.manaCost)) }
+            ? { ...entry, mana: Math.max(0, entry.mana - Math.max(0, sk.manaCost)) }
             : entry,
         ),
       );
-    } else {
-      incomingSubtype = "physical";
-      rawDamage = Math.max(0, randomIntInclusive(enemy.attackMin, enemy.attackMax));
-    }
-    const defenseStat = playerDefenseStatVsIncoming(
-      incomingSubtype,
-      effectivePlayerArmor,
-      effectivePlayerMr,
-    );
-    const damage = mitigateDamageByDefense(rawDamage, defenseStat);
-    recordPlayerDamageTaken(damage);
-    const nextPlayerHp = Math.max(0, playerCurrentHp - damage);
-    setPlayerCurrentHp(nextPlayerHp);
+    };
+
+    let simPlayerHp = playerCurrentHp;
+    const applyPlayerDamageTaken = (amount: number) => {
+      const d = Math.max(0, Math.trunc(amount));
+      if (d <= 0) return;
+      recordPlayerDamageTaken(d);
+      simPlayerHp = Math.max(0, simPlayerHp - d);
+      setPlayerCurrentHp(simPlayerHp);
+    };
+
     if (skill) {
-      const descRaw = skill.description?.trim();
-      const fallback = `${enemy.name} usa ${skill.name}.`;
-      const template = descRaw && descRaw.length > 0 ? descRaw : fallback;
-      const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(template);
-      const logText = formatEnemySkillCombatLogDescription(
-        template,
-        damage,
-        enemy.name,
-        skill.effect.damageTypes ?? [],
+      spendSkillResources(skill);
+      const root = skill.parsedEffect;
+      let livePlayerMods = [...enemyAppliedPlayerTimedModifiersRef.current];
+      let simEnemyHp = enemy.hp;
+      const enemyHpMaxSafe = Math.max(1, Math.trunc(enemy.hpMax));
+
+      const appendEnemySkillLog = (
+        template: string,
+        damageAmt: number,
+        dmgTypes: string[] = [],
+      ) => {
+        const t = template.trim();
+        if (!t) return;
+        const hadDamagePh = enemySkillCombatLogHadDamagePlaceholder(t);
+        const logText = formatEnemySkillCombatLogDescription(
+          t,
+          damageAmt,
+          enemy.name,
+          dmgTypes,
+          playerDisplayName,
+        );
+        appendCombatLog(
+          logText,
+          "danger",
+          undefined,
+          hadDamagePh ? Math.max(0, Math.trunc(damageAmt)) : undefined,
+        );
+      };
+
+      let enemySkillDescriptionLogged = false;
+      const skillLogDescription = resolveEnemySkillLogDescription(
+        skill.description,
+        root,
       );
-      appendCombatLog(
-        logText,
-        "danger",
-        undefined,
-        hadDamagePh ? Math.max(0, Math.trunc(damage)) : undefined,
-      );
+      const tryLogEnemySkillDescription = (
+        damageAmt: number,
+        dmgTypes: string[] = [],
+      ) => {
+        if (enemySkillDescriptionLogged) return;
+        const descRaw = skillLogDescription?.trim();
+        if (!descRaw) {
+          debugEnemy("skill-sin-descripcion-log", {
+            enemy: enemy.name,
+            skill: skill.name,
+            skillId: skill.id,
+            columnDescription: skill.description,
+            effectLogDescription:
+              root.mode === "composite" ? root.logDescription : null,
+          });
+          return;
+        }
+        enemySkillDescriptionLogged = true;
+        appendEnemySkillLog(descRaw, damageAmt, dmgTypes);
+      };
+
+      const getEnemyStatBonusesDuringSkill = (enemyId: string) =>
+        sumEnemyTimedStatBonuses(enemyTimedStatBuffsRef.current, enemyId);
+
+      const runLeaf = (
+        leaf: ParsedEnemySkillEffect,
+        rollLeafChance: boolean,
+        opts?: { suppressPlayerDamageLog?: boolean },
+      ): number => {
+        if (leaf.mode === "composite") {
+          if (rollLeafChance && Math.random() > leaf.chance) return 0;
+          const skillDesc = skillLogDescription?.trim() ?? "";
+          const suppressHits =
+            skillDesc.length > 0 || Boolean(opts?.suppressPlayerDamageLog);
+          let totalPlayerDamage = 0;
+          const orderedSteps = orderCompositeStepsForExecution(leaf.steps);
+          debugEnemy("composite-inicio", {
+            enemy: enemy.name,
+            skill: skill.name,
+            stepOrder: orderedSteps.map((s) => s.mode),
+            buffsActivosAntes: getEnemyStatBonusesDuringSkill(enemy.id),
+          });
+          for (const step of orderedSteps) {
+            totalPlayerDamage += runLeaf(step, true, {
+              suppressPlayerDamageLog: suppressHits,
+            });
+          }
+          if (!opts?.suppressPlayerDamageLog) {
+            tryLogEnemySkillDescription(totalPlayerDamage);
+          }
+          debugEnemy("composite-fin", {
+            enemy: enemy.name,
+            skill: skill.name,
+            totalPlayerDamage,
+            buffsActivosDespues: getEnemyStatBonusesDuringSkill(enemy.id),
+            logEscrito: enemySkillDescriptionLogged,
+          });
+          return totalPlayerDamage;
+        }
+        if (!enemySkillMatchesUseWhen(simEnemyHp, enemyHpMaxSafe, parsedEnemySkillUseWhen(leaf))) {
+          return 0;
+        }
+        if (rollLeafChance && Math.random() > parsedEnemySkillChance(leaf)) return 0;
+
+        const livingEnemyTargets = displayEnemiesRef.current.filter((e) => e.hp > 0);
+
+        switch (leaf.mode) {
+          case "damage": {
+            let playerDamage = 0;
+            const dmgTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            if (dmgTargets.hitPlayer) {
+              const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
+              const rawDamageRoll = Math.max(
+                0,
+                rollEnemySkillRawDamage(
+                  leaf.min,
+                  leaf.max,
+                  leaf.damageBasis,
+                  playerCurrentHp,
+                  playerHpMax,
+                ),
+              );
+              const defenseStat = playerDefenseStatVsIncoming(
+                incomingSubtype,
+                effectivePlayerArmor,
+                effectivePlayerMr,
+              );
+              const afterDef = mitigateDamageBySubtype(rawDamageRoll, defenseStat, incomingSubtype);
+              const rw = mergePlayerResistWeakForIncoming(
+                playerResistancesRef.current,
+                playerWeaknessesRef.current,
+                livePlayerMods,
+              );
+              const damage = applyEnemyResistWeakTagsToMitigatedDamage(
+                afterDef,
+                leaf.damageTypes,
+                rw.resistances,
+                rw.weaknesses,
+              );
+              const d = Math.max(0, Math.trunc(damage));
+              playerDamage += d;
+              applyPlayerDamageTaken(d);
+              if (!opts?.suppressPlayerDamageLog) {
+                tryLogEnemySkillDescription(d, leaf.damageTypes);
+              }
+            }
+            if (dmgTargets.enemies.length > 0) {
+              const hpById = new Map<string, number>();
+              for (const victim of dmgTargets.enemies) {
+                const bonuses = getEnemyStatBonuses(victim.id);
+                const d = mitigatedEnemySkillDamageToEnemy(leaf, victim, bonuses);
+                if (d <= 0) continue;
+                const nextHp = Math.max(0, victim.hp - d);
+                hpById.set(victim.id, nextHp);
+                appendCombatLog(
+                  `${enemy.name} inflige ${d} de daño a ${victim.name} (${skill.name}).`,
+                  "default",
+                );
+                if (victim.id === enemy.id) simEnemyHp = nextHp;
+              }
+              if (hpById.size > 0) {
+                setDisplayEnemies((prev) =>
+                  prev.map((e) => {
+                    const nextHp = hpById.get(e.id);
+                    return nextHp != null ? { ...e, hp: nextHp } : e;
+                  }),
+                );
+              }
+            }
+            return playerDamage;
+          }
+          case "weapon_attack": {
+            let playerDamage = 0;
+            const dmgTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            if (dmgTargets.hitPlayer) {
+              const timedBonuses = getEnemyStatBonusesDuringSkill(enemy.id);
+              const attackRange = effectiveEnemyAttackRange(enemy, timedBonuses);
+              const rawDamageRoll = Math.max(
+                0,
+                randomIntInclusive(attackRange.min, attackRange.max),
+              );
+
+              const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
+              const defenseStat = playerDefenseStatVsIncoming(
+                incomingSubtype,
+                effectivePlayerArmor,
+                effectivePlayerMr,
+              );
+              const afterDef = mitigateDamageBySubtype(rawDamageRoll, defenseStat, incomingSubtype);
+              const rw = mergePlayerResistWeakForIncoming(
+                playerResistancesRef.current,
+                playerWeaknessesRef.current,
+                livePlayerMods,
+              );
+              const damage = applyEnemyResistWeakTagsToMitigatedDamage(
+                afterDef,
+                leaf.damageTypes,
+                rw.resistances,
+                rw.weaknesses,
+              );
+              const d = Math.max(0, Math.trunc(damage));
+              playerDamage += d;
+              debugEnemy("weapon_attack", {
+                enemy: enemy.name,
+                skill: skill.name,
+                baseMin: enemy.attackMin,
+                baseMax: enemy.attackMax,
+                bonusAttackMin: timedBonuses.attackMin,
+                bonusAttackMax: timedBonuses.attackMax,
+                rangoFinal: attackRange,
+                tiradaBruta: rawDamageRoll,
+                trasDefensa: afterDef,
+                danoFinal: d,
+                damageTypes: leaf.damageTypes,
+                filasBuffRef: enemyTimedStatBuffsRef.current
+                  .filter((r) => r.enemyId === enemy.id)
+                  .map((r) => ({ skillName: r.skillName, parts: r.parts })),
+              });
+              applyPlayerDamageTaken(d);
+              if (!opts?.suppressPlayerDamageLog) {
+                tryLogEnemySkillDescription(d, leaf.damageTypes);
+              }
+            }
+            return playerDamage;
+          }
+          case "heal": {
+            const healTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            if (healTargets.hitPlayer) {
+              const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+              setPlayerCurrentHp((prev) => {
+                const cap = Math.max(1, playerHpMax);
+                const next = Math.min(cap, prev + rolled);
+                recordPlayerHealing(Math.max(0, next - prev));
+                return next;
+              });
+              if (!opts?.suppressPlayerDamageLog) {
+                tryLogEnemySkillDescription(0);
+              }
+            }
+            if (healTargets.enemies.length > 0) {
+              const hpById = new Map<string, number>();
+              let totalGained = 0;
+              for (const recipient of healTargets.enemies) {
+                const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+                const hpMax = Math.max(
+                  1,
+                  effectiveEnemyHpMax(recipient, getEnemyStatBonuses(recipient.id)),
+                );
+                const nextHp = Math.min(hpMax, recipient.hp + rolled);
+                const gained = Math.max(0, nextHp - recipient.hp);
+                totalGained += gained;
+                hpById.set(recipient.id, nextHp);
+                if (recipient.id === enemy.id) simEnemyHp = nextHp;
+              }
+              if (hpById.size > 0) {
+                setDisplayEnemies((prev) =>
+                  prev.map((e) => {
+                    const nextHp = hpById.get(e.id);
+                    return nextHp != null ? { ...e, hp: nextHp } : e;
+                  }),
+                );
+              }
+              appendCombatLog(
+                healTargets.enemies.length === 1
+                  ? `${enemy.name} recupera ${totalGained} PV (${skill.name}).`
+                  : `${enemy.name} recupera ${totalGained} PV en total (${skill.name}).`,
+                totalGained > 0 ? "success" : "default",
+              );
+            }
+            return 0;
+          }
+          case "apply_modifier": {
+            const modTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            const idSuffix = `${skill.id}:${turn}:${Math.random().toString(36).slice(2, 9)}`;
+            if (modTargets.hitPlayer) {
+              const row: EnemyAppliedPlayerTimedModifier = {
+                id: `${enemy.id}:player:${idSuffix}`,
+                remainingTurns: leaf.durationTurns,
+                lastTickTurn: turn,
+                sourceSkillName: skill.name,
+                stateIcons: leaf.stateIcons,
+                extraWeaknessTags: leaf.weaknessTags,
+                extraResistanceTags: leaf.resistanceTags,
+              };
+              livePlayerMods.push(row);
+              setEnemyAppliedPlayerTimedModifiers((prev) => [...prev, row]);
+            }
+            if (modTargets.enemies.length > 0) {
+              const rows: EnemySelfTimedModifier[] = modTargets.enemies.map((recipient) => ({
+                id: `${enemy.id}:${recipient.id}:${idSuffix}`,
+                enemyId: recipient.id,
+                remainingTurns: leaf.durationTurns,
+                lastTickTurn: turn,
+                skillName: skill.name,
+                stateIcons: leaf.stateIcons,
+                resistanceTags: leaf.resistanceTags,
+                weaknessTags: leaf.weaknessTags,
+              }));
+              setEnemySelfTimedModifiers((prev) => [...prev, ...rows]);
+            }
+            if (!opts?.suppressPlayerDamageLog) {
+              tryLogEnemySkillDescription(0);
+            }
+            return 0;
+          }
+          case "stat_buff": {
+            const buffTargets = resolveEnemySkillEffectTargets(
+              leaf.target,
+              enemy.id,
+              livingEnemyTargets,
+            );
+            const idSuffix = `${skill.id}:${turn}:${Math.random().toString(36).slice(2, 9)}`;
+
+            if (buffTargets.hitPlayer) {
+              const playerTimedParts = enemyStatPartsToPlayerTimedParts(leaf.parts);
+              if (playerTimedParts.length > 0) {
+                setPlayerTimedSelfBuffs((prev) => [
+                  ...prev,
+                  {
+                    id: `${enemy.id}:player:${idSuffix}`,
+                    parts: playerTimedParts,
+                    remainingTurns: leaf.durationTurns,
+                    lastTickTurn: turn,
+                    skillName: skill.name,
+                    stateIcons: leaf.stateIcons,
+                  },
+                ]);
+              }
+              for (const part of leaf.parts) {
+                const amount = Math.trunc(part.amount);
+                if (amount <= 0) continue;
+                if (part.stat === "hp") {
+                  setPlayerCurrentHp((prev) => {
+                    const cap = Math.max(1, playerHpMax);
+                    const next = Math.min(cap, prev + amount);
+                    recordPlayerHealing(Math.max(0, next - prev));
+                    return next;
+                  });
+                } else if (part.stat === "mana") {
+                  setDisplayPlayerMana((m) =>
+                    Math.min(Math.max(0, playerManaMax), Math.max(0, m + amount)),
+                  );
+                }
+              }
+            }
+
+            if (buffTargets.enemies.length > 0) {
+              const newRows: EnemyTimedStatBuff[] = buffTargets.enemies.map((recipient) => ({
+                id: `${enemy.id}:${recipient.id}:${idSuffix}`,
+                enemyId: recipient.id,
+                parts: leaf.parts,
+                remainingTurns: leaf.durationTurns,
+                lastTickTurn: turn,
+                skillName: skill.name,
+                stateIcons: leaf.stateIcons,
+              }));
+              const stackedBuffs = stackEnemyTimedStatBuffs(
+                enemyTimedStatBuffsRef.current,
+                newRows,
+                turn,
+              );
+              enemyTimedStatBuffsRef.current = stackedBuffs;
+              setEnemyTimedStatBuffs(stackedBuffs);
+              debugEnemy("stat_buff", {
+                enemy: enemy.name,
+                skill: skill.name,
+                targets: newRows.map((r) => r.enemyId),
+                partsAgregados: leaf.parts,
+                durationTurns: leaf.durationTurns,
+                filasActivas: stackedBuffs
+                  .filter((r) => buffTargets.enemies.some((e) => e.id === r.enemyId))
+                  .map((r) => ({
+                    skillName: r.skillName,
+                    parts: r.parts,
+                    remainingTurns: r.remainingTurns,
+                  })),
+                bonusesTrasBuff: Object.fromEntries(
+                  buffTargets.enemies.map((recipient) => [
+                    recipient.id,
+                    getEnemyStatBonusesDuringSkill(recipient.id),
+                  ]),
+                ),
+              });
+
+              const hpById = new Map<string, number>();
+              const manaById = new Map<string, number>();
+              for (const recipient of buffTargets.enemies) {
+                const bonusesAfter = sumEnemyTimedStatBonuses(
+                  enemyTimedStatBuffsRef.current,
+                  recipient.id,
+                );
+                let nextHp = recipient.id === enemy.id ? simEnemyHp : recipient.hp;
+                let nextMana = recipient.mana;
+                let hpChanged = false;
+                let manaChanged = false;
+                for (const part of leaf.parts) {
+                  const amount = Math.trunc(part.amount);
+                  if (amount <= 0) continue;
+                  if (part.stat === "hp") {
+                    const cap = effectiveEnemyHpMax(recipient, bonusesAfter);
+                    const healed = Math.min(cap, nextHp + amount) - nextHp;
+                    if (healed > 0) {
+                      nextHp += healed;
+                      hpChanged = true;
+                    }
+                  } else if (part.stat === "mana") {
+                    nextMana += amount;
+                    manaChanged = true;
+                  }
+                }
+                if (hpChanged) {
+                  hpById.set(recipient.id, nextHp);
+                  if (recipient.id === enemy.id) simEnemyHp = nextHp;
+                }
+                if (manaChanged) manaById.set(recipient.id, Math.max(0, nextMana));
+              }
+              if (hpById.size > 0 || manaById.size > 0) {
+                setDisplayEnemies((prev) =>
+                  prev.map((e) => {
+                    const hpNext = hpById.get(e.id);
+                    const manaNext = manaById.get(e.id);
+                    if (hpNext == null && manaNext == null) return e;
+                    return {
+                      ...e,
+                      hp: hpNext != null ? hpNext : e.hp,
+                      mana: manaNext != null ? manaNext : e.mana,
+                    };
+                  }),
+                );
+              }
+            }
+
+            if (!opts?.suppressPlayerDamageLog) {
+              tryLogEnemySkillDescription(0);
+            }
+            return 0;
+          }
+          default:
+            return 0;
+        }
+      };
+
+      runLeaf(root, false);
     } else {
+      const incomingSubtype: PlayerSkillEffectSubtype = "physical";
+      const enemyBonuses = getEnemyStatBonuses(enemy.id);
+      const attackRange = effectiveEnemyAttackRange(enemy, enemyBonuses);
+      const rawDamage = Math.max(0, randomIntInclusive(attackRange.min, attackRange.max));
+      const defenseStat = playerDefenseStatVsIncoming(
+        incomingSubtype,
+        effectivePlayerArmor,
+        effectivePlayerMr,
+      );
+      const damage = mitigateDamageByDefense(rawDamage, defenseStat);
+      const d = Math.max(0, Math.trunc(damage));
+      applyPlayerDamageTaken(d);
       appendCombatLog(
-        `${enemy.name} te ataca y te inflige ${damage} de daño.`,
+        `${enemy.name} te ataca y te inflige ${d} de daño.`,
         "danger",
         undefined,
-        Math.max(0, Math.trunc(damage)),
+        d,
       );
     }
-    if (nextPlayerHp === 0) {
+
+    if (simPlayerHp === 0) {
       appendCombatLog(`${enemy.name} te ha derrotado.`, "danger");
+      resolvedEnemyTurnRef.current = null;
       return;
     }
     scheduleAdvanceTurn();
   }, [
+    atbActionSeq,
     combatOutcome,
     currentActor,
-    effectiveTurnIndex,
+    currentActorId,
     displayEnemies,
     effectivePlayerArmor,
     effectivePlayerMr,
+    debugEnemy,
+    isInitialCombatDelay,
+    playerCurrentHp,
+    turn,
+  ]);
+
+  /** Enemigo atacó pero no quedó `scheduleAdvanceTurn` pendiente: reintentar avance. */
+  useEffect(() => {
+    if (combatOutcome !== "active") return;
+    if (!currentActor || currentActor.type !== "enemy") return;
+    if (isInitialCombatDelay || isTurnTransitioning) return;
+    if (playerCurrentHp <= 0) return;
+
+    const resolvedKey = `${atbActionSeq}:${currentActorId ?? ""}`;
+    if (resolvedEnemyTurnRef.current !== resolvedKey) return;
+
+    const watchdogId = setTimeout(() => {
+      if (resolvedEnemyTurnRef.current !== resolvedKey) return;
+      if (currentActorIdRef.current !== currentActorId) return;
+      debugEnemy("watchdog-reenviar-avance-tras-ataque-enemigo", { resolvedKey });
+      scheduleAdvanceTurn();
+    }, ACTION_DELAY_MS + 1200);
+
+    return () => clearTimeout(watchdogId);
+  }, [
+    atbActionSeq,
+    combatOutcome,
+    currentActor,
+    currentActorId,
+    debugEnemy,
+    isInitialCombatDelay,
     isTurnTransitioning,
     playerCurrentHp,
     turn,
@@ -3730,82 +5313,61 @@ export function CombatEncounterShell({
       />
 
       <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col p-2 sm:min-h-[100dvh] sm:p-6">
-        {combatDebug ? (
-          <details className="mb-2 rounded-lg border border-amber-600/50 bg-black/75 p-2 text-left text-[11px] text-amber-100/95 shadow-lg backdrop-blur-sm">
-            <summary className="cursor-pointer select-none font-semibold text-amber-300">
-              Debug combate (?debug=1)
-            </summary>
-            <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-emerald-100/90">
-              {JSON.stringify(
-                {
-                  server: combatDebug,
-                  runtime: {
-                    initiative: runtimeInitiativeDebug,
-                  },
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </details>
-        ) : null}
-
         <header
           className={`${menuFont.className} rounded-xl border border-amber-800/70 bg-[#1a100c]/88 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:py-2 sm:px-4`}
         >
-          <div className="flex w-full items-center gap-2 sm:gap-4">
-            <div className="min-w-0 flex-1 basis-0">
-              <p className="truncate text-[9px] font-semibold uppercase tracking-[0.18em] text-amber-400/90 sm:text-[11px]">
+          <div className="max-sm:grid max-sm:w-full max-sm:grid-cols-[minmax(0,1fr)_auto_auto] max-sm:items-center max-sm:gap-y-2 sm:flex sm:w-full sm:items-stretch">
+            <div className="max-sm:col-start-1 max-sm:row-start-1 flex min-w-0 items-center px-2 sm:max-w-[28%] sm:shrink-0 sm:px-3">
+              <p className="truncate text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-400/90 sm:text-[11px] sm:tracking-[0.18em]">
                 {encounterName}
               </p>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap border-x border-amber-800/40 px-2 sm:gap-2 sm:px-4">
-              <span
-                className={`text-xs font-bold transition-transform duration-200 sm:text-sm ${
-                  turnOwner === "player"
-                    ? "scale-110 text-amber-100 drop-shadow-[0_0_8px_rgba(251,191,36,0.7)]"
-                    : "text-amber-700/70"
-                }`}
-                aria-hidden
-              >
-                &lt;
-              </span>
-              <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-amber-300/90 sm:text-xs sm:tracking-[0.2em]">
-                Turno
-              </span>
-              <span className="min-w-[1.1rem] text-center text-base font-bold tabular-nums text-amber-100 sm:text-2xl">
-                {turn}
-              </span>
-              <span
-                className={`text-xs font-bold transition-transform duration-200 sm:text-sm ${
-                  turnOwner === "enemy"
-                    ? "scale-110 text-amber-100 drop-shadow-[0_0_8px_rgba(251,191,36,0.7)]"
-                    : "text-amber-700/70"
-                }`}
-                aria-hidden
-              >
-                &gt;
-              </span>
+            <div
+              className="max-sm:col-start-2 max-sm:row-start-1 max-sm:h-6 max-sm:w-px max-sm:shrink-0 max-sm:bg-amber-800/50 sm:w-px sm:shrink-0 sm:self-stretch sm:bg-amber-800/50"
+              role="separator"
+              aria-orientation="vertical"
+            />
+
+            <div className="max-sm:col-span-3 max-sm:row-start-2 flex w-full justify-center border-t border-amber-800/50 px-2 pt-2 sm:min-w-0 sm:flex-1 sm:border-0 sm:px-4 sm:pt-0">
+              {atbTimelineEntries.length > 0 ? (
+                <CombatAtbTimeline
+                  entries={atbTimelineEntries}
+                  className="mx-auto w-full max-sm:!max-w-full"
+                />
+              ) : (
+                <div className="min-w-0 flex-1" aria-hidden />
+              )}
             </div>
 
-            <Link
-              href={escapeHref}
-              onClick={handleEscapeClick}
-              aria-disabled={isEscapeDisabledByEnemyHp || isEscaping}
-              title={
-                isEscapeDisabledByEnemyHp
-                  ? "No podés huir cuando la vida total de los enemigos es 60% o menos."
-                  : undefined
-              }
-              className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition sm:px-3 ${
-                isEscapeDisabledByEnemyHp
-                  ? "cursor-not-allowed border-slate-700/70 bg-slate-900/35 text-slate-500"
-                  : "border-red-700/60 bg-red-900/15 text-amber-200/90 hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50"
-              }`}
-            >
-              {isEscaping ? "Escapando..." : "Escapar"}
-            </Link>
+            <div
+              className="hidden w-px shrink-0 self-stretch bg-amber-800/50 sm:block"
+              role="separator"
+              aria-orientation="vertical"
+            />
+
+            <div className="max-sm:col-start-3 max-sm:row-start-1 flex shrink-0 items-center px-2 sm:px-3">
+              <Link
+                href={escapeHref}
+                onClick={handleEscapeClick}
+                aria-disabled={isEscapeDisabled || isEscaping}
+                tabIndex={isEscapeDisabled ? -1 : undefined}
+                title={
+                  escapeDisabled
+                    ? "No podés escapar de este encuentro."
+                    : isEscapeDisabledByEnemyHp
+                      ? "No podés huir cuando la vida total de los enemigos es 60% o menos."
+                      : undefined
+                }
+                className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition sm:px-3 ${
+                  isEscapeDisabled
+                    ? "pointer-events-none cursor-not-allowed border-slate-700/70 bg-slate-900/35 text-slate-500"
+                    : "border-red-700/60 bg-red-900/15 text-amber-200/90 hover:border-red-700/70 hover:bg-red-900/45 hover:text-amber-50"
+                }`}
+              >
+                {isEscaping ? "Escapando..." : "Escapar"}
+              </Link>
+            </div>
           </div>
         </header>
 
@@ -3822,7 +5384,7 @@ export function CombatEncounterShell({
                       onSelect={() => setSelectedEnemyId(enemy.id)}
                       isDefeated={enemy.hp <= 0}
                       nameColorClass={enemyNameColorClass}
-                      stateIconSrcs={enemyHudStateIconSrcsById.get(enemy.id) ?? []}
+                      stateIcons={enemyHudStateIconsById.get(enemy.id) ?? []}
                     />
                   ))
                 : null}
@@ -3830,7 +5392,7 @@ export function CombatEncounterShell({
             {!floatPlayerStatusOverActionsMobile && !isMobileViewport ? (
               <div className="pointer-events-auto flex w-full justify-start">
                 <div className="flex flex-col items-start gap-1">
-                  <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                  <CombatHudStateIconStrip icons={playerActiveBuffStateIcons} />
                   <PlayerStatusModal
                     displayName={playerDisplayName}
                     level={playerLevelCurrent}
@@ -3918,7 +5480,7 @@ export function CombatEncounterShell({
             {!isActionsPanelOpen && isMobileViewport ? (
               <div className="pointer-events-none flex w-full justify-start">
                 <div className="pointer-events-auto flex flex-col items-start gap-1">
-                  <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                  <CombatHudStateIconStrip icons={playerActiveBuffStateIcons} />
                   <PlayerStatusModal
                     displayName={playerDisplayName}
                     level={playerLevelCurrent}
@@ -3976,7 +5538,7 @@ export function CombatEncounterShell({
                         type="button"
                         disabled={!canAttack}
                         title={attackBlockReason ?? undefined}
-                        onClick={handleAttack}
+                        onClick={() => void handleAttack()}
                         className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
                           canAttack
                             ? "cursor-pointer border-amber-600/80 bg-amber-900/40 text-amber-100 hover:bg-amber-800/55"
@@ -3998,6 +5560,20 @@ export function CombatEncounterShell({
                     >
                       Habilidades
                     </button>
+                    {requiresAmmo ? (
+                      <button
+                        type="button"
+                        disabled={isPlayerActionsLocked}
+                        onClick={() => setActionMenu("ammo")}
+                        className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition ${
+                          isPlayerActionsLocked
+                            ? "cursor-not-allowed border-slate-600/70 bg-slate-800/40 text-slate-300 opacity-55"
+                            : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                        }`}
+                      >
+                        Munición
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={isPlayerActionsLocked}
@@ -4011,6 +5587,8 @@ export function CombatEncounterShell({
                       Inventario
                     </button>
                   </div>
+                ) : actionMenu === "ammo" ? (
+                  renderAmmoMenuPanel("text-[11px]")
                 ) : actionMenu === "skills" ? (
                   playerCombatSkills.length === 0 ? (
                     <p
@@ -4092,7 +5670,7 @@ export function CombatEncounterShell({
                     </div>
                     </div>
                   )
-                ) : combatConsumables.length === 0 ? (
+                ) : combatPotionItems.length === 0 ? (
                   <p
                     className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-[11px] text-amber-200/75`}
                   >
@@ -4101,7 +5679,7 @@ export function CombatEncounterShell({
                 ) : (
                   <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
                   <div className="grid gap-1">
-                    {combatConsumables.map((item) => {
+                    {combatPotionItems.map((item) => {
                       const usable = canUseConsumable(item);
                       return (
                         <div key={item.inventoryId} className="flex items-center gap-1.5">
@@ -4153,7 +5731,7 @@ export function CombatEncounterShell({
                     role="presentation"
                   >
                     <div className="pointer-events-auto flex flex-col items-start gap-1">
-                      <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                      <CombatHudStateIconStrip icons={playerActiveBuffStateIcons} />
                       <PlayerStatusModal
                         displayName={playerDisplayName}
                         level={playerLevelCurrent}
@@ -4278,7 +5856,9 @@ export function CombatEncounterShell({
                   ? "Acciones"
                   : actionMenu === "skills"
                     ? "Habilidades"
-                    : "Inventario"}
+                    : actionMenu === "ammo"
+                      ? "Munición"
+                      : "Inventario"}
               </p>
             </div>
 
@@ -4294,7 +5874,7 @@ export function CombatEncounterShell({
                     type="button"
                     disabled={!canAttack}
                     title={attackBlockReason ?? undefined}
-                    onClick={handleAttack}
+                    onClick={() => void handleAttack()}
                     className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
                       canAttack
                         ? "cursor-pointer border-amber-600/80 bg-amber-900/40 text-amber-100 hover:bg-amber-800/55"
@@ -4316,6 +5896,20 @@ export function CombatEncounterShell({
                 >
                   Habilidades
                 </button>
+                {requiresAmmo ? (
+                      <button
+                        type="button"
+                        disabled={isPlayerActionsLocked}
+                        onClick={() => setActionMenu("ammo")}
+                        className={`w-full rounded-md border px-2 py-1 text-left text-xs font-semibold transition sm:px-3 sm:py-1.5 sm:text-sm ${
+                          isPlayerActionsLocked
+                            ? "cursor-not-allowed border-slate-500/70 bg-slate-700/45 text-slate-300 opacity-55"
+                            : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                        }`}
+                      >
+                        Munición
+                      </button>
+                    ) : null}
                 <button
                   type="button"
                   disabled={isPlayerActionsLocked}
@@ -4329,6 +5923,8 @@ export function CombatEncounterShell({
                   Inventario
                 </button>
               </div>
+            ) : actionMenu === "ammo" ? (
+              renderAmmoMenuPanel("text-[11px] sm:text-xs")
             ) : actionMenu === "skills" ? (
               playerCombatSkills.length === 0 ? (
                 <p
@@ -4396,7 +5992,7 @@ export function CombatEncounterShell({
                 </div>
                 </div>
               )
-            ) : combatConsumables.length === 0 ? (
+            ) : combatPotionItems.length === 0 ? (
               <p
                 className={`${helpCardFont.className} flex flex-1 items-center justify-center text-center text-sm text-amber-200/75`}
               >
@@ -4405,7 +6001,7 @@ export function CombatEncounterShell({
             ) : (
               <div className={ACTIONS_SKILLS_SCROLL_CLASS}>
               <div className="grid gap-1 sm:gap-1.5">
-                {combatConsumables.map((item) => {
+                {combatPotionItems.map((item) => {
                   const usable = canUseConsumable(item);
                   return (
                     <div key={item.inventoryId} className="flex items-center gap-1.5">
@@ -4534,6 +6130,7 @@ export function CombatEncounterShell({
               dex: playerStatDex,
               int: playerStatInt,
               wis: playerStatWis,
+              level: Math.max(1, Math.trunc(playerLevelCurrent)),
               weaponDamageMinEffective: tooltipWeaponMin,
               weaponDamageMaxEffective: tooltipWeaponMax,
               magicDamageMinSheet: playerMagicDamageMin,
@@ -4557,10 +6154,23 @@ export function CombatEncounterShell({
             const damageTypes = getEffectDamageTypes(skillTooltipEntry.skill.effect);
             const damageTypesLabel = damageTypes.join(", ");
             const skillDescRaw = getPlayerSkillTooltipDescription(skillTooltipEntry.skill);
+            const skillEffect = skillTooltipEntry.skill.effect;
+            let skillDescForTooltip = skillDescRaw
+              .replaceAll("{damage_type}", damageTypesLabel)
+              .replaceAll("{damage_types}", damageTypesLabel);
+            if (isPlayerSelfBuffEffect(skillEffect)) {
+              const buffParts = resolvePlayerSelfBuffParts(
+                skillEffect,
+                getCombatStatValueForSkills,
+              );
+              skillDescForTooltip = formatPlayerSelfBuffCombatLog(
+                skillDescForTooltip,
+                buffParts,
+                parseEffectDurationTurns(skillEffect),
+              );
+            }
             const descFormatted = formatAbilityTooltipStatExpressions(
-              skillDescRaw
-                .replaceAll("{damage_type}", damageTypesLabel)
-                .replaceAll("{damage_types}", damageTypesLabel),
+              skillDescForTooltip,
               getStat,
             );
             return (
@@ -4598,7 +6208,7 @@ export function CombatEncounterShell({
                   <SkillCooldownClockIcon className="h-3.5 w-3.5 shrink-0 opacity-95" />
                   <span>
                     <span className="font-semibold">CD</span>{" "}
-                    {skillTooltipEntry.skill.cooldownTurns} turno(s)
+                    {formatPlayerSkillCooldownText(skillTooltipEntry.skill.cooldownTurns)}
                     {cdRem > 0 ? (
                       <span className="opacity-95"> · Disponible en {cdRem}</span>
                     ) : null}
@@ -4680,6 +6290,13 @@ export function CombatEncounterShell({
                 </p>
                 <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-red-200/65 to-transparent" />
               </div>
+              {defeatCauseLogEntry ? (
+                <p
+                  className={`${helpCardFont.className} relative mx-auto mt-4 max-w-md rounded-lg border border-red-500/50 bg-black/35 px-3 py-2 text-center text-xs leading-relaxed text-red-50/95`}
+                >
+                  <CombatLogLineBody entry={defeatCauseLogEntry} />
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setIsDefeatPenaltyOpen(true)}
@@ -4899,15 +6516,7 @@ export function CombatEncounterShell({
                             const roll = loot.weaponInstance ?? loot.equipmentInstance ?? null;
                             if (!roll) return null;
                             const showDamage = Boolean(loot.weaponInstance);
-                            const statLineEntries = (
-                              [
-                                [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
-                                [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
-                                [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
-                                [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
-                                [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
-                              ] as const
-                            ).filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]));
+                            const statLineEntries = collectInstanceStatTooltipRollLines(roll);
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
                                 {roll.rarity ? (
@@ -4935,10 +6544,14 @@ export function CombatEncounterShell({
                                     </p>
                                   </>
                                 ) : null}
-                                {statLineEntries.map(([statKey, line], idx) => (
+                                {statLineEntries.map(({ statKey, valueFlat, valuePct, line }, idx) => (
                                   <p
                                     key={`${line}-${idx}`}
-                                    className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                                    className={instanceStatRollTooltipLineClassName(
+                                      statKey,
+                                      valueFlat,
+                                      valuePct,
+                                    )}
                                   >
                                     {line}
                                   </p>
@@ -5029,15 +6642,7 @@ export function CombatEncounterShell({
                             const roll = entry.weaponInstance ?? entry.equipmentInstance ?? null;
                             if (!roll) return null;
                             const showDamage = Boolean(entry.weaponInstance);
-                            const statLineEntries = (
-                              [
-                                [roll.statKey1, formatInstanceStatRollTooltipLine(roll.statKey1, roll.valueFlat1, roll.valuePct1)],
-                                [roll.statKey2, formatInstanceStatRollTooltipLine(roll.statKey2, roll.valueFlat2, roll.valuePct2)],
-                                [roll.statKey3, formatInstanceStatRollTooltipLine(roll.statKey3, roll.valueFlat3, roll.valuePct3)],
-                                [roll.statKey4, formatInstanceStatRollTooltipLine(roll.statKey4, roll.valueFlat4, roll.valuePct4)],
-                                [roll.statKey5, formatInstanceStatRollTooltipLine(roll.statKey5, roll.valueFlat5, roll.valuePct5)],
-                              ] as const
-                            ).filter((entry): entry is [typeof roll.statKey1, string] => Boolean(entry[1]));
+                            const statLineEntries = collectInstanceStatTooltipRollLines(roll);
                             return (
                               <div className="mt-1.5 border-t border-amber-700/50 pt-1 text-[11px] leading-tight text-amber-100">
                                 {roll.rarity ? (
@@ -5065,10 +6670,14 @@ export function CombatEncounterShell({
                                     </p>
                                   </>
                                 ) : null}
-                                {statLineEntries.map(([statKey, line], idx) => (
+                                {statLineEntries.map(({ statKey, valueFlat, valuePct, line }, idx) => (
                                   <p
                                     key={`${line}-${idx}`}
-                                    className={isInstanceStatWeakTooltipKey(statKey) ? "font-medium text-red-400" : undefined}
+                                    className={instanceStatRollTooltipLineClassName(
+                                      statKey,
+                                      valueFlat,
+                                      valuePct,
+                                    )}
                                   >
                                     {line}
                                   </p>

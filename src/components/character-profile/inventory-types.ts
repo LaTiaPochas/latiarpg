@@ -61,10 +61,23 @@ export function capitalizeFirstLetterOnly(raw: string | null | undefined): strin
   return `${t.charAt(0).toUpperCase()}${t.slice(1)}`;
 }
 
+/** Prefijo con signo para stats numéricos en tooltip (`+ 5` / `- 5`, sin `+ -5`). */
+export function formatInstanceStatSignedValue(n: number): string {
+  if (!Number.isFinite(n)) return `+ ${n}`;
+  if (n < 0) return `- ${Math.abs(n)}`;
+  return `+ ${n}`;
+}
+
+function instanceStatNumericFlat(valueFlat: string | number | null | undefined): number | null {
+  if (valueFlat == null || valueFlat === "") return null;
+  const n = Number(valueFlat);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Una línea de stat para tooltip de instancia (arma / armadura).
  * `RES` / `WEAK`: `+RES {tipo}` / `+WEAK {tipo}` (valor desde `value_flat`, primera letra mayúscula).
- * Otras claves: `+ {flat} {clave}` o `+ {pct}% {clave}` como antes.
+ * Otras claves: `+ {flat} {clave}` / `- {flat} {clave}` o lo mismo con `%`.
  */
 export function formatInstanceStatRollTooltipLine(
   statKey: string | null | undefined,
@@ -86,21 +99,93 @@ export function formatInstanceStatRollTooltipLine(
     return `+${tag} ${capitalizeFirstLetterOnly(flatStr)}`;
   }
   const keyLabel = formatInstanceStatKeyForTooltip(keyRaw);
-  if (valueFlat != null && valueFlat !== "") {
-    const n = Number(valueFlat);
-    if (Number.isFinite(n)) {
-      return `+ ${n} ${keyLabel}`;
-    }
+  const flatNum = instanceStatNumericFlat(valueFlat);
+  if (flatNum != null) {
+    return `${formatInstanceStatSignedValue(flatNum)} ${keyLabel}`;
   }
   if (valuePct != null && Number.isFinite(Number(valuePct))) {
-    return `+ ${valuePct}% ${keyLabel}`;
+    const pct = Number(valuePct);
+    return `${formatInstanceStatSignedValue(pct)}% ${keyLabel}`;
   }
   return null;
+}
+
+/** `value_flat` o `value_pct` negativos en tooltip de instancia (penalización). */
+export function isInstanceStatRollNegativeForTooltip(
+  valueFlat: string | number | null | undefined,
+  valuePct: number | null | undefined,
+): boolean {
+  const flatNum = instanceStatNumericFlat(valueFlat);
+  if (flatNum != null && flatNum < 0) return true;
+  if (valuePct != null && Number.isFinite(Number(valuePct)) && Number(valuePct) < 0) return true;
+  return false;
 }
 
 /** `stat_key` de instancia que muestra debilidad en tooltip (línea en rojo en la UI). */
 export function isInstanceStatWeakTooltipKey(statKey: string | null | undefined): boolean {
   return (statKey?.trim().toLowerCase() ?? "") === "weak";
+}
+
+/** Clase Tailwind para líneas de stat en tooltip (debilidad o valor negativo). */
+export function instanceStatRollTooltipLineClassName(
+  statKey: string | null | undefined,
+  valueFlat: string | number | null | undefined,
+  valuePct: number | null | undefined,
+): string | undefined {
+  if (
+    isInstanceStatWeakTooltipKey(statKey) ||
+    isInstanceStatRollNegativeForTooltip(valueFlat, valuePct)
+  ) {
+    return "font-medium text-red-400";
+  }
+  return undefined;
+}
+
+export type InstanceStatTooltipRollSource = {
+  statKey1: string | null;
+  valueFlat1: string | number | null;
+  valuePct1: number | null;
+  statKey2: string | null;
+  valueFlat2: string | number | null;
+  valuePct2: number | null;
+  statKey3: string | null;
+  valueFlat3: string | number | null;
+  valuePct3: number | null;
+  statKey4: string | null;
+  valueFlat4: string | number | null;
+  valuePct4: number | null;
+  statKey5: string | null;
+  valueFlat5: string | number | null;
+  valuePct5: number | null;
+};
+
+export type InstanceStatTooltipRollLine = {
+  statKey: string;
+  valueFlat: string | number | null;
+  valuePct: number | null;
+  line: string;
+};
+
+/** Filas de stats de instancia listas para renderizar en tooltips de arma / equipo. */
+export function collectInstanceStatTooltipRollLines(
+  roll: InstanceStatTooltipRollSource,
+): InstanceStatTooltipRollLine[] {
+  const rows: Array<[string | null, string | number | null, number | null]> = [
+    [roll.statKey1, roll.valueFlat1, roll.valuePct1],
+    [roll.statKey2, roll.valueFlat2, roll.valuePct2],
+    [roll.statKey3, roll.valueFlat3, roll.valuePct3],
+    [roll.statKey4, roll.valueFlat4, roll.valuePct4],
+    [roll.statKey5, roll.valueFlat5, roll.valuePct5],
+  ];
+
+  const out: InstanceStatTooltipRollLine[] = [];
+  for (const [statKey, valueFlat, valuePct] of rows) {
+    const line = formatInstanceStatRollTooltipLine(statKey, valueFlat, valuePct);
+    const key = statKey?.trim() ?? "";
+    if (!line || !key) continue;
+    out.push({ statKey: key, valueFlat, valuePct, line });
+  }
+  return out;
 }
 
 function capitalizeWord(value: string): string {

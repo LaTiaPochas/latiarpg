@@ -5,7 +5,6 @@ import {
   CombatEncounterShell,
   type CombatEncounterStatsPayload,
   type CombatConsumeResult,
-  type CombatEncounterDebugPayload,
   type CombatEncounterEnemyView,
   type CombatEncounterEnemySkill,
   type CombatVictoryLootItem,
@@ -14,6 +13,7 @@ import {
   type CombatDefeatLostItem,
 } from "@/components/combat/combat-encounter-shell";
 import {
+  isCombatEscapeDisabledZone,
   mapPathByZoneCode,
   normalizeZoneCodeKey,
   zoneLookupCodeCandidates,
@@ -21,12 +21,16 @@ import {
 import { normalizeEnemyTemplateAssetUrl, normalizePublicAssetUrl } from "@/lib/normalize-asset-url";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
+import { parseEnemySkillEffectJson } from "@/lib/enemy-skill-combat";
+import { parsePlayerSkillCooldownTurns } from "@/lib/player-skill-effect-combat";
+import { isAmmoConsumableEffect } from "@/lib/combat-ammo";
+import { persistCombatAmmoSpent, type CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
 
 const LEVEL_UP_WORLD_EVENT_ICON_SRC = "/img/resources/iconos/icon_lvlup.png";
 
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ debug?: string; zone?: string; hotspot?: string }>;
+  searchParams: Promise<{ zone?: string; hotspot?: string; debug?: string }>;
 };
 
 type EnemyTemplateRow = Record<string, unknown>;
@@ -345,60 +349,6 @@ function templatePortraitRaw(t: EnemyTemplateRow): string | null {
   );
 }
 
-function normalizeDamageTypeLabel(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, "_");
-  return normalized.length > 0 ? normalized : null;
-}
-
-function getEffectDamageTypes(effect: Record<string, unknown>): string[] {
-  const raw = effect.damage_type ?? effect.damage_types;
-  const values = Array.isArray(raw)
-    ? raw
-    : typeof raw === "string"
-      ? raw.split(/[,|/]+/)
-      : [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const normalized = normalizeDamageTypeLabel(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push(normalized);
-  }
-  return out;
-}
-
-function getEffectStateIcons(effect: Record<string, unknown>): string[] {
-  const arrRaw = effect.state_icons ?? effect.stateIcons;
-  if (Array.isArray(arrRaw)) {
-    const out: string[] = [];
-    for (const item of arrRaw) {
-      if (typeof item === "string" && item.trim().length > 0) out.push(item.trim());
-    }
-    return out;
-  }
-  const one = effect.state_icon ?? effect.stateIcon;
-  if (typeof one === "string" && one.trim().length > 0) return [one.trim()];
-  return [];
-}
-
-function getEffectStateIcon(effect: Record<string, unknown>): string | null {
-  const xs = getEffectStateIcons(effect);
-  return xs[0] ?? null;
-}
-
-function enemySkillDamageSubtype(
-  effect: Record<string, unknown>,
-): "physical" | "magical" | "buff" | "neutral" {
-  const raw = effect.subtype;
-  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-  if (s === "physical") return "physical";
-  if (s === "magical") return "magical";
-  if (s === "buff") return "buff";
-  return "neutral";
-}
-
 function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
   const relationRaw = t.enemy_template_skills;
   if (!Array.isArray(relationRaw)) return [];
@@ -415,13 +365,8 @@ function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
     if (!skillId) continue;
 
     const effectRaw = skill.effect_json;
-    if (!effectRaw || typeof effectRaw !== "object") continue;
-    const effect = effectRaw as Record<string, unknown>;
-    if (effect.type !== "damage" || effect.target !== "player") continue;
-    const min = Math.max(0, num(effect.min, 0));
-    const max = Math.max(min, num(effect.max, min));
-    const damageTypes = getEffectDamageTypes(effect);
-    const stateIcon = getEffectStateIcon(effect);
+    const parsedEffect = parseEnemySkillEffectJson(effectRaw);
+    if (!parsedEffect) continue;
 
     result.push({
       id: skillId,
@@ -439,16 +384,7 @@ function parseEnemySkills(t: EnemyTemplateRow): CombatEncounterEnemySkill[] {
         ),
       ),
       manaCost: Math.max(0, num(skill.mana_cost, 0)),
-      effect: {
-        type: "damage",
-        target: "player",
-        min,
-        max,
-        subtype: enemySkillDamageSubtype(effect),
-        damageTypes,
-        stateIcon,
-        chance: Math.max(0, Math.min(1, num(effect.chance, 1))),
-      },
+      parsedEffect,
     });
   }
   return result;
@@ -587,7 +523,7 @@ function mapUserCharacterSkillsRow(row: Record<string, unknown>): CombatPlayerSk
       name: firstNonEmptyString(ps.name) ?? "Habilidad",
       description: firstNonEmptyString(ps.description),
       manaCost: Math.max(0, num(ps.mana_cost, 0)),
-      cooldownTurns: Math.max(1, num(ps.cooldown_turns, 1)),
+      cooldownTurns: parsePlayerSkillCooldownTurns(ps.cooldown_turns, 0),
       target: typeof ps.target === "string" && ps.target.trim().length > 0 ? ps.target.trim() : "enemy_single",
       effect,
     },
@@ -923,7 +859,8 @@ export default async function CombatEncounterPage({
 }: CombatEncounterPageProps) {
   const { code: rawCode } = await params;
   const code = decodeURIComponent(rawCode);
-  const { debug: debugParam, zone: zoneQuery, hotspot: hotspotQuery } = await searchParams;
+  const { zone: zoneQuery, hotspot: hotspotQuery, debug: debugQuery } = await searchParams;
+  const combatDebugEnabled = debugQuery === "1";
   const zoneCode =
     typeof zoneQuery === "string" && zoneQuery.trim().length > 0
       ? zoneQuery.trim()
@@ -932,8 +869,6 @@ export default async function CombatEncounterPage({
     typeof hotspotQuery === "string" && hotspotQuery.trim().length > 0
       ? hotspotQuery.trim()
       : "";
-  const showCombatDebug =
-    debugParam === "1" || debugParam === "true" || debugParam === "yes";
 
   const supabase = await createClient();
   /** Plantillas de instancia suelen estar bloqueadas por RLS para el rol `authenticated`. */
@@ -1162,17 +1097,21 @@ export default async function CombatEncounterPage({
     .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i, playerLevel))
     .filter((e): e is CombatEncounterEnemyView => e !== null);
 
-  if (showCombatDebug) {
-    console.log("[combate][resist-weak][server] PJ", {
-      resistances: playerResistances,
-      weaknesses: playerWeaknesses,
-    });
-    enemies.forEach((e, i) => {
-      console.log(`[combate][resist-weak][server] enemigo[${i}]`, e.name, {
-        templateId: e.templateId,
-        resistances: e.resistances,
-        weaknesses: e.weaknesses,
-      });
+  if (combatDebugEnabled) {
+    console.log("[combat-debug][server] encuentro cargado", {
+      code,
+      enemies: enemies.map((e) => ({
+        id: e.id,
+        name: e.name,
+        attackMin: e.attackMin,
+        attackMax: e.attackMax,
+        skills: e.skills.map((s) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          parsedMode: s.parsedEffect.mode,
+        })),
+      })),
     });
   }
 
@@ -1746,6 +1685,7 @@ export default async function CombatEncounterPage({
       : user.id;
 
   let playerWeaponAttackFamily: string | null = null;
+  let playerWeaponAmmoKind: string | null = null;
   {
     const { data: weaponSlotEquip } = await supabase
       .from("user_equipment")
@@ -1769,7 +1709,7 @@ export default async function CombatEncounterPage({
       if (Number.isFinite(wiId) && wiId > 0) {
         const { data: wiRow } = await supabase
           .from("weapon_instance")
-          .select("attack_family")
+          .select("attack_family, ammo_kind")
           .eq("id", wiId)
           .maybeSingle();
 
@@ -1777,55 +1717,13 @@ export default async function CombatEncounterPage({
         if (typeof af === "string" && af.trim().length > 0) {
           playerWeaponAttackFamily = af.trim();
         }
+        const ak = wiRow?.ammo_kind;
+        if (typeof ak === "string" && ak.trim().length > 0) {
+          playerWeaponAmmoKind = ak.trim();
+        }
       }
     }
   }
-
-  const combatDebug: CombatEncounterDebugPayload | null = showCombatDebug
-    ? {
-        encounterCode: code,
-        zoneFilter: zoneCode || null,
-        encounterId: String(encounter.id),
-        rowsError: rowsErrorPayload,
-        rawRowCount: enemyRows.length,
-        mappedEnemyCount: enemies.length,
-        enemies,
-        playerResistances,
-        playerWeaknesses,
-        playerWeaponAttackFamily,
-        rawRows: enemyRows.map((row, index) => ({
-          index,
-          spawn_index: row.spawn_index,
-          hp_override: row.hp_override,
-          mana_override: row.mana_override,
-          ai_profile: row.ai_profile,
-          enemyTemplate: pickTemplate(row.enemy_templates),
-        })),
-        lootDebug: {
-          combatEncounterLootKey: code,
-          recommendedLevel: encounterRecommendedLevel,
-          playerLevel,
-          dropChanceMultiplier,
-          dropTableRows: dropRowsSafe.map((row) => ({
-            combat_encounter_id: row.combat_encounter_id,
-            enemy_template_id: row.enemy_template_id,
-            item_id_raw: row.item_id,
-            weapon_instance_id: row.weapon_instance_id,
-            equipment_instance_id: row.equipment_instance_id,
-            item_id: rowItemId(row),
-            item_name: rowItemName(row),
-            drop_chance: num(row.drop_chance, 0),
-            adjusted_drop_chance: adjustedDropChance(row),
-            drop_group: row.drop_group,
-            min_qty: Math.max(0, Math.trunc(num(row.min_qty, 0))),
-            max_qty: Math.max(0, Math.trunc(num(row.max_qty, num(row.min_qty, 0)))),
-          })),
-          rollTrace: lootRollTrace,
-          finalLoot: victoryLootItems,
-          victoryGoldFromLoot,
-        },
-      }
-    : null;
 
   const backgroundRaw = encounter.background;
   const backgroundSrc =
@@ -1842,7 +1740,11 @@ export default async function CombatEncounterPage({
         ? "Cercanías del bosque"
         : zoneKeyForMapUi === "magic_forest" || zoneKeyForMapUi === "magicforest"
           ? "Bosque mágico"
-          : encounter.name != null && String(encounter.name).trim().length > 0
+          : zoneKeyForMapUi === "mystic_cave"
+            ? "Cueva mística"
+            : zoneKeyForMapUi === "abandoned_coal_mine"
+              ? "Minas abandonadas"
+              : encounter.name != null && String(encounter.name).trim().length > 0
             ? String(encounter.name).trim()
             : "Mapa desconocido";
   const combatDisplayName =
@@ -1853,6 +1755,7 @@ export default async function CombatEncounterPage({
     hotspotId && mapBaseHref.startsWith("/")
       ? `${mapBaseHref}?hotspot=${encodeURIComponent(hotspotId)}`
       : mapBaseHref;
+  const escapeDisabled = isCombatEscapeDisabledZone(zoneForMapHref);
   const playerDisplayName =
     typeof userCharacter.character_name === "string" && userCharacter.character_name.trim().length > 0
       ? userCharacter.character_name.trim().toUpperCase()
@@ -2265,6 +2168,16 @@ export default async function CombatEncounterPage({
     const profileTargets = Array.from(
       new Set([characterSkillsProfileId, actionUser.id].map((v) => String(v).trim()).filter(Boolean)),
     );
+
+    const ammoSpentPayload = (payload.ammoSpent ?? []).filter(
+      (entry) =>
+        entry &&
+        Number.isFinite(entry.inventoryId) &&
+        Number.isFinite(entry.quantitySpent) &&
+        entry.quantitySpent > 0,
+    );
+    await persistCombatAmmoSpent(profileTargets, ammoSpentPayload);
+
     const persistCharacterVitals = async () => {
       for (const profileId of profileTargets) {
         const { data: characterRow, error: characterReadError } = await supabaseAction
@@ -2650,7 +2563,7 @@ export default async function CombatEncounterPage({
 
     const { data: invRow, error: invError } = await supabaseAction
       .from("user_inventory")
-      .select("id, quantity, profile_id")
+      .select("id, quantity, profile_id, items!inner(json_consumable_effect)")
       .eq("id", safeInventoryId)
       .maybeSingle();
 
@@ -2661,6 +2574,16 @@ export default async function CombatEncounterPage({
     const profileId = typeof invRow.profile_id === "string" ? invRow.profile_id.trim() : "";
     if (profileId !== actionUser.id && profileId !== characterSkillsProfileId) {
       return { ok: false, error: "No podés consumir este objeto." };
+    }
+
+    const itemJoin = Array.isArray(invRow.items) ? (invRow.items[0] ?? null) : invRow.items;
+    const effectRaw = itemJoin?.json_consumable_effect;
+    const effect =
+      effectRaw && typeof effectRaw === "object" && !Array.isArray(effectRaw)
+        ? (effectRaw as Record<string, unknown>)
+        : null;
+    if (isAmmoConsumableEffect(effect)) {
+      return { ok: false, error: "La munición solo se gasta al atacar." };
     }
 
     const currentQty = Math.max(0, Math.trunc(Number(invRow.quantity ?? 0)));
@@ -2684,6 +2607,7 @@ export default async function CombatEncounterPage({
   async function persistEscapeCombatState(payload: {
     finalHp: number;
     finalMana: number;
+    ammoSpent?: CombatAmmoSpentEntry[];
   }) {
     "use server";
 
@@ -2700,6 +2624,15 @@ export default async function CombatEncounterPage({
     const profileTargets = Array.from(
       new Set([characterSkillsProfileId, actionUser.id].map((v) => String(v).trim()).filter(Boolean)),
     );
+
+    const ammoSpentPayload = (payload.ammoSpent ?? []).filter(
+      (entry) =>
+        entry &&
+        Number.isFinite(entry.inventoryId) &&
+        Number.isFinite(entry.quantitySpent) &&
+        entry.quantitySpent > 0,
+    );
+    await persistCombatAmmoSpent(profileTargets, ammoSpentPayload);
 
     for (const profileId of profileTargets) {
       const { data: characterRow, error: characterReadError } = await supabaseAction
@@ -2731,7 +2664,6 @@ export default async function CombatEncounterPage({
       }
       backgroundSrc={backgroundSrc}
       enemies={enemies}
-      combatDebug={combatDebug}
       combatStartMessage={
         typeof encounter.combat_start_message === "string" &&
         encounter.combat_start_message.trim().length > 0
@@ -2739,6 +2671,7 @@ export default async function CombatEncounterPage({
           : null
       }
       escapeHref={escapeToMapHref}
+      escapeDisabled={escapeDisabled}
       playerDisplayName={playerDisplayName}
       playerPortraitSrc={playerPortraitSrc}
       playerSpriteSrc={playerSpriteSrc}
@@ -2773,8 +2706,8 @@ export default async function CombatEncounterPage({
       playerResistances={playerResistances}
       playerWeaknesses={playerWeaknesses}
       playerWeaponAttackFamily={playerWeaponAttackFamily}
-      combatResistWeakDebug={showCombatDebug}
-      combatBuffStatDebug={showCombatDebug}
+      playerWeaponAmmoKind={playerWeaponAmmoKind}
+      combatDebugEnabled={combatDebugEnabled}
     />
   );
 }
