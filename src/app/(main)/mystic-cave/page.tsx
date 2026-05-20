@@ -49,7 +49,7 @@ export default async function MysticCavePage({ searchParams }: MysticCavePagePro
 
   const { data: milestones } = await supabase
     .from("user_milestones")
-    .select("cave_entrance_dialog")
+    .select("cave_entrance_dialog, meloni_found_cave")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -127,6 +127,7 @@ export default async function MysticCavePage({ searchParams }: MysticCavePagePro
           currentCombatStep={currentCombatStep}
           zoneCode={MYSTIC_CAVE_ZONE_CODE}
           initialHotspotId={hotspotQuery}
+          meloniFoundCave={milestones?.meloni_found_cave === true}
         />
 
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">

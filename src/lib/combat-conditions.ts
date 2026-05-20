@@ -17,7 +17,7 @@ export type CombatConditionSkipTurnEffect = {
   kind: "skip_turn";
   /**
    * Al inicio del turno del afectado: probabilidad de remover la condición y actuar.
-   * Ej. sueño: 0.4 = 40 % despertar, 60 % perder el turno.
+   * Ej. sueño: 0.25 = 25 % despertar, 75 % perder el turno.
    */
   wakeChance?: number;
 };
@@ -43,8 +43,8 @@ const COMBAT_CONDITIONS: Record<string, CombatConditionDefinition> = {
   sleep: {
     id: "sleep",
     name: "Sueño",
-    icon: "icon_sleep.png",
-    effects: [{ kind: "skip_turn", wakeChance: 0.4 }],
+    icon: "condition_sleep.png",
+    effects: [{ kind: "skip_turn", wakeChance: 0.25 }],
   },
   paralysis: {
     id: "paralysis",
@@ -55,7 +55,7 @@ const COMBAT_CONDITIONS: Record<string, CombatConditionDefinition> = {
   stun: {
     id: "stun",
     name: "Aturdimiento",
-    icon: "icon_stun.png",
+    icon: "condition_stun.png",
     effects: [{ kind: "skip_turn" }],
   },
   poison: {
@@ -107,7 +107,22 @@ export type ActiveCombatCondition = {
   remainingTurns: number | null;
   lastTickTurn: number;
   sourceSkillName: string;
+  /** Iconos del `effect_json` del skill (p. ej. `state_icons`); si faltan, se usa el del catálogo. */
+  stateIcons?: string[];
 };
+
+/** Icono HUD: prioriza `stateIcons` de la instancia, luego el definido en el catálogo. */
+export function resolveActiveCombatConditionIconSrc(
+  row: Pick<ActiveCombatCondition, "conditionId" | "stateIcons">,
+): string | null {
+  if (row.stateIcons?.length) {
+    for (const raw of row.stateIcons) {
+      const src = normalizeCombatStateIconUrl(raw);
+      if (src) return src;
+    }
+  }
+  return getCombatConditionIconSrc(row.conditionId);
+}
 
 export function activeConditionGrantsSkipTurn(
   row: ActiveCombatCondition,
@@ -208,8 +223,13 @@ export function evaluateSkipTurnConditionsAtTurnStart(
     const def = blockingRow
       ? getCombatConditionDefinition(blockingRow.conditionId)
       : null;
+    const blockingConditionId = blockingRow?.conditionId?.trim().toLowerCase() ?? "";
+    const skipMessage =
+      targetKind === "enemy" && blockingConditionId === "stun"
+        ? `${affectedName} se encuentra incapacitado.`
+        : `${affectedName} no puede actuar${def?.name ? ` (${def.name})` : ""}.`;
     logs.push({
-      message: `${affectedName} no puede actuar${def?.name ? ` (${def.name})` : ""}.`,
+      message: skipMessage,
       tone: "default",
     });
   }

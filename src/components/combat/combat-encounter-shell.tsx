@@ -24,6 +24,8 @@ import {
   parsedEnemySkillUseWhen,
   orderCompositeStepsForExecution,
   resolveEnemySkillLogDescription,
+  rollEnemySkillRawDamage,
+  mergeEnemyStatBuffParts,
   stackEnemyTimedStatBuffs,
   sumEnemyTimedStatBonuses,
 } from "@/lib/enemy-skill-combat";
@@ -31,7 +33,7 @@ import {
   type ActiveCombatCondition,
   evaluateSkipTurnConditionsAtTurnStart,
   getCombatConditionDefinition,
-  getCombatConditionIconSrc,
+  resolveActiveCombatConditionIconSrc,
   targetHasSkipTurnCondition,
 } from "@/lib/combat-conditions";
 import {
@@ -97,7 +99,7 @@ const PJ_FEDE_RPG_FIGHT_STICK =
 const PJ_FEDE_FACE_COMBAT =
   "/img/resources/caracters_faces/pj_fede_rpg_face_fight.png";
 
-const MAX_ENEMIES_ON_FIELD = 3;
+const MAX_ENEMIES_ON_FIELD = 4;
 const ACTION_DELAY_MS = 1000;
 const FIRST_ACTION_DELAY_MS = 3000;
 
@@ -585,18 +587,25 @@ function formatEnemySkillCombatLogDescription(
   damageDealt: number,
   attackerEnemyName: string,
   damageTypes: string[] = [],
+  targetName = "",
 ): string {
   const s = String(Math.max(0, Math.trunc(damageDealt)));
   const enemyLabel =
     typeof attackerEnemyName === "string" && attackerEnemyName.trim().length > 0
       ? attackerEnemyName.trim()
       : "";
+  const targetLabel =
+    typeof targetName === "string" && targetName.trim().length > 0
+      ? targetName.trim()
+      : enemyLabel;
   const damageTypeLabel = damageTypes.join(", ");
   return template
     .replaceAll("{daño}", s)
     .replaceAll("{dano}", s)
     .replaceAll("{damage}", s)
     .replaceAll("{enemigo}", enemyLabel)
+    .replaceAll("{objetivo}", targetLabel)
+    .replaceAll("{target}", targetLabel)
     .replaceAll("{damage_type}", damageTypeLabel)
     .replaceAll("{damage_types}", damageTypeLabel);
 }
@@ -648,6 +657,71 @@ function buffEffectTargetIsSelf(effect: Record<string, unknown>): boolean {
 function isPlayerSelfBuffEffect(effect: Record<string, unknown>): boolean {
   const t = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
   return t === "buff" && buffEffectTargetIsSelf(effect);
+}
+
+function isPlayerConditionDebuffEffect(effect: Record<string, unknown>): boolean {
+  const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  if (typeRaw !== "debuff") return false;
+  const modRaw = effect.modifier;
+  if (!modRaw || typeof modRaw !== "object" || Array.isArray(modRaw)) return false;
+  const kindRaw = (modRaw as Record<string, unknown>).kind ?? (modRaw as Record<string, unknown>).modifier_kind;
+  const kind =
+    typeof kindRaw === "string" ? kindRaw.trim().toLowerCase().replace(/-/g, "_") : "";
+  return kind === "condition";
+}
+
+/** Debuff/buff de stats temporales sobre enemigo(s); distinto de `modifier.kind: condition` (sleep, stun, etc.). */
+function isPlayerEnemyTimedStatEffect(effect: Record<string, unknown>): boolean {
+  const typeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
+  if (typeRaw !== "buff" && typeRaw !== "debuff") return false;
+  if (buffEffectTargetIsSelf(effect)) return false;
+  if (isPlayerConditionDebuffEffect(effect)) return false;
+  const target = parsePlayerSkillEffectTarget(effect.target, "enemy");
+  if (target !== "enemy" && target !== "all_enemies" && target !== "all") return false;
+  const parts = resolvePlayerSelfBuffParts(effect, () => 0);
+  return playerSelfBuffPartsToEnemyStatParts(parts).length > 0;
+}
+
+function playerSelfBuffPartsToEnemyStatParts(
+  parts: Array<{ stat: PlayerSelfBuffAffectedStat; amount: number }>,
+): EnemyStatBuffPart[] {
+  const draft: EnemyStatBuffPart[] = [];
+  let weaponDelta = 0;
+  let magicDelta = 0;
+  for (const p of parts) {
+    const a = Math.trunc(p.amount);
+    if (a === 0) continue;
+    switch (p.stat) {
+      case "armor":
+        draft.push({ stat: "armor", amount: a });
+        break;
+      case "mr":
+        draft.push({ stat: "mr", amount: a });
+        break;
+      case "speed":
+        draft.push({ stat: "speed", amount: a });
+        break;
+      case "hp":
+        draft.push({ stat: "hp", amount: a });
+        break;
+      case "mana":
+        draft.push({ stat: "mana", amount: a });
+        break;
+      case "weapon_damage_min":
+      case "weapon_damage_max":
+        weaponDelta += a;
+        break;
+      case "magic_damage_min":
+      case "magic_damage_max":
+        magicDelta += a;
+        break;
+      default:
+        break;
+    }
+  }
+  if (weaponDelta !== 0) draft.push({ stat: "damage", amount: weaponDelta });
+  if (magicDelta !== 0) draft.push({ stat: "magic_damage", amount: magicDelta });
+  return mergeEnemyStatBuffParts([], draft);
 }
 
 function buffScalingRatioParsed(value: unknown): number {
@@ -1003,7 +1077,7 @@ function computePlayerSkillMitigatedDamageToEnemy(
     subtype === "magical"
       ? Math.max(0, Math.trunc(rawDamage + opts.magicalCombatDamageFlat))
       : rawDamage;
-  const mitigated = mitigateDamageByDefense(rawDamage, defenseStat);
+  const mitigated = mitigateDamageBySubtype(rawDamage, defenseStat, subtype);
   return applyEnemyResistWeakTagsToMitigatedDamage(
     mitigated,
     opts.resistWeakTags,
@@ -1116,11 +1190,27 @@ function computePlayerSkillDamageRangeBeforeArmor(
   };
 }
 
-/** Daño bruto menos armadura/MR (resultado no negativo). */
-function mitigateDamageByDefense(rawDamage: number, defense: number): number {
+/** Daño bruto menos armadura 1:1 (resultado no negativo). */
+function mitigateDamageByDefense(rawDamage: number, armor: number): number {
   const raw = Math.max(0, Math.trunc(rawDamage));
-  const def = Math.max(0, Math.trunc(defense));
+  const def = Math.max(0, Math.trunc(armor));
   return Math.max(0, raw - def);
+}
+
+/** Daño bruto menos MR×2 (resultado no negativo). */
+function mitigateDamageByMr(rawDamage: number, mr: number): number {
+  const raw = Math.max(0, Math.trunc(rawDamage));
+  const mrVal = Math.max(0, Math.trunc(mr));
+  return Math.max(0, raw - mrVal * 2);
+}
+
+function mitigateDamageBySubtype(
+  rawDamage: number,
+  defenseStat: number,
+  subtype: PlayerSkillEffectSubtype,
+): number {
+  if (subtype === "magical") return mitigateDamageByMr(rawDamage, defenseStat);
+  return mitigateDamageByDefense(rawDamage, defenseStat);
 }
 
 /**
@@ -1309,12 +1399,21 @@ function mitigatedEnemySkillDamageToEnemy(
   bonuses: EnemyCombatStatBonuses,
 ): number {
   const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
-  const rawDamageRoll = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+  const rawDamageRoll = Math.max(
+    0,
+    rollEnemySkillRawDamage(
+      leaf.min,
+      leaf.max,
+      leaf.damageBasis,
+      victim.hp,
+      victim.hpMax,
+    ),
+  );
   const defenseStat =
     incomingSubtype === "magical"
       ? effectiveEnemyMr(victim, bonuses)
       : effectiveEnemyArmor(victim, bonuses);
-  return Math.max(0, Math.trunc(mitigateDamageByDefense(rawDamageRoll, defenseStat)));
+  return Math.max(0, Math.trunc(mitigateDamageBySubtype(rawDamageRoll, defenseStat, incomingSubtype)));
 }
 
 /** Daño del PJ al enemigo: físico/neutral/buff usa armor del monstruo; mágico usa MR. */
@@ -1770,19 +1869,57 @@ function enemyNameLevelColorClass(recommendedLevel: number | null, playerLevel: 
   return "text-white";
 }
 
-function PlayerBuffStateIconStrip({ srcs }: { srcs: string[] }) {
-  if (srcs.length === 0) return null;
+type CombatHudStateIcon = {
+  key: string;
+  src: string;
+  /** Si es > 0, muestra contador abajo a la izquierda del icono. */
+  remainingTurns?: number | null;
+};
+
+function pushResolvedHudStateIcons(
+  list: CombatHudStateIcon[],
+  keyPrefix: string,
+  opts: Parameters<typeof resolveCombatStateIconSrcs>[0],
+  remainingTurns?: number | null,
+) {
+  let index = 0;
+  for (const src of resolveCombatStateIconSrcs(opts)) {
+    const turns =
+      remainingTurns != null && Number.isFinite(remainingTurns)
+        ? Math.max(0, Math.trunc(remainingTurns))
+        : null;
+    list.push({
+      key: `${keyPrefix}:${index}:${src}`,
+      src,
+      ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+    });
+    index += 1;
+  }
+}
+
+function CombatHudStateIconStrip({ icons }: { icons: CombatHudStateIcon[] }) {
+  if (icons.length === 0) return null;
   return (
     <div
       className="flex flex-wrap justify-start gap-0.5 px-2 sm:px-2"
       aria-label="Estados activos"
     >
-      {srcs.map((src, idx) => (
+      {icons.map((icon) => (
         <div
-          key={`${idx}:${src}`}
-          className="relative h-6 w-6 shrink-0 overflow-hidden rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
+          key={icon.key}
+          className="relative h-6 w-6 shrink-0 overflow-visible rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
         >
-          <Image src={src} alt="" fill className="object-contain p-px" sizes="16px" />
+          <div className="relative h-full w-full overflow-hidden rounded-[inherit]">
+            <Image src={icon.src} alt="" fill className="object-contain p-px" sizes="16px" />
+          </div>
+          {icon.remainingTurns != null && icon.remainingTurns > 0 ? (
+            <span
+              className="pointer-events-none absolute -bottom-px -left-px z-[1] min-w-[0.7rem] rounded-tr border border-amber-900/80 bg-black/90 px-[2px] text-center text-[8px] font-bold leading-tight text-amber-50 tabular-nums shadow-sm sm:text-[9px]"
+              aria-hidden
+            >
+              {icon.remainingTurns}
+            </span>
+          ) : null}
         </div>
       ))}
     </div>
@@ -1871,14 +2008,14 @@ function EnemyStatusModal({
   onSelect,
   isDefeated,
   nameColorClass,
-  stateIconSrcs = [],
+  stateIcons = [],
 }: {
   enemy: CombatEncounterEnemyView;
   isSelected: boolean;
   onSelect: () => void;
   isDefeated: boolean;
   nameColorClass: string;
-  stateIconSrcs?: string[];
+  stateIcons?: CombatHudStateIcon[];
 }) {
   const pct = enemyHpPercent(enemy);
   return (
@@ -1931,9 +2068,9 @@ function EnemyStatusModal({
           <p className="mt-1 text-[9px] tabular-nums text-red-100/90 sm:text-[10px]">
             HP {enemy.hp} / {enemy.hpMax}
           </p>
-          {stateIconSrcs.length > 0 ? (
+          {stateIcons.length > 0 ? (
             <div className="mt-1 flex justify-center sm:justify-start">
-              <PlayerBuffStateIconStrip srcs={stateIconSrcs} />
+              <CombatHudStateIconStrip icons={stateIcons} />
             </div>
           ) : null}
         </div>
@@ -1943,6 +2080,9 @@ function EnemyStatusModal({
 }
 
 function enemySpriteHeightClass(count: number) {
+  if (count >= 4) {
+    return "h-[min(14vh,88px)] w-auto sm:h-[min(19vh,120px)]";
+  }
   if (count >= 3) {
     return "h-[min(18vh,110px)] w-auto sm:h-[min(24vh,150px)]";
   }
@@ -2936,57 +3076,53 @@ export function CombatEncounterShell({
   const playerManaPercent = Math.round(
     (displayPlayerMana / Math.max(1, playerManaMax)) * 100,
   );
-  const playerActiveBuffStateIconSrcs = useMemo(() => {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    const addResolved = (opts: Parameters<typeof resolveCombatStateIconSrcs>[0]) => {
-      for (const src of resolveCombatStateIconSrcs(opts)) {
-        if (seen.has(src)) continue;
-        seen.add(src);
-        out.push(src);
-      }
-    };
+  const playerActiveBuffStateIcons = useMemo(() => {
+    const out: CombatHudStateIcon[] = [];
     for (const buff of playerTimedSelfBuffs) {
-      addResolved({ stateIcons: buff.stateIcons });
+      if (buff.remainingTurns <= 0) continue;
+      pushResolvedHudStateIcons(out, `pbuff:${buff.id}`, { stateIcons: buff.stateIcons }, buff.remainingTurns);
     }
     for (const deb of enemyAppliedPlayerTimedModifiers) {
-      addResolved({
-        stateIcons: deb.stateIcons,
-        resistanceTags: deb.extraResistanceTags,
-        weaknessTags: deb.extraWeaknessTags,
-      });
+      if (deb.remainingTurns <= 0) continue;
+      pushResolvedHudStateIcons(
+        out,
+        `pmod:${deb.id}`,
+        {
+          stateIcons: deb.stateIcons,
+          resistanceTags: deb.extraResistanceTags,
+          weaknessTags: deb.extraWeaknessTags,
+        },
+        deb.remainingTurns,
+      );
     }
     for (const cond of activeCombatConditions) {
       if (cond.targetKind !== "player" || cond.targetId !== "player") continue;
-      const icon = getCombatConditionIconSrc(cond.conditionId);
-      if (!icon || seen.has(icon)) continue;
-      seen.add(icon);
-      out.push(icon);
+      const icon = resolveActiveCombatConditionIconSrc(cond);
+      if (!icon) continue;
+      const turns = cond.remainingTurns;
+      if (turns != null && turns <= 0) continue;
+      out.push({
+        key: `pcond:${cond.id}`,
+        src: icon,
+        ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+      });
     }
     return out;
   }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers, activeCombatConditions]);
 
-  const enemyHudStateIconSrcsById = useMemo(() => {
-    const byEnemy = new Map<string, string[]>();
-    const mergeForEnemy = (
-      enemyId: string,
-      opts: Parameters<typeof resolveCombatStateIconSrcs>[0],
-    ) => {
-      const resolved = resolveCombatStateIconSrcs(opts);
-      if (resolved.length === 0) return;
-      const prev = byEnemy.get(enemyId) ?? [];
-      const seen = new Set(prev);
-      const merged = [...prev];
-      for (const src of resolved) {
-        if (seen.has(src)) continue;
-        seen.add(src);
-        merged.push(src);
+  const enemyHudStateIconsById = useMemo(() => {
+    const byEnemy = new Map<string, CombatHudStateIcon[]>();
+    const listFor = (enemyId: string) => {
+      let list = byEnemy.get(enemyId);
+      if (!list) {
+        list = [];
+        byEnemy.set(enemyId, list);
       }
-      byEnemy.set(enemyId, merged);
+      return list;
     };
 
     for (const enemy of displayEnemies) {
-      mergeForEnemy(enemy.id, {
+      pushResolvedHudStateIcons(listFor(enemy.id), `base:${enemy.id}`, {
         resistanceTags: enemy.resistances,
         weaknessTags: enemy.weaknesses,
       });
@@ -2994,31 +3130,57 @@ export function CombatEncounterShell({
 
     for (const eff of enemyPlayerTimedEffects) {
       if (eff.debuffRemainingTurns <= 0 && eff.dotTicksRemaining <= 0) continue;
-      mergeForEnemy(eff.enemyId, {
-        stateIcons: eff.stateIcons,
-        weaknessTags: eff.extraWeaknessTags,
-      });
+      const turns =
+        eff.debuffRemainingTurns > 0
+          ? eff.debuffRemainingTurns
+          : eff.dotTicksRemaining > 0
+            ? eff.dotTicksRemaining
+            : null;
+      pushResolvedHudStateIcons(
+        listFor(eff.enemyId),
+        `ept:${eff.id}`,
+        { stateIcons: eff.stateIcons, weaknessTags: eff.extraWeaknessTags },
+        turns,
+      );
     }
+
     for (const sm of enemySelfTimedModifiers) {
       if (sm.remainingTurns <= 0) continue;
-      mergeForEnemy(sm.enemyId, {
-        stateIcons: sm.stateIcons,
-        resistanceTags: sm.resistanceTags,
-        weaknessTags: sm.weaknessTags,
-      });
+      pushResolvedHudStateIcons(
+        listFor(sm.enemyId),
+        `esm:${sm.id}`,
+        {
+          stateIcons: sm.stateIcons,
+          resistanceTags: sm.resistanceTags,
+          weaknessTags: sm.weaknessTags,
+        },
+        sm.remainingTurns,
+      );
     }
+
     for (const sb of enemyTimedStatBuffs) {
       if (sb.remainingTurns <= 0) continue;
-      mergeForEnemy(sb.enemyId, { stateIcons: sb.stateIcons });
+      pushResolvedHudStateIcons(
+        listFor(sb.enemyId),
+        `esb:${sb.id}`,
+        { stateIcons: sb.stateIcons },
+        sb.remainingTurns,
+      );
     }
+
     for (const cond of activeCombatConditions) {
       if (cond.targetKind !== "enemy") continue;
-      const icon = getCombatConditionIconSrc(cond.conditionId);
+      const icon = resolveActiveCombatConditionIconSrc(cond);
       if (!icon) continue;
-      const prev = byEnemy.get(cond.targetId) ?? [];
-      if (prev.includes(icon)) continue;
-      mergeForEnemy(cond.targetId, { stateIcons: [icon] });
+      const turns = cond.remainingTurns;
+      if (turns != null && turns <= 0) continue;
+      listFor(cond.targetId).push({
+        key: `econd:${cond.id}`,
+        src: icon,
+        ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+      });
     }
+
     return byEnemy;
   }, [
     displayEnemies,
@@ -3340,6 +3502,7 @@ export function CombatEncounterShell({
     step: ParsedPlayerConditionDebuff,
     skillName: string,
     livingEnemies: CombatEncounterEnemyView[],
+    effectForIcons: Record<string, unknown> = {},
   ) {
     const def = getCombatConditionDefinition(step.conditionId);
     if (!def) {
@@ -3355,12 +3518,21 @@ export function CombatEncounterShell({
     const rowsToAdd: ActiveCombatCondition[] = [];
     let resistedCount = 0;
     let appliedCount = 0;
+    const conditionStateIcons = getEffectStateIcons(effectForIcons);
+    const isSleepCondition = step.conditionId === "sleep";
+    const sleepTargetLogs: Array<{ message: string; tone: "default" | "success" }> = [];
+
+    const targetDisplayName = (
+      targetKind: "player" | "enemy",
+      enemyForResist: CombatEncounterEnemyView | null,
+    ) => (targetKind === "player" ? playerDisplayName : (enemyForResist?.name ?? "Enemigo"));
 
     const tryApply = (
       targetKind: "player" | "enemy",
       targetId: string,
       enemyForResist: CombatEncounterEnemyView | null,
     ) => {
+      const displayName = targetDisplayName(targetKind, enemyForResist);
       const resisted = rollConditionResisted(step.resist, (statKey) => {
         if (targetKind === "player") {
           return getPlayerStatValueForConditionResist(statKey, {
@@ -3377,9 +3549,21 @@ export function CombatEncounterShell({
       });
       if (resisted) {
         resistedCount += 1;
+        if (isSleepCondition) {
+          sleepTargetLogs.push({
+            message: `${displayName} resistió el encantamiento.`,
+            tone: "default",
+          });
+        }
         return;
       }
       appliedCount += 1;
+      if (isSleepCondition) {
+        sleepTargetLogs.push({
+          message: `${displayName} está dormido.`,
+          tone: "success",
+        });
+      }
       rowsToAdd.push({
         id: `${targetKind}:${targetId}:${step.conditionId}:${turn}:${Math.random().toString(36).slice(2, 9)}`,
         conditionId: step.conditionId,
@@ -3388,6 +3572,7 @@ export function CombatEncounterShell({
         remainingTurns: step.durationTurns,
         lastTickTurn: turn,
         sourceSkillName: skillName,
+        ...(conditionStateIcons.length > 0 ? { stateIcons: conditionStateIcons } : {}),
       });
     };
 
@@ -3413,7 +3598,11 @@ export function CombatEncounterShell({
       });
     }
 
-    if (appliedCount > 0 && resistedCount === 0) {
+    if (isSleepCondition) {
+      for (const log of sleepTargetLogs) {
+        appendCombatLog(log.message, log.tone);
+      }
+    } else if (appliedCount > 0 && resistedCount === 0) {
       appendCombatLog(`${def.name} aplicado (${skillName}).`, "success");
     } else if (appliedCount > 0) {
       appendCombatLog(
@@ -3423,6 +3612,59 @@ export function CombatEncounterShell({
     } else if (resistedCount > 0) {
       appendCombatLog(`El objetivo resistió ${def.name}.`, "default");
     }
+  }
+
+  function applyPlayerEnemyTimedStatDebuff(
+    effect: Record<string, unknown>,
+    skillName: string,
+    livingEnemies: CombatEncounterEnemyView[],
+  ) {
+    const durationTurns = parseEffectDurationTurns(effect);
+    const enemyParts = playerSelfBuffPartsToEnemyStatParts(
+      resolvePlayerSelfBuffParts(effect, getCombatStatValueForSkills),
+    );
+    if (durationTurns == null || enemyParts.length === 0) {
+      appendCombatLog(`No se pudo aplicar el efecto de ${skillName}.`, "default");
+      return;
+    }
+
+    const targets = resolvePlayerSkillEffectTargetsForPlayer(
+      parsePlayerSkillEffectTarget(effect.target, "enemy"),
+      selectedEnemy,
+      livingEnemies,
+    );
+    if (targets.enemies.length === 0) {
+      appendCombatLog("No hay enemigos válidos para el efecto.", "default");
+      return;
+    }
+
+    const stateIcons = getEffectStateIcons(effect);
+    const newRows: EnemyTimedStatBuff[] = targets.enemies.map((enemy, index) => ({
+      id: `player:${skillName}:${enemy.id}:${turn}:${index}:${Math.random().toString(36).slice(2, 9)}`,
+      enemyId: enemy.id,
+      parts: enemyParts,
+      remainingTurns: durationTurns,
+      lastTickTurn: turn,
+      skillName,
+      stateIcons,
+    }));
+
+    const stacked = stackEnemyTimedStatBuffs(enemyTimedStatBuffsRef.current, newRows, turn);
+    enemyTimedStatBuffsRef.current = stacked;
+    setEnemyTimedStatBuffs(stacked);
+
+    const affectedNames = targets.enemies.map((e) => e.name).join(", ");
+    const hasSpeedDebuff = enemyParts.some((p) => p.stat === "speed" && p.amount < 0);
+    appendCombatLog(
+      targets.enemies.length === 1
+        ? hasSpeedDebuff
+          ? `${affectedNames} está ralentizado.`
+          : `${affectedNames} recibe el efecto de ${skillName}.`
+        : hasSpeedDebuff
+          ? `${affectedNames} están ralentizados.`
+          : `${affectedNames} reciben el efecto de ${skillName}.`,
+      "success",
+    );
   }
 
   function runPlayerSkillDamageEffectOnly(
@@ -3579,7 +3821,9 @@ export function CombatEncounterShell({
       const livingEnemies = displayEnemies.filter((e) => e.hp > 0);
       for (const step of steps) {
         if (step.mode === "apply_condition") {
-          applyPlayerConditionDebuff(step, skillEntry.skill.name, livingEnemies);
+          applyPlayerConditionDebuff(step, skillEntry.skill.name, livingEnemies, effect);
+        } else if (step.mode === "raw" && isPlayerEnemyTimedStatEffect(step.effect)) {
+          applyPlayerEnemyTimedStatDebuff(step.effect, skillEntry.skill.name, livingEnemies);
         }
       }
       const damageStep = steps.find(
@@ -3594,6 +3838,19 @@ export function CombatEncounterShell({
         appendSpellLog(0);
       } else {
         appendSpellLog(totalDamage, selectedEnemy?.name ?? null);
+      }
+      scheduleAdvanceTurn();
+      return;
+    }
+
+    if (isPlayerEnemyTimedStatEffect(effect)) {
+      const livingEnemies = displayEnemies.filter((e) => e.hp > 0);
+      applyPlayerEnemyTimedStatDebuff(effect, skillEntry.skill.name, livingEnemies);
+      if (descTemplate != null) {
+        appendCombatLog(
+          formatPlayerSkillCombatLogDescription(descTemplate, 0, null, damageTypes),
+          "default",
+        );
       }
       scheduleAdvanceTurn();
       return;
@@ -4268,7 +4525,10 @@ export function CombatEncounterShell({
       ammoAttackType === "magical"
         ? effectiveEnemyMr(target, targetBonuses)
         : effectiveEnemyArmor(target, targetBonuses);
-    const afterArmor = mitigateDamageByDefense(rawDamage, enemyDefenseForHit);
+    const afterArmor =
+      ammoAttackType === "magical"
+        ? mitigateDamageByMr(rawDamage, enemyDefenseForHit)
+        : mitigateDamageByDefense(rawDamage, enemyDefenseForHit);
     const resistMerged = mergedEnemyResistancesForPlayerAttack(target, enemySelfTimedModifiers);
     const weakMerged = mergedEnemyWeaknessesForPlayerAttack(
       target,
@@ -4535,6 +4795,7 @@ export function CombatEncounterShell({
           damageAmt,
           enemy.name,
           dmgTypes,
+          playerDisplayName,
         );
         appendCombatLog(
           logText,
@@ -4625,13 +4886,22 @@ export function CombatEncounterShell({
             );
             if (dmgTargets.hitPlayer) {
               const incomingSubtype = enemySkillIncomingSubtypeFromParsed(leaf);
-              const rawDamageRoll = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+              const rawDamageRoll = Math.max(
+                0,
+                rollEnemySkillRawDamage(
+                  leaf.min,
+                  leaf.max,
+                  leaf.damageBasis,
+                  playerCurrentHp,
+                  playerHpMax,
+                ),
+              );
               const defenseStat = playerDefenseStatVsIncoming(
                 incomingSubtype,
                 effectivePlayerArmor,
                 effectivePlayerMr,
               );
-              const afterDef = mitigateDamageByDefense(rawDamageRoll, defenseStat);
+              const afterDef = mitigateDamageBySubtype(rawDamageRoll, defenseStat, incomingSubtype);
               const rw = mergePlayerResistWeakForIncoming(
                 playerResistancesRef.current,
                 playerWeaknessesRef.current,
@@ -4696,7 +4966,7 @@ export function CombatEncounterShell({
                 effectivePlayerArmor,
                 effectivePlayerMr,
               );
-              const afterDef = mitigateDamageByDefense(rawDamageRoll, defenseStat);
+              const afterDef = mitigateDamageBySubtype(rawDamageRoll, defenseStat, incomingSubtype);
               const rw = mergePlayerResistWeakForIncoming(
                 playerResistancesRef.current,
                 playerWeaknessesRef.current,
@@ -5114,7 +5384,7 @@ export function CombatEncounterShell({
                       onSelect={() => setSelectedEnemyId(enemy.id)}
                       isDefeated={enemy.hp <= 0}
                       nameColorClass={enemyNameColorClass}
-                      stateIconSrcs={enemyHudStateIconSrcsById.get(enemy.id) ?? []}
+                      stateIcons={enemyHudStateIconsById.get(enemy.id) ?? []}
                     />
                   ))
                 : null}
@@ -5122,7 +5392,7 @@ export function CombatEncounterShell({
             {!floatPlayerStatusOverActionsMobile && !isMobileViewport ? (
               <div className="pointer-events-auto flex w-full justify-start">
                 <div className="flex flex-col items-start gap-1">
-                  <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                  <CombatHudStateIconStrip icons={playerActiveBuffStateIcons} />
                   <PlayerStatusModal
                     displayName={playerDisplayName}
                     level={playerLevelCurrent}
@@ -5210,7 +5480,7 @@ export function CombatEncounterShell({
             {!isActionsPanelOpen && isMobileViewport ? (
               <div className="pointer-events-none flex w-full justify-start">
                 <div className="pointer-events-auto flex flex-col items-start gap-1">
-                  <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                  <CombatHudStateIconStrip icons={playerActiveBuffStateIcons} />
                   <PlayerStatusModal
                     displayName={playerDisplayName}
                     level={playerLevelCurrent}
@@ -5461,7 +5731,7 @@ export function CombatEncounterShell({
                     role="presentation"
                   >
                     <div className="pointer-events-auto flex flex-col items-start gap-1">
-                      <PlayerBuffStateIconStrip srcs={playerActiveBuffStateIconSrcs} />
+                      <CombatHudStateIconStrip icons={playerActiveBuffStateIcons} />
                       <PlayerStatusModal
                         displayName={playerDisplayName}
                         level={playerLevelCurrent}

@@ -31,6 +31,8 @@ const INTRO_PARAGRAPHS = [
   "¿Te vas a animar a intentar llevarte algo de este lugar?",
 ] as const;
 
+const PICKAXE_REQUIRED_MESSAGE = "(Tenés que tener un pico para poder minar.)";
+
 /** Mismas claves que Bosque Mágico (`magic-forest-gather-outcomes`). */
 const MINE_RESULT_MESSAGE: Record<string, string> = {
   piedra: "Extraés trozos de piedra del filón.",
@@ -209,7 +211,7 @@ export function AbandonedCoalMineShell({ hasStonePickaxeInInventory }: Abandoned
               Minas Abandonadas
             </h1>
             <div
-              className={`${dialogueFont.className} mt-4 space-y-3 text-center text-sm leading-relaxed text-amber-100/95 sm:text-sm`}
+              className={`${dialogueFont.className} mt-4 space-y-3 text-center text-[12px] leading-relaxed text-amber-100/95 sm:text-sm`}
             >
               {INTRO_PARAGRAPHS.map((paragraph) => (
                 <p key={paragraph}>{paragraph}</p>
@@ -229,6 +231,11 @@ export function AbandonedCoalMineShell({ hasStonePickaxeInInventory }: Abandoned
               >
                 {isPending ? "Minando…" : "Minar"}
               </button>
+              {!hasStonePickaxeInInventory ? (
+                <p className="text-center text-xs text-red-400" role="status">
+                  {PICKAXE_REQUIRED_MESSAGE}
+                </p>
+              ) : null}
               {actionError ? (
                 <p className="text-center text-xs text-red-300" role="alert">
                   {actionError}

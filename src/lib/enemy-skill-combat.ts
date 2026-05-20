@@ -12,6 +12,76 @@ export type EnemySkillUseWhen = {
   enemyHpPctMin?: number | null;
 };
 
+/**
+ * Cómo interpretar `min` / `max` en `type: "damage"`.
+ * - `flat` (default): entero de daño.
+ * - `target_hp_max_pct`: % de HP máximo del objetivo (`0.1` o `10` = 10%).
+ * - `target_hp_current_pct`: % de HP actual del objetivo.
+ */
+export type EnemySkillDamageBasis =
+  | "flat"
+  | "target_hp_max_pct"
+  | "target_hp_current_pct";
+
+export function parseEnemySkillDamageBasis(raw: unknown): EnemySkillDamageBasis {
+  if (typeof raw !== "string") return "flat";
+  const t = raw.trim().toLowerCase().replace(/-/g, "_");
+  if (
+    t === "target_hp_max_pct" ||
+    t === "target_hp_max_percent" ||
+    t === "player_hp_max_pct" ||
+    t === "player_max_hp_pct"
+  ) {
+    return "target_hp_max_pct";
+  }
+  if (
+    t === "target_hp_current_pct" ||
+    t === "target_hp_pct" ||
+    t === "player_hp_current_pct" ||
+    t === "player_current_hp_pct"
+  ) {
+    return "target_hp_current_pct";
+  }
+  return "flat";
+}
+
+/** `min`/`max` en fracción (0.1) o puntos (10 → 10%). */
+export function normalizeEnemySkillPctFraction(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  const v = Math.max(0, value);
+  return v > 1 ? Math.min(1, v / 100) : v;
+}
+
+/** Daño bruto antes de armadura/MR (inclusive en modo `flat`). */
+export function rollEnemySkillRawDamage(
+  min: number,
+  max: number,
+  basis: EnemySkillDamageBasis,
+  targetHp: number,
+  targetHpMax: number,
+): number {
+  if (basis === "target_hp_max_pct") {
+    const hpMax = Math.max(1, Math.trunc(targetHpMax));
+    const pctMin = normalizeEnemySkillPctFraction(min);
+    const pctMax = normalizeEnemySkillPctFraction(Math.max(min, max));
+    const pct =
+      pctMin === pctMax ? pctMin : pctMin + Math.random() * (pctMax - pctMin);
+    return Math.max(0, Math.floor(hpMax * pct));
+  }
+  if (basis === "target_hp_current_pct") {
+    const hp = Math.max(0, Math.trunc(targetHp));
+    const pctMin = normalizeEnemySkillPctFraction(min);
+    const pctMax = normalizeEnemySkillPctFraction(Math.max(min, max));
+    const pct =
+      pctMin === pctMax ? pctMin : pctMin + Math.random() * (pctMax - pctMin);
+    return Math.max(0, Math.floor(hp * pct));
+  }
+  const minV = Math.max(0, Math.trunc(min));
+  const maxV = Math.max(minV, Math.trunc(max));
+  if (maxV === minV) return minV;
+  return minV + Math.floor(Math.random() * (maxV - minV + 1));
+}
+
 /** Destino de un efecto de skill enemiga (`target` en `effect_json`). */
 export type EnemySkillEffectTarget = "player" | "caster" | "all_enemies" | "all";
 
@@ -175,11 +245,14 @@ export type ParsedEnemySkillEffect =
       target: EnemySkillEffectTarget;
       min: number;
       max: number;
+      damageBasis: EnemySkillDamageBasis;
       subtype: PlayerSkillEffectSubtype;
       damageTypes: string[];
       stateIcon: string | null;
       chance: number;
       useWhen: EnemySkillUseWhen | null;
+      /** `description` en `effect_json` (`{enemigo}`, `{daño}`, etc.). */
+      logDescription: string | null;
     }
   | {
       mode: "heal";
@@ -188,6 +261,7 @@ export type ParsedEnemySkillEffect =
       max: number;
       chance: number;
       useWhen: EnemySkillUseWhen | null;
+      logDescription: string | null;
     }
   | {
       mode: "apply_modifier";
@@ -198,6 +272,7 @@ export type ParsedEnemySkillEffect =
       stateIcons: string[];
       chance: number;
       useWhen: EnemySkillUseWhen | null;
+      logDescription: string | null;
     }
   | {
       mode: "stat_buff";
@@ -207,6 +282,7 @@ export type ParsedEnemySkillEffect =
       stateIcons: string[];
       chance: number;
       useWhen: EnemySkillUseWhen | null;
+      logDescription: string | null;
     }
   /** Ataque con daño de arma del enemigo; `damage_type` aplica RES/WEAK como en `damage`. */
   | {
@@ -216,6 +292,7 @@ export type ParsedEnemySkillEffect =
       damageTypes: string[];
       chance: number;
       useWhen: EnemySkillUseWhen | null;
+      logDescription: string | null;
     }
   | {
       mode: "composite";
@@ -522,6 +599,7 @@ function parseApplyModifier(
     stateIcons,
     chance,
     useWhen,
+    logDescription: extractLogDescription(effect),
   };
 }
 
@@ -547,6 +625,7 @@ function parseStatBuff(
     stateIcons,
     chance,
     useWhen,
+    logDescription: extractLogDescription(effect),
   };
 }
 
@@ -581,7 +660,15 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
     const target = parseEnemySkillTarget(effect.target, "caster");
     const min = Math.max(0, num(effect.min, 0));
     const max = Math.max(min, num(effect.max, min));
-    return { mode: "heal", target, min, max, chance, useWhen };
+    return {
+      mode: "heal",
+      target,
+      min,
+      max,
+      chance,
+      useWhen,
+      logDescription: extractLogDescription(effect),
+    };
   }
 
   if (typeNorm === "weapon_attack") {
@@ -595,6 +682,7 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
       damageTypes: getEffectDamageTypes(effect),
       chance,
       useWhen,
+      logDescription: extractLogDescription(effect),
     };
   }
 
@@ -608,18 +696,23 @@ function parseOne(effect: Record<string, unknown>): ParsedEnemySkillEffect | nul
 
   if (typeNorm !== "damage") return null;
   const target = parseEnemySkillTarget(effect.target, "player");
-  const min = Math.max(0, num(effect.min, 0));
-  const max = Math.max(min, num(effect.max, min));
+  const damageBasis = parseEnemySkillDamageBasis(
+    effect.damage_basis ?? effect.damageBasis,
+  );
+  const min = num(effect.min, 0);
+  const max = num(effect.max, min);
   return {
     mode: "damage",
     target,
     min,
-    max,
+    max: Math.max(min, max),
+    damageBasis,
     subtype: enemySkillDamageSubtype(effect),
     damageTypes: getEffectDamageTypes(effect),
     stateIcon: getEffectStateIcon(effect),
     chance,
     useWhen,
+    logDescription: extractLogDescription(effect),
   };
 }
 
@@ -629,7 +722,19 @@ export function parseEnemySkillEffectJson(effectRaw: unknown): ParsedEnemySkillE
   return parseOne(effectRaw as Record<string, unknown>);
 }
 
-/** Texto de log: columna `description` o `description` del `effect_json` (p. ej. composite). */
+function logDescriptionFromParsedEffect(
+  parsedEffect: ParsedEnemySkillEffect,
+): string | null {
+  if (parsedEffect.mode === "composite") {
+    return parsedEffect.logDescription;
+  }
+  const fromEffect = parsedEffect.logDescription?.trim() ?? "";
+  return fromEffect.length > 0 ? fromEffect : null;
+}
+
+/**
+ * Texto de log: prioridad `enemy_skills.description` (columna), luego `description` en `effect_json`.
+ */
 export function resolveEnemySkillLogDescription(
   skillDescription: string | null | undefined,
   parsedEffect: ParsedEnemySkillEffect,
@@ -637,10 +742,7 @@ export function resolveEnemySkillLogDescription(
   const fromColumn =
     typeof skillDescription === "string" ? skillDescription.trim() : "";
   if (fromColumn.length > 0) return fromColumn;
-  if (parsedEffect.mode === "composite" && parsedEffect.logDescription) {
-    return parsedEffect.logDescription;
-  }
-  return null;
+  return logDescriptionFromParsedEffect(parsedEffect);
 }
 
 /** Buffs/modificadores antes que daño para que el ataque del mismo skill use el buff. */
