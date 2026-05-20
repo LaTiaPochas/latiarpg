@@ -13,6 +13,8 @@ import { insertWorldEventLog } from "@/lib/world-event-log";
 import Link from "next/link";
 
 const WOOD_ITEM_ID = "ea5b9601-8a7d-4270-b5d9-cf292d49945e";
+/** Mismo ítem que en mina abandonada (`abandoned-coal-mine/actions.ts`). */
+const STONE_ITEM_ID = "e2b70f4d-19d5-4406-bcd9-23c8820c1505";
 const STONE_FALLBACK_ICON = "/img/resources/items/resource_rock.png";
 const HERRERIA_WOOD_MILESTONE = {
   id: 6,
@@ -528,18 +530,14 @@ export default async function HerreriaPage() {
     .maybeSingle();
   const { data: stoneItem } = await supabase
     .from("items")
-    .select("id, icon_path")
-    .or("icon_path.ilike.%resource_rock%,name.ilike.%piedra%,name.ilike.%stone%")
-    .limit(1)
+    .select("icon_path")
+    .eq("id", STONE_ITEM_ID)
     .maybeSingle();
-  const stoneItemId = typeof stoneItem?.id === "string" ? stoneItem.id : null;
-  const { data: stoneInventoryRows } = stoneItemId
-    ? await supabase
-        .from("user_inventory")
-        .select("quantity")
-        .eq("profile_id", user.id)
-        .eq("item_id", stoneItemId)
-    : { data: [] };
+  const { data: stoneInventoryRows } = await supabase
+    .from("user_inventory")
+    .select("quantity")
+    .eq("profile_id", user.id)
+    .eq("item_id", STONE_ITEM_ID);
   const { data: recipeInventoryRows } = await supabase
     .from("user_inventory")
     .select("id, item_id, quantity, items!inner(name, icon_path, rarity_color, equip_slot)")
@@ -1404,23 +1402,11 @@ export default async function HerreriaPage() {
       redirect("/login");
     }
 
-    const { data: currentStoneItem } = await supabaseAction
-      .from("items")
-      .select("id")
-      .or("icon_path.ilike.%resource_rock%,name.ilike.%piedra%,name.ilike.%stone%")
-      .limit(1)
-      .maybeSingle();
-    const currentStoneItemId =
-      typeof currentStoneItem?.id === "string" ? currentStoneItem.id : null;
-    if (!currentStoneItemId) {
-      redirect("/herreria");
-    }
-
     const { data: inventoryRows } = await supabaseAction
       .from("user_inventory")
       .select("id, quantity")
       .eq("profile_id", currentUser.id)
-      .eq("item_id", currentStoneItemId)
+      .eq("item_id", STONE_ITEM_ID)
       .order("id", { ascending: true });
 
     const availableStone = (inventoryRows ?? []).reduce(
