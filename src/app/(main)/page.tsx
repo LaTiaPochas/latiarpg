@@ -2,6 +2,7 @@ import Image from "next/image";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { ZoneMapModalRouter } from "@/components/maps/zone-map-modal-router";
 import { WorldEventJournal } from "@/components/home/world-event-journal";
+import { FORTUNE_COOKIE_ITEM_ID } from "@/lib/fortune-cookie-item";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -97,7 +98,7 @@ export default async function Home({ searchParams }: HomePageProps) {
 
   const { data: milestones } = await supabase
     .from("user_milestones")
-    .select("intro_completed, tutorial_completed, first_time_camp_entered")
+    .select("intro_completed, tutorial_completed, first_time_camp_entered, meloni_found_cave")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -138,6 +139,23 @@ export default async function Home({ searchParams }: HomePageProps) {
     typeof garrisonMilestone.title === "string" &&
     ["campamento construido", "campamento_construido"].includes(
       garrisonMilestone.title.trim().toLowerCase(),
+    );
+  const { data: meloniGalletaMilestone } = await supabase
+    .from("global_milestones")
+    .select("is_completed")
+    .eq("title", "meloni_galleta_given")
+    .maybeSingle();
+  const meloniGalletaGiven = meloniGalletaMilestone?.is_completed === true;
+  const { data: fortuneCookieInventoryRows } = await supabase
+    .from("user_inventory")
+    .select("quantity")
+    .eq("profile_id", user.id)
+    .eq("item_id", FORTUNE_COOKIE_ITEM_ID)
+    .gt("quantity", 0);
+  const hasFortuneCookieInInventory =
+    !meloniGalletaGiven &&
+    (fortuneCookieInventoryRows ?? []).some(
+      (row) => typeof row.quantity === "number" && row.quantity > 0,
     );
 
   return (
@@ -185,6 +203,9 @@ export default async function Home({ searchParams }: HomePageProps) {
           restrictToCamp={showFirstCampDialogue}
           mapSrc={initialZoneMapSrc}
           isCampBuilt={isCampBuilt}
+          meloniFoundCave={milestones?.meloni_found_cave === true}
+          hasFortuneCookieInInventory={hasFortuneCookieInInventory}
+          meloniGalletaGiven={meloniGalletaGiven}
         />
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-300 lg:text-sm">

@@ -68,8 +68,10 @@ import {
   type CombatAmmoMenuEntry,
 } from "@/lib/combat-ammo";
 import {
+  canonicalizeCombatResistWeakTag,
   collectResistWeakIconSrcsForEnemyTags,
   getCombatResistWeakIconSrc,
+  inferResistWeakTooltipFromIconSrc,
   preloadCombatResistWeakIcons,
   resolveCombatStateIconSrcs,
 } from "@/lib/combat-resist-weak-icons";
@@ -1227,12 +1229,20 @@ function applyEnemyResistWeakTagsToMitigatedDamage(
   weaknesses: string[],
 ): number {
   const base = Math.max(0, Math.trunc(damageAfterDefense));
-  const tags = attackTags.map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0);
+  const tags = attackTags
+    .map((s) => canonicalizeCombatResistWeakTag(s))
+    .filter((s): s is string => Boolean(s));
   if (tags.length === 0) return base;
-  const norm = (arr: string[]) =>
-    arr.map((s) => String(s).trim().toLowerCase()).filter((s) => s.length > 0);
-  const res = new Set(norm(resistances));
-  const weak = new Set(norm(weaknesses));
+  const res = new Set(
+    resistances
+      .map((s) => canonicalizeCombatResistWeakTag(s))
+      .filter((s): s is string => Boolean(s)),
+  );
+  const weak = new Set(
+    weaknesses
+      .map((s) => canonicalizeCombatResistWeakTag(s))
+      .filter((s): s is string => Boolean(s)),
+  );
 
   let hasResistOnly = false;
   let hasWeakOnly = false;
@@ -1872,6 +1882,8 @@ function enemyNameLevelColorClass(recommendedLevel: number | null, playerLevel: 
 type CombatHudStateIcon = {
   key: string;
   src: string;
+  /** p. ej. `RES: arcane` / `WEAK: fire` al pasar el mouse. */
+  tooltip?: string | null;
   /** Si es > 0, muestra contador abajo a la izquierda del icono. */
   remainingTurns?: number | null;
 };
@@ -1883,45 +1895,101 @@ function pushResolvedHudStateIcons(
   remainingTurns?: number | null,
 ) {
   let index = 0;
-  for (const src of resolveCombatStateIconSrcs(opts)) {
+  for (const resolved of resolveCombatStateIconSrcs(opts)) {
     const turns =
       remainingTurns != null && Number.isFinite(remainingTurns)
         ? Math.max(0, Math.trunc(remainingTurns))
         : null;
     list.push({
-      key: `${keyPrefix}:${index}:${src}`,
-      src,
+      key: `${keyPrefix}:${index}:${resolved.src}`,
+      src: resolved.src,
+      ...(resolved.tooltip ? { tooltip: resolved.tooltip } : {}),
       ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
     });
     index += 1;
   }
 }
 
-function CombatHudStateIconStrip({ icons }: { icons: CombatHudStateIcon[] }) {
+function CombatHudStateIconStrip({
+  icons,
+  tooltipPlacement = "above",
+}: {
+  icons: CombatHudStateIcon[];
+  /** Enemigos (arriba): `below` evita recorte por overflow del escenario. */
+  tooltipPlacement?: "above" | "below";
+}) {
+  const [pinnedTooltipKey, setPinnedTooltipKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pinnedTooltipKey) return;
+    const close = () => setPinnedTooltipKey(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [pinnedTooltipKey]);
+
+  useEffect(() => {
+    setPinnedTooltipKey(null);
+  }, [icons]);
+
   if (icons.length === 0) return null;
+  const tooltipPositionClass =
+    tooltipPlacement === "below"
+      ? "top-[calc(100%+4px)]"
+      : "bottom-[calc(100%+4px)]";
   return (
     <div
       className="flex flex-wrap justify-start gap-0.5 px-2 sm:px-2"
       aria-label="Estados activos"
     >
-      {icons.map((icon) => (
-        <div
-          key={icon.key}
-          className="relative h-6 w-6 shrink-0 overflow-visible rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
-        >
-          <div className="relative h-full w-full overflow-hidden rounded-[inherit]">
-            <Image src={icon.src} alt="" fill className="object-contain p-px" sizes="16px" />
+      {icons.map((icon) => {
+        const tooltip =
+          icon.tooltip ?? inferResistWeakTooltipFromIconSrc(icon.src) ?? null;
+        const isPinned = pinnedTooltipKey === icon.key;
+        return (
+          <div
+            key={icon.key}
+            title={tooltip ?? undefined}
+            role={tooltip ? "button" : undefined}
+            tabIndex={tooltip ? 0 : undefined}
+            aria-label={tooltip ?? undefined}
+            aria-expanded={tooltip ? isPinned : undefined}
+            onClick={(event) => {
+              if (!tooltip) return;
+              event.stopPropagation();
+              setPinnedTooltipKey((prev) => (prev === icon.key ? null : icon.key));
+            }}
+            onKeyDown={(event) => {
+              if (!tooltip) return;
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              setPinnedTooltipKey((prev) => (prev === icon.key ? null : icon.key));
+            }}
+            className="group relative z-20 h-6 w-6 shrink-0 cursor-help overflow-visible rounded border border-amber-300/75 bg-black/50 sm:h-7 sm:w-7"
+          >
+            {tooltip ? (
+              <span
+                className={`pointer-events-none absolute left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded border border-amber-600/80 bg-[#1c120e] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-50 shadow-[0_4px_14px_rgba(0,0,0,0.65)] ${tooltipPositionClass} ${
+                  isPinned ? "block" : "hidden sm:group-hover:block"
+                }`}
+              >
+                {tooltip}
+              </span>
+            ) : null}
+            <div className="relative h-full w-full overflow-hidden rounded-[inherit]">
+              <Image src={icon.src} alt="" fill className="object-contain p-px" sizes="16px" />
+            </div>
+            {icon.remainingTurns != null && icon.remainingTurns > 0 ? (
+              <span
+                className="pointer-events-none absolute -bottom-px -left-px z-[1] min-w-[0.7rem] rounded-tr border border-amber-900/80 bg-black/90 px-[2px] text-center text-[8px] font-bold leading-tight text-amber-50 tabular-nums shadow-sm sm:text-[9px]"
+                aria-hidden
+              >
+                {icon.remainingTurns}
+              </span>
+            ) : null}
           </div>
-          {icon.remainingTurns != null && icon.remainingTurns > 0 ? (
-            <span
-              className="pointer-events-none absolute -bottom-px -left-px z-[1] min-w-[0.7rem] rounded-tr border border-amber-900/80 bg-black/90 px-[2px] text-center text-[8px] font-bold leading-tight text-amber-50 tabular-nums shadow-sm sm:text-[9px]"
-              aria-hidden
-            >
-              {icon.remainingTurns}
-            </span>
-          ) : null}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -2019,18 +2087,24 @@ function EnemyStatusModal({
 }) {
   const pct = enemyHpPercent(enemy);
   return (
+    <div
+      className={`${menuFont.className} min-w-0 flex-1 basis-0 rounded-xl border bg-[#1a100c]/92 shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm transition sm:w-52 sm:flex-none sm:basis-auto ${
+        isDefeated
+          ? "border-slate-700/70 opacity-55"
+          : isSelected
+            ? "border-amber-400/90 ring-1 ring-amber-300/70"
+            : "border-amber-900/65 hover:border-amber-700/80"
+      }`}
+    >
     <button
       type="button"
       onClick={onSelect}
       disabled={isDefeated}
-      className={`${menuFont.className} min-w-0 flex-1 basis-0 rounded-xl border bg-[#1a100c]/92 p-1.5 text-left shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm transition sm:w-52 sm:flex-none sm:basis-auto sm:p-2.5 ${
+      className={`w-full rounded-[inherit] p-1.5 text-left transition sm:p-2.5 ${
         isDefeated
-          ? "cursor-not-allowed border-slate-700/70 opacity-55"
-          : isSelected
-          ? "border-amber-400/90 ring-1 ring-amber-300/70"
-          : "border-amber-900/65 hover:border-amber-700/80"
+          ? "cursor-not-allowed"
+          : "cursor-pointer hover:bg-amber-950/20"
       }`}
-      role="group"
       aria-label={`Estado de ${enemy.name}`}
       aria-pressed={isSelected}
     >
@@ -2068,14 +2142,15 @@ function EnemyStatusModal({
           <p className="mt-1 text-[9px] tabular-nums text-red-100/90 sm:text-[10px]">
             HP {enemy.hp} / {enemy.hpMax}
           </p>
-          {stateIcons.length > 0 ? (
-            <div className="mt-1 flex justify-center sm:justify-start">
-              <CombatHudStateIconStrip icons={stateIcons} />
-            </div>
-          ) : null}
         </div>
       </div>
     </button>
+      {stateIcons.length > 0 ? (
+        <div className="relative z-30 flex justify-center px-1.5 pb-1.5 sm:justify-start">
+          <CombatHudStateIconStrip icons={stateIcons} tooltipPlacement="below" />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -3078,6 +3153,8 @@ export function CombatEncounterShell({
   );
   const playerActiveBuffStateIcons = useMemo(() => {
     const out: CombatHudStateIcon[] = [];
+    pushResolvedHudStateIcons(out, "pbase:res", { resistanceTags: playerResistances });
+    pushResolvedHudStateIcons(out, "pbase:weak", { weaknessTags: playerWeaknesses });
     for (const buff of playerTimedSelfBuffs) {
       if (buff.remainingTurns <= 0) continue;
       pushResolvedHudStateIcons(out, `pbuff:${buff.id}`, { stateIcons: buff.stateIcons }, buff.remainingTurns);
@@ -3108,7 +3185,13 @@ export function CombatEncounterShell({
       });
     }
     return out;
-  }, [playerTimedSelfBuffs, enemyAppliedPlayerTimedModifiers, activeCombatConditions]);
+  }, [
+    playerTimedSelfBuffs,
+    enemyAppliedPlayerTimedModifiers,
+    activeCombatConditions,
+    playerResistances,
+    playerWeaknesses,
+  ]);
 
   const enemyHudStateIconsById = useMemo(() => {
     const byEnemy = new Map<string, CombatHudStateIcon[]>();
@@ -4834,6 +4917,16 @@ export function CombatEncounterShell({
       const getEnemyStatBonusesDuringSkill = (enemyId: string) =>
         sumEnemyTimedStatBonuses(enemyTimedStatBuffsRef.current, enemyId);
 
+      /** Daño al PJ en este cast (para `heal_basis: damage_dealt_to_player` en composite). */
+      const enemySkillCastCtx = { playerDamageDealt: 0 };
+
+      const resolveEnemyHealAmount = (leaf: Extract<ParsedEnemySkillEffect, { mode: "heal" }>) => {
+        if (leaf.healBasis === "damage_dealt_to_player") {
+          return Math.max(0, Math.trunc(enemySkillCastCtx.playerDamageDealt));
+        }
+        return Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+      };
+
       const runLeaf = (
         leaf: ParsedEnemySkillEffect,
         rollLeafChance: boolean,
@@ -4846,6 +4939,7 @@ export function CombatEncounterShell({
             skillDesc.length > 0 || Boolean(opts?.suppressPlayerDamageLog);
           let totalPlayerDamage = 0;
           const orderedSteps = orderCompositeStepsForExecution(leaf.steps);
+          enemySkillCastCtx.playerDamageDealt = 0;
           debugEnemy("composite-inicio", {
             enemy: enemy.name,
             skill: skill.name,
@@ -4915,6 +5009,7 @@ export function CombatEncounterShell({
               );
               const d = Math.max(0, Math.trunc(damage));
               playerDamage += d;
+              enemySkillCastCtx.playerDamageDealt += d;
               applyPlayerDamageTaken(d);
               if (!opts?.suppressPlayerDamageLog) {
                 tryLogEnemySkillDescription(d, leaf.damageTypes);
@@ -4980,6 +5075,7 @@ export function CombatEncounterShell({
               );
               const d = Math.max(0, Math.trunc(damage));
               playerDamage += d;
+              enemySkillCastCtx.playerDamageDealt += d;
               debugEnemy("weapon_attack", {
                 enemy: enemy.name,
                 skill: skill.name,
@@ -5010,7 +5106,7 @@ export function CombatEncounterShell({
               livingEnemyTargets,
             );
             if (healTargets.hitPlayer) {
-              const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+              const rolled = resolveEnemyHealAmount(leaf);
               setPlayerCurrentHp((prev) => {
                 const cap = Math.max(1, playerHpMax);
                 const next = Math.min(cap, prev + rolled);
@@ -5025,7 +5121,7 @@ export function CombatEncounterShell({
               const hpById = new Map<string, number>();
               let totalGained = 0;
               for (const recipient of healTargets.enemies) {
-                const rolled = Math.max(0, randomIntInclusive(leaf.min, leaf.max));
+                const rolled = resolveEnemyHealAmount(leaf);
                 const hpMax = Math.max(
                   1,
                   effectiveEnemyHpMax(recipient, getEnemyStatBonuses(recipient.id)),
