@@ -9,6 +9,11 @@ import {
   BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE,
   DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
 } from "@/lib/daily-boss-combat";
+import {
+  rollWolfForestEnemyCombatCode,
+  WOLF_FOREST_HOTSPOT_ID,
+  WOLF_FOREST_ZONE_CODE,
+} from "@/lib/wolf-forest-enemy-combats";
 
 const MAP_SRC = "/img/resources/maps/map_hiddenforest_start.png";
 
@@ -30,6 +35,15 @@ const HOTSPOTS: ExplorationHotspot[] = [
     yPercent: 80,
     description:
       "A medida que te adentrás en el bosque empezás a sentir el peligro más presente que nunca. El bosque es cada vez más frondoso y ya no podés ver la salida, aunque sabrías por donde volver si lo necesitás. De todas formas, aun no hay señales de mayores impedimentos.",
+  },
+  {
+    id: "wolf-forest",
+    step: 6,
+    label: "Bosques de lobos",
+    xPercent: 15,
+    yPercent: 76,
+    description:
+      "Entre la espesura escuchás aullidos lejanos y huellas recientes en el barro. Los lobos marcan este tramo del bosque; conviene avanzar con cautela.",
   },
   {
     id: "forest-exit",
@@ -102,6 +116,15 @@ export function HiddenForestMap({
         zoneCode={zoneCode}
         initialHotspotId={initialHotspotId}
         onIrAlla={(hotspot) => {
+          if (hotspot.id === WOLF_FOREST_HOTSPOT_ID) {
+            const encounterCode = rollWolfForestEnemyCombatCode();
+            const z = encodeURIComponent(WOLF_FOREST_ZONE_CODE);
+            const hotspotParam = encodeURIComponent(WOLF_FOREST_HOTSPOT_ID);
+            router.push(
+              `/combate/${encodeURIComponent(encounterCode)}?zone=${z}&hotspot=${hotspotParam}`,
+            );
+            return true;
+          }
           if (hotspot.id !== "cave-entrance") {
             return false;
           }

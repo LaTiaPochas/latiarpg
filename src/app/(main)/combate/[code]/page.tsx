@@ -1754,7 +1754,7 @@ export default async function CombatEncounterPage({
   const mapBaseHref = mapPathByZoneCode(zoneForMapHref) ?? "/";
   const zoneKeyForMapUi = normalizeZoneCodeKey(zoneForMapHref);
   const mapDisplayName =
-    zoneKeyForMapUi === "hidden_forest"
+    zoneKeyForMapUi === "hidden_forest" || zoneKeyForMapUi === "wolf_forest"
       ? "Bosque Inexplorado"
       : zoneKeyForMapUi === "near_woods" || zoneKeyForMapUi === "nearwoods"
         ? "Cercanías del bosque"

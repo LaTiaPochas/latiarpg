@@ -3,6 +3,8 @@
  * Pasalos en `?zone=` al entrar a `/combate/[code]` para que el escape vuelva al mapa correcto.
  */
 export const HIDDEN_FOREST_ZONE_CODE = "hidden_forest";
+/** Encuentros aleatorios del hotspot «Bosques de lobos» en bosque inexplorado. */
+export const WOLF_FOREST_ZONE_CODE = "wolf-forest";
 /** Debe coincidir con `user_combat_progress.zone_id` y `zones.code` en Supabase. */
 export const MYSTIC_CAVE_ZONE_CODE = "mystic-cave";
 /** Valor recomendado para `?zone=` desde cercanías del bosque. */
@@ -35,6 +37,11 @@ export function zoneLookupCodeCandidates(zoneQueryParam: string): string[] {
 
   if (key === "hidden_forest") {
     add(out, "hidden_forest");
+    return out;
+  }
+  if (key === "wolf_forest") {
+    add(out, "wolf-forest");
+    add(out, "wolf_forest");
     return out;
   }
   if (key === "mystic_cave") {
@@ -81,7 +88,7 @@ export function mapPathByZoneCode(zoneCode: string | null | undefined): string |
   const key = normalizeZoneCodeKey(zoneCode);
   if (!key) return null;
 
-  if (key === "hidden_forest") {
+  if (key === "hidden_forest" || key === "wolf_forest") {
     return "/bosque-inexplorado";
   }
   if (key === "mystic_cave") {
