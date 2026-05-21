@@ -76,6 +76,10 @@ import {
   resolveCombatStateIconSrcs,
 } from "@/lib/combat-resist-weak-icons";
 import {
+  stackEnemySelfTimedResistWeakModifiers,
+  stackPlayerTimedResistWeakModifiers,
+} from "@/lib/combat-timed-resist-weak-stack";
+import {
   advanceAtbAfterAction,
   createInitialAtbGauges,
   predictAtbTimeline,
@@ -5169,8 +5173,14 @@ export function CombatEncounterShell({
                 extraWeaknessTags: leaf.weaknessTags,
                 extraResistanceTags: leaf.resistanceTags,
               };
-              livePlayerMods.push(row);
-              setEnemyAppliedPlayerTimedModifiers((prev) => [...prev, row]);
+              livePlayerMods = stackPlayerTimedResistWeakModifiers(
+                livePlayerMods,
+                [row],
+                turn,
+              );
+              setEnemyAppliedPlayerTimedModifiers((prev) =>
+                stackPlayerTimedResistWeakModifiers(prev, [row], turn),
+              );
             }
             if (modTargets.enemies.length > 0) {
               const rows: EnemySelfTimedModifier[] = modTargets.enemies.map((recipient) => ({
@@ -5183,7 +5193,9 @@ export function CombatEncounterShell({
                 resistanceTags: leaf.resistanceTags,
                 weaknessTags: leaf.weaknessTags,
               }));
-              setEnemySelfTimedModifiers((prev) => [...prev, ...rows]);
+              setEnemySelfTimedModifiers((prev) =>
+                stackEnemySelfTimedResistWeakModifiers(prev, rows, turn),
+              );
             }
             if (!opts?.suppressPlayerDamageLog) {
               tryLogEnemySkillDescription(0);

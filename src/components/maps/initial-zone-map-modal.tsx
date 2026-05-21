@@ -58,14 +58,14 @@ const HOTSPOTS: Hotspot[] = [
     xPercent: 70,
     yPercent: 26,
     description: "Una forma fácil de recolectar madera sin exponerse a grandes peligros.",
-  },
+  },/*
   {
     id: "relaxing-waters",
     label: "Aguas relajantes",
     xPercent: 40,
     yPercent: 87,
     description: "Podés tomar un descanso en estas aguas.",
-  },
+  },*/
 ];
 
 const MELONI_HOTSPOT: Hotspot = {

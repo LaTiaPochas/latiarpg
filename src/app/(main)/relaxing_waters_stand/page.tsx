@@ -115,6 +115,8 @@ export default async function RelaxingWatersStandPage() {
     .eq("id", "ea5b9601-8a7d-4270-b5d9-cf292d49945e")
     .maybeSingle();
   const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
+  const GOLD_ITEM_ID = "8438bdcd-b4b6-412c-8a54-0dcdb6636289";
+  const HEAL_COST_GOLD = 1;
   const { data: relaxingWatersStockRow } = await supabase
     .from("global_warehouse")
     .select("quantity")
@@ -125,6 +127,12 @@ export default async function RelaxingWatersStandPage() {
     .select("icon_path")
     .eq("id", RELAXING_WATER_ITEM_ID)
     .maybeSingle();
+  const { data: goldInventoryRows } = await supabase
+    .from("user_inventory")
+    .select("quantity")
+    .eq("profile_id", user.id)
+    .eq("item_id", GOLD_ITEM_ID)
+    .gt("quantity", 0);
 
   const fallbackName = user.email?.split("@")[0] ?? "Aventurero";
   const playerName = resolvePlayerName(profile?.miembro, fallbackName);
@@ -165,6 +173,16 @@ export default async function RelaxingWatersStandPage() {
       ? Math.max(0, Math.trunc(relaxingWatersStockRow.quantity))
       : 0;
   const isNoBottleAvailable = relaxingWatersAvailable <= 0;
+  const playerGoldAmount = (goldInventoryRows ?? []).reduce(
+    (total, row) =>
+      total +
+      (typeof row.quantity === "number" && Number.isFinite(row.quantity)
+        ? Math.max(0, Math.trunc(row.quantity))
+        : 0),
+    0,
+  );
+  const canPayGoldToHeal = playerGoldAmount >= HEAL_COST_GOLD;
+  const showPayGoldHealButton = isNoBottleAvailable && !isCharacterAlreadyFull;
   const relaxingWaterIconSrc = resolveItemIconPath(relaxingWaterItem?.icon_path);
   const userWoodQuantity = (woodInventoryRows ?? []).reduce(
     (total, row) => total + (typeof row.quantity === "number" ? row.quantity : 0),
@@ -358,6 +376,78 @@ export default async function RelaxingWatersStandPage() {
     redirect("/relaxing_waters_stand");
   }
 
+  async function healPayingGold() {
+    "use server";
+
+    const supabaseAction = await createClient();
+    const {
+      data: { user: currentUser },
+    } = await supabaseAction.auth.getUser();
+    if (!currentUser) {
+      redirect("/login");
+    }
+
+    const { data: goldRows } = await supabaseAction
+      .from("user_inventory")
+      .select("id, quantity")
+      .eq("profile_id", currentUser.id)
+      .eq("item_id", GOLD_ITEM_ID)
+      .gt("quantity", 0)
+      .order("id", { ascending: true });
+
+    let totalGold = 0;
+    for (const row of goldRows ?? []) {
+      const qty =
+        typeof row.quantity === "number" && Number.isFinite(row.quantity)
+          ? Math.max(0, Math.trunc(row.quantity))
+          : 0;
+      totalGold += qty;
+    }
+    if (totalGold < HEAL_COST_GOLD) {
+      redirect("/relaxing_waters_stand");
+    }
+
+    let pendingDiscount = HEAL_COST_GOLD;
+    for (const row of goldRows ?? []) {
+      if (pendingDiscount <= 0) break;
+      const rowQty =
+        typeof row.quantity === "number" && Number.isFinite(row.quantity)
+          ? Math.max(0, Math.trunc(row.quantity))
+          : 0;
+      if (rowQty <= 0) continue;
+      const deduct = Math.min(rowQty, pendingDiscount);
+      const nextQty = rowQty - deduct;
+      if (nextQty <= 0) {
+        await supabaseAction.from("user_inventory").delete().eq("id", row.id);
+      } else {
+        await supabaseAction.from("user_inventory").update({ quantity: nextQty }).eq("id", row.id);
+      }
+      pendingDiscount -= deduct;
+    }
+
+    const { data: characterRow } = await supabaseAction
+      .from("user_character")
+      .select("hp_total, mana_total")
+      .eq("profile_id", currentUser.id)
+      .maybeSingle();
+    if (characterRow) {
+      const hpTotal =
+        typeof characterRow.hp_total === "number" && Number.isFinite(characterRow.hp_total)
+          ? Math.max(0, Math.trunc(characterRow.hp_total))
+          : 0;
+      const manaTotal =
+        typeof characterRow.mana_total === "number" && Number.isFinite(characterRow.mana_total)
+          ? Math.max(0, Math.trunc(characterRow.mana_total))
+          : 0;
+      await supabaseAction
+        .from("user_character")
+        .update({ hp_actual: hpTotal, mana_actual: manaTotal })
+        .eq("profile_id", currentUser.id);
+    }
+
+    redirect("/relaxing_waters_stand");
+  }
+
   if (standMilestone?.is_completed === true) {
     return (
       <main
@@ -419,6 +509,28 @@ export default async function RelaxingWatersStandPage() {
                   </span>
                 ) : null}
               </div>
+              {showPayGoldHealButton ? (
+                <div className="group relative">
+                  <form action={healPayingGold}>
+                    <button
+                      type="submit"
+                      disabled={!canPayGoldToHeal}
+                      className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
+                        canPayGoldToHeal
+                          ? "cursor-pointer border-amber-500/80 bg-amber-700/90 text-amber-50 hover:bg-amber-600/90"
+                          : "cursor-not-allowed border-cyan-700/40 bg-cyan-950/40 text-cyan-200/60"
+                      }`}
+                    >
+                      Curarse pagando 1 de oro
+                    </button>
+                  </form>
+                  {!canPayGoldToHeal ? (
+                    <span className="pointer-events-none absolute -top-10 left-1/2 z-20 w-max -translate-x-1/2 rounded-md border border-cyan-700/70 bg-[#0f1e2a]/95 px-2 py-1 text-[10px] text-cyan-100 opacity-0 shadow-[0_8px_18px_rgba(0,0,0,0.35)] transition-opacity duration-150 group-active:opacity-100 sm:hidden">
+                      No tenés suficiente oro.
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               <Link
                 href="/garrison"
                 className="rounded-md border border-amber-500/80 bg-amber-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-50 transition hover:bg-amber-700/90 sm:text-sm"
@@ -431,7 +543,11 @@ export default async function RelaxingWatersStandPage() {
                 <span className="text-[10px] text-cyan-100/90 sm:text-sm">
                   {isCharacterAlreadyFull
                     ? "Tu vida y tu mana están completos."
-                    : "Podés tomar una botella para recuperar vida y mana."}
+                    : isNoBottleAvailable
+                      ? canPayGoldToHeal
+                        ? "No quedan botellas. Podés curarte pagando 1 de oro."
+                        : "No quedan botellas y no tenés oro suficiente para curarte."
+                      : "Podés tomar una botella para recuperar vida y mana."}
                 </span>
               </div>
             </div>

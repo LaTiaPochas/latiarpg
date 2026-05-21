@@ -604,7 +604,12 @@ export function HerreriaCompletedModal({
                     setActiveTooltip(null);
                     setCraftProgress(100);
                     window.setTimeout(() => {
-                      router.push("/character_profile");
+                      setCraftProgressVisible(false);
+                      setCraftProgress(0);
+                      setSelectedAvailableRecipeId(null);
+                      setSelectedRecipeId(null);
+                      setMode("options");
+                      router.refresh();
                     }, 260);
                   });
                 }}
