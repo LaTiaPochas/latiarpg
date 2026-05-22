@@ -195,12 +195,13 @@ async function contributeSoulAltarMaterial(amount: number, kind: SoulAltarMateri
     const statColumn = kind === "gold" ? "gold_given" : "rock_given";
     const { data: currentStats } = await supabaseAction
       .from("user_stats")
-      .select(statColumn)
+      .select("gold_given, rock_given")
       .eq("user_id", currentUser.id)
       .maybeSingle();
+    const rawStat = currentStats?.[statColumn];
     const currentValue =
-      typeof currentStats?.[statColumn] === "number" && Number.isFinite(currentStats[statColumn])
-        ? Math.max(0, Math.trunc(currentStats[statColumn]))
+      typeof rawStat === "number" && Number.isFinite(rawStat)
+        ? Math.max(0, Math.trunc(rawStat))
         : 0;
     await supabaseAction.from("user_stats").upsert(
       {
