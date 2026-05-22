@@ -7,12 +7,15 @@ import { useRouter } from "next/navigation";
 
 import { completeMeloniFoundCave } from "@/app/(main)/mystic-cave/actions";
 import { ExplorationZoneMap, type ExplorationHotspot } from "@/components/maps/exploration-zone-map";
+import { ZoneDescentLoadingOverlay } from "@/components/maps/zone-descent-loading-overlay";
 import {
   DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
   MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE,
 } from "@/lib/daily-boss-combat";
 
 const ABANDONED_MINE_HOTSPOT_ID = "cave-node-5";
+const CAVE_DEPTHS_HOTSPOT_ID = "cave-node-10";
+const CAVE_DEPTHS_PATH = "/cave-depths";
 const HIDDEN_HOTSPOT_ID = "cave-node-0";
 
 const MAP_SRC = "/img/resources/maps/map_mystic_cave_floor_1.png";
@@ -158,6 +161,7 @@ export function MysticCaveMap({
   initialDailyBossBlockedMessage = null,
 }: MysticCaveMapProps) {
   const router = useRouter();
+  const [descendingToDepths, setDescendingToDepths] = useState(false);
   const [hiddenModalOpen, setHiddenModalOpen] = useState(false);
   const [hiddenModalStep, setHiddenModalStep] = useState<HiddenPitModalStep>("pit");
   const [meloniRescued, setMeloniRescued] = useState(meloniFoundCave);
@@ -197,6 +201,11 @@ export function MysticCaveMap({
           return true;
         }}
         onIrAlla={(hotspot) => {
+          if (hotspot.id === CAVE_DEPTHS_HOTSPOT_ID) {
+            setDescendingToDepths(true);
+            router.push(CAVE_DEPTHS_PATH);
+            return true;
+          }
           if (hotspot.id !== ABANDONED_MINE_HOTSPOT_ID) {
             return false;
           }
@@ -213,6 +222,12 @@ export function MysticCaveMap({
           return null;
         }}
         initialDailyBossBlockedMessage={initialDailyBossBlockedMessage}
+      />
+
+      <ZoneDescentLoadingOverlay
+        visible={descendingToDepths}
+        label="Descendiendo..."
+        uiClassName={uiFont.className}
       />
 
       {hiddenModalOpen ? (

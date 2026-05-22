@@ -68,6 +68,11 @@ import {
   type CombatAmmoMenuEntry,
 } from "@/lib/combat-ammo";
 import {
+  isWeaponAttackFamilyConsumableEffect,
+  parseWeaponAttackFamilyConsumableEffect,
+  validateWeaponAttackFamilyConsumableForWeapon,
+} from "@/lib/combat-weapon-attack-family-consumable";
+import {
   canonicalizeCombatResistWeakTag,
   collectResistWeakIconSrcsForEnemyTags,
   getCombatResistWeakIconSrc,
@@ -357,15 +362,8 @@ function tagsFromWeaponAttackFamilyForResistWeak(family: string | null | undefin
   return n ? [n] : [];
 }
 
-/**
- * Tags de daño para RES/WEAK enemigo (`attack_type` o `attack_types` en `effect_json`).
- * Puede ser string, array, string con JSON tipo `["fire","physical"]`, o lista separada por comas.
- * Si un tag es exactamente `weapon`, se sustituye por el `attack_family` del arma equipada (sin tag literal `weapon`).
- */
-function getEffectAttackTypesForResistWeak(
-  effect: Record<string, unknown>,
-  equippedWeaponAttackFamily?: string | null,
-): string[] {
+/** Tags literales de `attack_type` / `attack_types` antes de expandir `weapon`. */
+function collectNormalizedEffectAttackTypes(effect: Record<string, unknown>): string[] {
   const raw = effect.attack_type ?? effect.attack_types;
   const pushNormalized = (value: unknown, seen: Set<string>, out: string[]) => {
     const asStr =
@@ -411,6 +409,42 @@ function getEffectAttackTypesForResistWeak(
       }
     }
   }
+  return out;
+}
+
+function effectUsesWeaponAttackType(effect: Record<string, unknown>): boolean {
+  return collectNormalizedEffectAttackTypes(effect).includes("weapon");
+}
+
+type ConsumableWeaponMitigationOverride = {
+  attackType: AmmoAttackType;
+};
+
+/**
+ * Mitigación armor/MR: si el skill usa tag `weapon` y hay aceite activo, manda el `attack_type` del consumible.
+ */
+function resolvePlayerSkillMitigationSubtype(
+  effect: Record<string, unknown>,
+  consumableOverride: ConsumableWeaponMitigationOverride | null,
+): PlayerSkillEffectSubtype {
+  if (consumableOverride && effectUsesWeaponAttackType(effect)) {
+    return consumableOverride.attackType;
+  }
+  const sub = getPlayerSkillEffectSubtype(effect);
+  if (sub === "magical" || sub === "physical") return sub;
+  return "physical";
+}
+
+/**
+ * Tags de daño para RES/WEAK enemigo (`attack_type` o `attack_types` en `effect_json`).
+ * Puede ser string, array, string con JSON tipo `["fire","physical"]`, o lista separada por comas.
+ * Si un tag es exactamente `weapon`, se sustituye por el `attack_family` del arma equipada (sin tag literal `weapon`).
+ */
+function getEffectAttackTypesForResistWeak(
+  effect: Record<string, unknown>,
+  equippedWeaponAttackFamily?: string | null,
+): string[] {
+  const out = collectNormalizedEffectAttackTypes(effect);
 
   const fromWeapon = tagsFromWeaponAttackFamilyForResistWeak(equippedWeaponAttackFamily);
   const expanded: string[] = [];
@@ -1070,9 +1104,14 @@ function computePlayerSkillMitigatedDamageToEnemy(
     /** Lista completa de debilidades (base + temporales) para RES/WEAK. */
     weaknessesResolved: string[];
     enemyStatBonuses?: EnemyCombatStatBonuses;
+    /** Aceite de arma activo: `attack_type` del consumible para skills con tag `weapon`. */
+    consumableWeaponMitigation?: ConsumableWeaponMitigationOverride | null;
   },
 ): number {
-  const subtype = getPlayerSkillEffectSubtype(effect);
+  const subtype = resolvePlayerSkillMitigationSubtype(
+    effect,
+    opts.consumableWeaponMitigation ?? null,
+  );
   const defenseStat = enemyDefenseStatForPlayerSkill(
     subtype,
     enemy,
@@ -2269,6 +2308,29 @@ export function CombatEncounterShell({
 
   const requiresAmmo = weaponRequiresAmmo(weaponAmmoKindNorm);
 
+  type CombatWeaponAttackFamilyOverride = {
+    attackFamily: string;
+    attackType: AmmoAttackType;
+    /** `null` = dura hasta el fin del combate. */
+    remainingTurns: number | null;
+    lastTickTurn: number;
+    effectIcon: string | null;
+  };
+  const [weaponAttackFamilyOverride, setWeaponAttackFamilyOverride] =
+    useState<CombatWeaponAttackFamilyOverride | null>(null);
+
+  const effectivePlayerWeaponAttackFamily = useMemo(() => {
+    if (weaponAttackFamilyOverride) return weaponAttackFamilyOverride.attackFamily;
+    const base =
+      typeof playerWeaponAttackFamily === "string" ? playerWeaponAttackFamily.trim() : "";
+    return base.length > 0 ? base : null;
+  }, [weaponAttackFamilyOverride, playerWeaponAttackFamily]);
+
+  const consumableWeaponMitigation = useMemo((): ConsumableWeaponMitigationOverride | null => {
+    if (!weaponAttackFamilyOverride) return null;
+    return { attackType: weaponAttackFamilyOverride.attackType };
+  }, [weaponAttackFamilyOverride]);
+
   const combatAmmoItems = useMemo((): CombatAmmoMenuEntry[] => {
     if (!requiresAmmo || !weaponAmmoKindNorm) return [];
     const defaultAmmo = createDefaultCombatAmmoEntry(weaponAmmoKindNorm);
@@ -2601,11 +2663,13 @@ export function CombatEncounterShell({
     magicalCombatDamageFlat: number;
     skillDamageBases: PlayerSkillDamageBaseBounds;
     playerWeaponAttackFamily: string | null;
+    consumableWeaponMitigation: ConsumableWeaponMitigationOverride | null;
   }>({
     getCombatStatValue: () => 0,
     magicalCombatDamageFlat: 0,
     skillDamageBases: { weaponMin: 1, weaponMax: 1, magicMin: 0, magicMax: 0 },
     playerWeaponAttackFamily: null,
+    consumableWeaponMitigation: null,
   });
   {
     const wmin = Math.max(
@@ -2641,7 +2705,8 @@ export function CombatEncounterShell({
         magicMin: playerMagicDamageMin,
         magicMax: playerMagicDamageMax,
       },
-      playerWeaponAttackFamily: playerWeaponAttackFamily ?? null,
+      playerWeaponAttackFamily: effectivePlayerWeaponAttackFamily,
+      consumableWeaponMitigation,
     };
   }
 
@@ -2695,6 +2760,7 @@ export function CombatEncounterShell({
     setPlayerCombatMagicDamageMinBonus(0);
     setPlayerCombatMagicDamageMaxBonus(0);
     setPlayerTimedSelfBuffs([]);
+    setWeaponAttackFamilyOverride(null);
     setEnemyPlayerTimedEffects([]);
     setActiveCombatConditions([]);
     setEnemyAppliedPlayerTimedModifiers([]);
@@ -3190,6 +3256,16 @@ export function CombatEncounterShell({
         ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
       });
     }
+    if (weaponAttackFamilyOverride?.effectIcon) {
+      const turns = weaponAttackFamilyOverride.remainingTurns;
+      if (turns == null || turns > 0) {
+        out.push({
+          key: "pweapon-attack-family",
+          src: weaponAttackFamilyOverride.effectIcon,
+          ...(turns != null && turns > 0 ? { remainingTurns: turns } : {}),
+        });
+      }
+    }
     return out;
   }, [
     playerTimedSelfBuffs,
@@ -3197,6 +3273,7 @@ export function CombatEncounterShell({
     activeCombatConditions,
     playerResistances,
     playerWeaknesses,
+    weaponAttackFamilyOverride,
   ]);
 
   const enemyHudStateIconsById = useMemo(() => {
@@ -3387,14 +3464,27 @@ export function CombatEncounterShell({
     item: CombatPlayerConsumableView,
     amountApplied: number,
     enemyName?: string | null,
+    damageTypeOverride?: string | null,
   ): string {
     const fromEffect = item.effect?.text;
+    const damageTypeLabel =
+      typeof damageTypeOverride === "string" && damageTypeOverride.trim().length > 0
+        ? damageTypeOverride.trim()
+        : "";
     if (typeof fromEffect === "string" && fromEffect.trim().length > 0) {
       let text = fromEffect.trim().replaceAll("{daño}", String(Math.max(0, Math.trunc(amountApplied))));
+      if (damageTypeLabel.length > 0) {
+        text = text
+          .replaceAll("{damage_type}", damageTypeLabel)
+          .replaceAll("{damage_types}", damageTypeLabel);
+      }
       if (enemyName && enemyName.trim().length > 0) {
         text = text.replaceAll("{enemigo}", enemyName.trim());
       }
       return text;
+    }
+    if (damageTypeLabel.length > 0) {
+      return `Usaste ${item.name}. Tu arma ahora inflige daño ${damageTypeLabel}.`;
     }
     return `Usaste ${item.name}.`;
   }
@@ -3404,6 +3494,10 @@ export function CombatEncounterShell({
     if (isPlayerActionsLocked) return false;
     if (item.quantity <= 0) return false;
     if (!item.effect) return false;
+    if (isWeaponAttackFamilyConsumableEffect(item.effect)) {
+      if (!parseWeaponAttackFamilyConsumableEffect(item.effect)) return false;
+      return validateWeaponAttackFamilyConsumableForWeapon(weaponAmmoKindNorm) == null;
+    }
     const objective = consumableObjective(item.effect);
     if (objective !== "enemy") return true;
     const target = consumableTarget(item.effect);
@@ -3426,6 +3520,15 @@ export function CombatEncounterShell({
 
   async function handleConsumableUse(item: CombatPlayerConsumableView) {
     if (!canUseConsumable(item)) return;
+
+    if (isWeaponAttackFamilyConsumableEffect(item.effect)) {
+      const parsed = parseWeaponAttackFamilyConsumableEffect(item.effect);
+      const weaponError = validateWeaponAttackFamilyConsumableForWeapon(weaponAmmoKindNorm);
+      if (!parsed || weaponError) {
+        appendCombatLog(weaponError ?? "Este consumible no tiene un efecto válido.", "danger");
+        return;
+      }
+    }
 
     // Gasto optimista para evitar doble click mientras responde el server action.
     setCombatConsumables((prev) =>
@@ -3468,6 +3571,28 @@ export function CombatEncounterShell({
           );
         });
       }
+    }
+
+    if (isWeaponAttackFamilyConsumableEffect(item.effect)) {
+      const parsed = parseWeaponAttackFamilyConsumableEffect(item.effect)!;
+      setWeaponAttackFamilyOverride({
+        attackFamily: parsed.attackFamily,
+        attackType: parsed.attackType,
+        remainingTurns: parsed.durationTurns,
+        lastTickTurn: turn,
+        effectIcon: normalizePublicAssetUrl(parsed.effectIcon),
+      });
+      const durationNote =
+        parsed.durationTurns != null
+          ? ` (${parsed.durationTurns} turno${parsed.durationTurns === 1 ? "" : "s"})`
+          : "";
+      appendCombatLog(
+        consumableLogText(item, 0, null, parsed.attackFamily) + durationNote,
+        "success",
+      );
+      setActionMenu("main");
+      scheduleAdvanceTurn();
+      return;
     }
 
     const objective = consumableObjective(item.effect);
@@ -3764,7 +3889,7 @@ export function CombatEncounterShell({
     const damageTypes = getEffectDamageTypes(damageEffect);
     const resistWeakTags = getEffectAttackTypesForResistWeak(
       damageEffect,
-      playerWeaponAttackFamily,
+      effectivePlayerWeaponAttackFamily,
     );
     const magicalCombatDamageFlat = Math.max(
       0,
@@ -3810,6 +3935,7 @@ export function CombatEncounterShell({
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        consumableWeaponMitigation,
         enemyResistancesResolved: mergedEnemyResistancesForPlayerAttack(
           target,
           enemySelfTimedModifiers,
@@ -3844,6 +3970,7 @@ export function CombatEncounterShell({
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        consumableWeaponMitigation,
         enemyResistancesResolved: mergedEnemyResistancesForPlayerAttack(
           enemy,
           enemySelfTimedModifiers,
@@ -3876,7 +4003,10 @@ export function CombatEncounterShell({
     const effectTypeRaw = typeof effect.type === "string" ? effect.type.trim().toLowerCase() : "";
     const damageKind = getPlayerSkillDamageEffectKind(effect);
     const damageTypes = getEffectDamageTypes(effect);
-    const resistWeakTags = getEffectAttackTypesForResistWeak(effect, playerWeaponAttackFamily);
+    const resistWeakTags = getEffectAttackTypesForResistWeak(
+      effect,
+      effectivePlayerWeaponAttackFamily,
+    );
 
     const descTemplateRaw = effect.description;
     const descTemplate =
@@ -4033,14 +4163,6 @@ export function CombatEncounterShell({
           timedBuffBonusByStat.magic_damage_max,
       ),
     );
-    const applyMagicalCombatFlatToRawDamage = (
-      subtype: PlayerSkillEffectSubtype,
-      rolled: number,
-    ) =>
-      subtype === "magical"
-        ? Math.max(0, Math.trunc(rolled + magicalCombatDamageFlat))
-        : rolled;
-
     const effectiveWeaponDamageMin = Math.max(
       1,
       Math.floor(
@@ -4111,6 +4233,7 @@ export function CombatEncounterShell({
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        consumableWeaponMitigation,
         enemyResistancesResolved,
         weaknessesResolved,
         enemyStatBonuses: getEnemyStatBonuses(target.id),
@@ -4163,6 +4286,7 @@ export function CombatEncounterShell({
         skillDamageBases,
         magicalCombatDamageFlat,
         resistWeakTags,
+        consumableWeaponMitigation,
         enemyResistancesResolved,
         weaknessesResolved,
         enemyStatBonuses: getEnemyStatBonuses(enemy.id),
@@ -4275,6 +4399,14 @@ export function CombatEncounterShell({
 
   useEffect(() => {
     tickPlayerTimedBuffs(turn);
+
+    setWeaponAttackFamilyOverride((prev) => {
+      if (!prev || prev.remainingTurns == null) return prev;
+      if (prev.lastTickTurn >= turn) return prev;
+      const nextRemaining = prev.remainingTurns - 1;
+      if (nextRemaining <= 0) return null;
+      return { ...prev, remainingTurns: nextRemaining, lastTickTurn: turn };
+    });
 
     setEnemyAppliedPlayerTimedModifiers((prev) => {
       if (prev.length === 0) return prev;
@@ -4419,6 +4551,7 @@ export function CombatEncounterShell({
           skillDamageBases: ctx.skillDamageBases,
           magicalCombatDamageFlat: ctx.magicalCombatDamageFlat,
           resistWeakTags: resistTags,
+          consumableWeaponMitigation: ctx.consumableWeaponMitigation,
           enemyResistancesResolved,
           weaknessesResolved: extraWeak,
           enemyStatBonuses: sumEnemyTimedStatBonuses(
@@ -4581,7 +4714,7 @@ export function CombatEncounterShell({
       ),
     );
     let rawDamage = randomIntInclusive(damageMin, damageMax);
-    let attackFamilyForHit = playerWeaponAttackFamily;
+    let attackFamilyForHit = effectivePlayerWeaponAttackFamily;
 
     let ammoItemForAttack: CombatAmmoMenuEntry | null = null;
     let ammoAttackType: AmmoAttackType | null = null;
@@ -4610,13 +4743,17 @@ export function CombatEncounterShell({
       }
     }
 
+    const mitigationAttackType: AmmoAttackType =
+      ammoAttackType ??
+      (weaponAttackFamilyOverride?.attackType === "magical" ? "magical" : "physical");
+
     const targetBonuses = getEnemyStatBonuses(target.id);
     const enemyDefenseForHit =
-      ammoAttackType === "magical"
+      mitigationAttackType === "magical"
         ? effectiveEnemyMr(target, targetBonuses)
         : effectiveEnemyArmor(target, targetBonuses);
     const afterArmor =
-      ammoAttackType === "magical"
+      mitigationAttackType === "magical"
         ? mitigateDamageByMr(rawDamage, enemyDefenseForHit)
         : mitigateDamageByDefense(rawDamage, enemyDefenseForHit);
     const resistMerged = mergedEnemyResistancesForPlayerAttack(target, enemySelfTimedModifiers);

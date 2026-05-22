@@ -165,7 +165,15 @@ function consumableInventoryAmount(effect: Record<string, unknown>): number {
 
 /** Botón CONSUMIR cuando `json_consumable_effect` indica uso desde inventario y hay stat/cantidad. */
 function inventoryConsumableShowsConsume(effect: Record<string, unknown> | null | undefined): boolean {
-  if (!effect || !consumableInventoryFlag(effect)) return false;
+  if (!effect) return false;
+  const kind =
+    typeof effect.kind === "string"
+      ? effect.kind.trim().toLowerCase()
+      : typeof effect.type === "string"
+        ? effect.type.trim().toLowerCase()
+        : "";
+  if (kind === "weapon_attack_family") return false;
+  if (!consumableInventoryFlag(effect)) return false;
   const stat = consumableInventoryStat(effect);
   const delta = consumableInventoryAmount(effect);
   return Boolean(stat.length > 0 && delta > 0);

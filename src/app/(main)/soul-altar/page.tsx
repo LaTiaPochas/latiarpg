@@ -191,6 +191,26 @@ async function contributeSoulAltarMaterial(amount: number, kind: SoulAltarMateri
     })
     .eq("title", SOUL_ALTAR_MATERIAL_TITLES[kind]);
 
+  if (kind === "gold" || kind === "stone") {
+    const statColumn = kind === "gold" ? "gold_given" : "rock_given";
+    const { data: currentStats } = await supabaseAction
+      .from("user_stats")
+      .select(statColumn)
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    const currentValue =
+      typeof currentStats?.[statColumn] === "number" && Number.isFinite(currentStats[statColumn])
+        ? Math.max(0, Math.trunc(currentStats[statColumn]))
+        : 0;
+    await supabaseAction.from("user_stats").upsert(
+      {
+        user_id: currentUser.id,
+        [statColumn]: currentValue + amountToApply,
+      },
+      { onConflict: "user_id" },
+    );
+  }
+
   const { data: currentProfile } = await supabaseAction
     .from("user_profiles")
     .select("miembro, color")

@@ -1,5 +1,6 @@
 "use server";
 
+import { isWeaponAttackFamilyConsumableEffect } from "@/lib/combat-weapon-attack-family-consumable";
 import { resolveEquippedWeaponSprites } from "@/lib/equipped-weapon-sprites";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
@@ -566,6 +567,11 @@ export async function consumeInventoryItem(inventoryId: number) {
   if (!effect) {
     throw new Error("Este objeto no se puede consumir.");
   }
+
+  if (isWeaponAttackFamilyConsumableEffect(effect)) {
+    throw new Error("Este consumible solo se puede usar en combate.");
+  }
+
   if (!inventoryConsumeFlag(effect)) {
     throw new Error("Este objeto no se puede consumir desde el inventario.");
   }
