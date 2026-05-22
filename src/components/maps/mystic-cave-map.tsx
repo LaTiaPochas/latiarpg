@@ -130,6 +130,8 @@ const HOTSPOTS: ExplorationHotspot[] = [
     xPercent: 19,
     yPercent: 16,
     description: "No se ve nada para adentro. Podría ser eterno este camino, lo unico que se nota, es que va hacia abajo.",
+    alwaysLocked: true,
+    lockedMessage: "Aún no disponible",
   },
   {
     id: HIDDEN_HOTSPOT_ID,

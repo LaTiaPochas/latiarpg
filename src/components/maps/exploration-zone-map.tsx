@@ -29,6 +29,10 @@ export type ExplorationHotspot = {
   description: string;
   /** Sin marcador visible; solo área clickeable con cursor pointer. */
   hidden?: boolean;
+  /** Bloqueado siempre (no depende de `currentCombatStep`). */
+  alwaysLocked?: boolean;
+  /** Tooltip al pasar el mouse si `alwaysLocked` (por defecto: «Aún no disponible»). */
+  lockedMessage?: string;
 };
 
 type ExplorationZoneMapProps = {
@@ -70,6 +74,8 @@ export function ExplorationZoneMap({
     () => hotspots.filter((spot) => !spot.hidden),
     [hotspots],
   );
+  const isHotspotUnlocked = (spot: ExplorationHotspot) =>
+    !spot.alwaysLocked && spot.step <= currentCombatStep;
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapNaturalSize, setMapNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [mapFrame, setMapFrame] = useState<{ left: number; top: number; width: number; height: number } | null>(
@@ -83,9 +89,9 @@ export function ExplorationZoneMap({
   const initialHotspot =
     visibleHotspots.length === 0
       ? null
-      : requestedHotspot && requestedHotspot.step <= currentCombatStep
+      : requestedHotspot && isHotspotUnlocked(requestedHotspot)
         ? requestedHotspot
-        : visibleHotspots.find((spot) => spot.step <= currentCombatStep) ?? visibleHotspots[0];
+        : visibleHotspots.find(isHotspotUnlocked) ?? visibleHotspots[0];
 
   const [selectedHotspotId, setSelectedHotspotId] = useState<string>(initialHotspot?.id ?? "");
 
@@ -218,7 +224,10 @@ export function ExplorationZoneMap({
           {hotspots.map((hotspot) => {
             const isHidden = Boolean(hotspot.hidden);
             const isSelected = !isHidden && hotspot.id === selectedHotspot?.id;
-            const isLocked = hotspot.step > currentCombatStep;
+            const isLocked = hotspot.alwaysLocked === true || hotspot.step > currentCombatStep;
+            const lockedHoverMessage = hotspot.alwaysLocked
+              ? (hotspot.lockedMessage?.trim() || "Aún no disponible")
+              : "Superá el combate anterior";
             const hotspotLeft = mapFrame
               ? mapFrame.left + mapFrame.width * (hotspot.xPercent / 100)
               : 0;
@@ -289,7 +298,7 @@ export function ExplorationZoneMap({
                 ) : null}
                 {isLocked ? (
                   <span className="pointer-events-none absolute left-1/2 top-[calc(50%-30px)] -translate-x-1/2 whitespace-nowrap rounded border border-amber-300/80 bg-[#2e1a13]/95 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-100 opacity-0 shadow-[0_0_10px_rgba(251,191,36,0.35)] transition-opacity duration-150 group-hover:opacity-100">
-                    Superá el combate anterior
+                    {lockedHoverMessage}
                   </span>
                 ) : null}
               </div>
@@ -306,7 +315,7 @@ export function ExplorationZoneMap({
             <p className="flex-1 text-xs text-slate-800 lg:text-sm">{selectedHotspot.description}</p>
             <button
               type="button"
-              disabled={selectedHotspot.step > currentCombatStep}
+              disabled={!isHotspotUnlocked(selectedHotspot)}
               onClick={handleIrAlla}
               className="shrink-0 cursor-pointer rounded border border-slate-700/90 bg-gradient-to-b from-slate-600 to-slate-800 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-100 shadow-[0_0_8px_rgba(25,25,25,0.8)] transition hover:from-slate-500 hover:to-slate-700 disabled:cursor-not-allowed disabled:border-slate-700 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-300 disabled:shadow-none"
             >

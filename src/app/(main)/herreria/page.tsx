@@ -75,6 +75,7 @@ type GlobalHerreriaRecipeRow = {
   recipe_level: number | null;
   max_level: number | null;
 };
+type HerreriaItemTypeJoinRow = { code: string | null } | Array<{ code: string | null }>;
 type HerreriaRecipeItemRow = {
   id: string;
   name: string | null;
@@ -83,7 +84,16 @@ type HerreriaRecipeItemRow = {
   icon_path: string | null;
   rarity_color: string | null;
   equip_slot?: string | null;
+  item_types?: HerreriaItemTypeJoinRow | null;
 };
+
+function resolveItemTypeCode(
+  itemTypes: HerreriaItemTypeJoinRow | null | undefined,
+): string | null {
+  const join = Array.isArray(itemTypes) ? (itemTypes[0] ?? null) : itemTypes;
+  const code = typeof join?.code === "string" ? join.code.trim().toLowerCase() : "";
+  return code.length > 0 ? code : null;
+}
 type RecipeComponentRow = {
   recipe_id: string | null;
   recipe_level: number | null;
@@ -597,7 +607,9 @@ export default async function HerreriaPage() {
     craftedItemIds.length > 0
       ? await supabase
           .from("items")
-          .select("id, name, description, quote_text, icon_path, rarity_color, equip_slot")
+          .select(
+            "id, name, description, quote_text, icon_path, rarity_color, equip_slot, item_types(code)",
+          )
           .in("id", craftedItemIds)
       : { data: [] };
   const { data: craftedWeaponInstances } =
@@ -840,11 +852,20 @@ export default async function HerreriaPage() {
       }),
     );
 
+    const craftedItemTypeCode =
+      resolveItemTypeCode(craftedItem?.item_types) ??
+      (recipeComponentItemType(matchingComponents[0] ?? ({} as RecipeComponentRow)) === "weapon"
+        ? "weapon"
+        : recipeComponentItemType(matchingComponents[0] ?? ({} as RecipeComponentRow)) === "equipment"
+          ? "equipment"
+          : null);
+
     return [
       {
         recipeId: row.recipe_id,
         name: recipeItem.name,
         craftedItemName: craftedItem?.name ?? recipeItem.name,
+        craftedItemTypeCode,
         recipeLevel,
         iconPath: resolveItemIconPath(displayItem.icon_path),
         rarityColor:

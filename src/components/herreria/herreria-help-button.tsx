@@ -66,8 +66,8 @@ export function HerreriaHelpButton() {
                     el máximo permitido y se consume del inventario.
                   </p>
                   <p>
-                    En <strong className="text-amber-600">Craftear</strong>, elegís una receta aprendida, revisás sus componentes y fabricás el
-                    item si tenés materiales suficientes y espacio libre en el inventario.
+                    En <strong className="text-amber-600">Craftear</strong>, primero elegís el tipo (consumibles, equipamento u otros), después la receta
+                    aprendida de esa categoría, revisás sus componentes y fabricás el item si tenés materiales y espacio libre en el inventario.
                   </p>
                   <p>
                     Los items fabricados pueden generar stats adicionales al momento de craftear.
