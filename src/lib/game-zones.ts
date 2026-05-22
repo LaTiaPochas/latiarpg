@@ -7,6 +7,8 @@ export const HIDDEN_FOREST_ZONE_CODE = "hidden_forest";
 export const WOLF_FOREST_ZONE_CODE = "wolf-forest";
 /** Debe coincidir con `user_combat_progress.zone_id` y `zones.code` en Supabase. */
 export const MYSTIC_CAVE_ZONE_CODE = "mystic-cave";
+/** Segundo piso / profundidades (`/cave-depths`). */
+export const CAVE_DEPTHS_ZONE_CODE = "cave-depths";
 /** Valor recomendado para `?zone=` desde cercanías del bosque. */
 export const NEAR_WOODS_ZONE_CODE = "near_woods";
 /** Valor recomendado para `?zone=` desde bosque mágico. Ajustá si en BD usás otro `zones.code`. */
@@ -47,6 +49,11 @@ export function zoneLookupCodeCandidates(zoneQueryParam: string): string[] {
   if (key === "mystic_cave") {
     add(out, "mystic-cave");
     add(out, "mystic_cave");
+    return out;
+  }
+  if (key === "cave_depths") {
+    add(out, "cave-depths");
+    add(out, "cave_depths");
     return out;
   }
   if (key === "near_woods" || key === "nearwoods") {
@@ -93,6 +100,9 @@ export function mapPathByZoneCode(zoneCode: string | null | undefined): string |
   }
   if (key === "mystic_cave") {
     return "/mystic-cave";
+  }
+  if (key === "cave_depths") {
+    return "/cave-depths";
   }
   if (key === "near_woods" || key === "nearwoods") {
     return "/near-woods";

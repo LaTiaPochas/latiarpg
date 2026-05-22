@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { HerreriaHelpButton } from "@/components/herreria/herreria-help-button";
 import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
@@ -15,10 +15,14 @@ export type HerreriaRecipeInventoryItem = {
   rarityColor: string | null;
   isMaxLevel: boolean;
 };
+export type HerreriaCraftCategory = "consumable" | "equipment" | "other";
+
 export type HerreriaAvailableRecipeItem = {
   recipeId: string;
   name: string;
   craftedItemName: string;
+  /** `items.item_types.code` del ítem fabricado (p. ej. `consumable`, `equipment`, `weapon`). */
+  craftedItemTypeCode: string | null;
   recipeLevel: number;
   iconPath: string;
   rarityColor: string | null;
@@ -59,6 +63,22 @@ type HerreriaCompletedModalProps = {
 
 const SLOT_COUNT = 8;
 const TOOLTIP_VIEWPORT_PADDING = 12;
+
+const CRAFT_CATEGORY_LABELS: Record<HerreriaCraftCategory, string> = {
+  consumable: "Consumibles",
+  equipment: "Equipamento",
+  other: "Otros",
+};
+
+function recipeMatchesCraftCategory(
+  recipe: HerreriaAvailableRecipeItem,
+  category: HerreriaCraftCategory,
+): boolean {
+  const code = (recipe.craftedItemTypeCode ?? "").trim().toLowerCase();
+  if (category === "consumable") return code === "consumable";
+  if (category === "equipment") return code === "equipment";
+  return code !== "consumable" && code !== "equipment";
+}
 
 type RecipeTooltipState = {
   recipeId: number;
@@ -209,8 +229,13 @@ export function HerreriaCompletedModal({
 }: HerreriaCompletedModalProps) {
   const router = useRouter();
   const [mode, setMode] = useState<
-    "options" | "give-recipe" | "available-recipes" | "recipe-components"
+    | "options"
+    | "give-recipe"
+    | "craft-category"
+    | "available-recipes"
+    | "recipe-components"
   >("options");
+  const [craftCategory, setCraftCategory] = useState<HerreriaCraftCategory | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
   const [selectedAvailableRecipeId, setSelectedAvailableRecipeId] = useState<string | null>(null);
   const [activeTooltip, setActiveTooltip] = useState<RecipeTooltipState | null>(null);
@@ -221,9 +246,14 @@ export function HerreriaCompletedModal({
   const [isCraftPending, startCraftTransition] = useTransition();
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const slots = Array.from({ length: SLOT_COUNT }, (_, index) => recipes[index] ?? null);
-  const availableRecipeSlots = availableRecipes;
+  const filteredAvailableRecipes = useMemo(() => {
+    if (!craftCategory) return [];
+    return availableRecipes.filter((recipe) => recipeMatchesCraftCategory(recipe, craftCategory));
+  }, [availableRecipes, craftCategory]);
+  const availableRecipeSlots = filteredAvailableRecipes;
   const selectedAvailableRecipe =
-    availableRecipes.find((recipe) => recipe.recipeId === selectedAvailableRecipeId) ?? null;
+    filteredAvailableRecipes.find((recipe) => recipe.recipeId === selectedAvailableRecipeId) ??
+    null;
   const canCraftSelectedRecipe = Boolean(
     selectedAvailableRecipe &&
       selectedAvailableRecipe.components.length > 0 &&
@@ -394,10 +424,50 @@ export function HerreriaCompletedModal({
               </button>
             </div>
           </>
+        ) : mode === "craft-category" ? (
+          <>
+            <p className="text-base font-bold leading-relaxed text-slate-900 sm:text-base">
+              ¿Qué querés craftear?
+            </p>
+            <div className="mx-auto mt-6 flex max-w-md flex-col gap-3">
+              {(["consumable", "equipment", "other"] as const).map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => {
+                    setActiveTooltip(null);
+                    setSelectedAvailableRecipeId(null);
+                    setCraftCategory(category);
+                    setMode("available-recipes");
+                  }}
+                  className={`w-full cursor-pointer rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-5 py-3 text-xs font-bold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] ${actionButtonClassName}`}
+                >
+                  {CRAFT_CATEGORY_LABELS[category]}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTooltip(null);
+                  setCraftCategory(null);
+                  setMode("options");
+                }}
+                className={`inline-flex cursor-pointer items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-900 transition hover:text-amber-800 ${uiClassName}`}
+              >
+                <span className="text-base leading-none" aria-hidden>
+                  ←
+                </span>
+                Volver
+              </button>
+            </div>
+          </>
         ) : mode === "available-recipes" ? (
           <>
             <p className="text-base font-bold leading-relaxed text-slate-900 sm:text-base">
-              Recetas disponibles:
+              Recetas disponibles
+              {craftCategory ? ` — ${CRAFT_CATEGORY_LABELS[craftCategory]}` : ""}:
             </p>
             <div className="mx-auto mt-6 grid max-w-sm grid-cols-4 gap-2">
               {availableRecipeSlots.map((recipe) => {
@@ -452,9 +522,11 @@ export function HerreriaCompletedModal({
                 );
               })}
             </div>
-            {availableRecipes.length === 0 ? (
+            {filteredAvailableRecipes.length === 0 ? (
               <p className="mt-4 text-sm font-semibold text-slate-700">
-                Chane todavía no tiene recetas disponibles.
+                {craftCategory
+                  ? `Chane no tiene recetas de ${CRAFT_CATEGORY_LABELS[craftCategory].toLowerCase()} en este nivel.`
+                  : "Chane todavía no tiene recetas disponibles."}
               </p>
             ) : (
               <button
@@ -476,7 +548,7 @@ export function HerreriaCompletedModal({
                 onClick={() => {
                   setActiveTooltip(null);
                   setSelectedAvailableRecipeId(null);
-                  setMode("options");
+                  setMode("craft-category");
                 }}
                 className={`inline-flex cursor-pointer items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-900 transition hover:text-amber-800 ${uiClassName}`}
               >
@@ -608,6 +680,7 @@ export function HerreriaCompletedModal({
                       setCraftProgress(0);
                       setSelectedAvailableRecipeId(null);
                       setSelectedRecipeId(null);
+                      setCraftCategory(null);
                       setMode("options");
                       router.refresh();
                     }, 260);
@@ -652,7 +725,12 @@ export function HerreriaCompletedModal({
               </button>
               <button
                 type="button"
-                onClick={() => setMode("available-recipes")}
+                onClick={() => {
+                  setActiveTooltip(null);
+                  setCraftCategory(null);
+                  setSelectedAvailableRecipeId(null);
+                  setMode("craft-category");
+                }}
                 className={`w-full cursor-pointer rounded-lg border border-slate-500/80 bg-slate-700 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-100 shadow-sm transition-colors hover:bg-slate-600 active:bg-[#b9a47b] sm:w-auto ${uiClassName}`}
               >
                 CRAFTEAR

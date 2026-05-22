@@ -24,6 +24,12 @@ import { insertWorldEventLog } from "@/lib/world-event-log";
 import { parseEnemySkillEffectJson } from "@/lib/enemy-skill-combat";
 import { parsePlayerSkillCooldownTurns } from "@/lib/player-skill-effect-combat";
 import { isAmmoConsumableEffect } from "@/lib/combat-ammo";
+import {
+  isWeaponAttackFamilyConsumableEffect,
+  parseWeaponAttackFamilyConsumableEffect,
+  validateWeaponAttackFamilyConsumableForWeapon,
+  weaponAttackFamilyConsumableAllowsInventoryUse,
+} from "@/lib/combat-weapon-attack-family-consumable";
 import { persistCombatAmmoSpent, type CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
 import {
   hasUserDefeatedDailyBossToday,
@@ -694,14 +700,20 @@ function xpRewardMultiplierByEnemyVsPlayer(enemyLevel: number, playerLevel: numb
   return 0.05;
 }
 
+/**
+ * `gap = playerLevel - encounterRecommendedLevel` (positivo = encuentro más débil).
+ * Mismo nivel o 1 nivel menos que el PJ → 100% del `drop_chance` base.
+ */
 function dropChanceMultiplierByEncounterVsPlayer(recommendedLevel: number, playerLevel: number): number {
   const encounterLevel = Math.max(1, Math.trunc(recommendedLevel));
   const p = Math.max(1, Math.trunc(playerLevel));
   const gap = p - encounterLevel;
 
   if (gap <= 1) return 1;
-  if (gap <= 3) return 0.4;
-  if (gap === 4) return 0.2;
+  if (gap === 2) return 0.9;
+  if (gap === 3) return 0.8;
+  if (gap === 4) return 0.5;
+  if (gap === 5) return 0.25;
   return 0.01;
 }
 
@@ -1762,6 +1774,8 @@ export default async function CombatEncounterPage({
           ? "Bosque mágico"
           : zoneKeyForMapUi === "mystic_cave"
             ? "Cueva mística"
+            : zoneKeyForMapUi === "cave_depths"
+              ? "Profundidades de la cueva"
             : zoneKeyForMapUi === "abandoned_coal_mine"
               ? "Minas abandonadas"
               : encounter.name != null && String(encounter.name).trim().length > 0
@@ -2608,6 +2622,21 @@ export default async function CombatEncounterPage({
         : null;
     if (isAmmoConsumableEffect(effect)) {
       return { ok: false, error: "La munición solo se gasta al atacar." };
+    }
+    if (isWeaponAttackFamilyConsumableEffect(effect)) {
+      if (weaponAttackFamilyConsumableAllowsInventoryUse(effect)) {
+        return {
+          ok: false,
+          error: "Este consumible solo se puede usar en combate.",
+        };
+      }
+      if (!parseWeaponAttackFamilyConsumableEffect(effect)) {
+        return { ok: false, error: "Efecto de consumible inválido." };
+      }
+      const weaponError = validateWeaponAttackFamilyConsumableForWeapon(playerWeaponAmmoKind);
+      if (weaponError) {
+        return { ok: false, error: weaponError };
+      }
     }
 
     const currentQty = Math.max(0, Math.trunc(Number(invRow.quantity ?? 0)));
