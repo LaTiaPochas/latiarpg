@@ -116,10 +116,10 @@ const MAP_SPRITES: MapSprite[] = [
     height: 170,
     xPercent: 83,
     yPercent: 82,
-    className: "w-[65px] sm:w-[82px] lg:w-[100px]",
+    className: "w-[72px] sm:w-[90px] lg:w-[125px]",
     completedSrc: "/img/resources/maps/garrison_altar_completed.png",
     completedAlt: "Altar de almas",
-    completedClassName: "w-[84px] sm:w-[112px] lg:w-[160px]",
+    completedClassName: "w-[92px] sm:w-[122px] lg:w-[175px]",
   },
   {
     id: "meloni-sprite",
@@ -239,7 +239,8 @@ export function GarrisonMap({
                 ? sprite.completedAlt
                 : sprite.alt;
           const defaultSpriteWidthClass = "w-[70px] sm:w-[110px] lg:w-[130px]";
-          const spriteWidthClass = isCraftingCompleted
+          const isSpriteCompleted = isCraftingCompleted || isSoulAltarSpriteCompleted;
+          const spriteWidthClass = isSpriteCompleted
             ? (sprite.completedClassName ?? sprite.className ?? defaultSpriteWidthClass)
             : (sprite.className ?? defaultSpriteWidthClass);
           return (
@@ -306,7 +307,6 @@ export function GarrisonMap({
           <p className="flex-1 text-xs text-slate-800 lg:text-sm">{selectedHotspot.description}</p>
           <button
             type="button"
-            disabled={selectedHotspot.id === "meloni"}
             onClick={() => {
               if (selectedHotspot.id === "warehouse-spot") {
                 router.push("/warehouse");
@@ -325,6 +325,7 @@ export function GarrisonMap({
                 return;
               }
               if (selectedHotspot.id === "meloni") {
+                router.push("/meloni-stand");
                 return;
               }
               router.push(`/?destino=${encodeURIComponent(selectedHotspot.id)}`);

@@ -36,12 +36,32 @@ import {
   isDailyBossLimitedEncounterCode,
   recordUserDailyBossDefeat,
 } from "@/lib/daily-boss-combat";
+import {
+  SOUL_GAUNTLET_COMBAT_MODE,
+  SOUL_GAUNTLET_LOBBY_PATH,
+  SOUL_GAUNTLET_RUN_PATH,
+  SOUL_GAUNTLET_ZONE_CODE,
+  getGauntletFloorConfig,
+} from "@/lib/soul-gauntlet";
+import {
+  applyGauntletScalingToEnemies,
+  endActiveSoulGauntletRun,
+  gauntletLobbyResultPath,
+  getActiveSoulGauntletRun,
+} from "@/lib/soul-gauntlet-run";
 
 const LEVEL_UP_WORLD_EVENT_ICON_SRC = "/img/resources/iconos/icon_lvlup.png";
 
 type CombatEncounterPageProps = {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ zone?: string; hotspot?: string; debug?: string }>;
+  searchParams: Promise<{
+    zone?: string;
+    hotspot?: string;
+    debug?: string;
+    mode?: string;
+    floor?: string;
+    run?: string;
+  }>;
 };
 
 type EnemyTemplateRow = Record<string, unknown>;
@@ -876,12 +896,30 @@ export default async function CombatEncounterPage({
 }: CombatEncounterPageProps) {
   const { code: rawCode } = await params;
   const code = decodeURIComponent(rawCode);
-  const { zone: zoneQuery, hotspot: hotspotQuery, debug: debugQuery } = await searchParams;
+  const {
+    zone: zoneQuery,
+    hotspot: hotspotQuery,
+    debug: debugQuery,
+    mode: modeQuery,
+    floor: floorQuery,
+    run: runQuery,
+  } = await searchParams;
   const combatDebugEnabled = debugQuery === "1";
+  const isGauntletCombat = modeQuery === SOUL_GAUNTLET_COMBAT_MODE;
   const zoneCode =
     typeof zoneQuery === "string" && zoneQuery.trim().length > 0
       ? zoneQuery.trim()
-      : "";
+      : isGauntletCombat
+        ? SOUL_GAUNTLET_ZONE_CODE
+        : "";
+  const gauntletFloor =
+    isGauntletCombat && typeof floorQuery === "string" && floorQuery.trim() !== ""
+      ? Math.max(1, Math.trunc(Number(floorQuery) || 1))
+      : 0;
+  const gauntletRunId =
+    isGauntletCombat && typeof runQuery === "string" && runQuery.trim().length > 0
+      ? runQuery.trim()
+      : null;
   const hotspotId =
     typeof hotspotQuery === "string" && hotspotQuery.trim().length > 0
       ? hotspotQuery.trim()
@@ -967,6 +1005,25 @@ export default async function CombatEncounterPage({
 
   if (encounterError || !encounter) {
     notFound();
+  }
+
+  let activeGauntletRun: Awaited<ReturnType<typeof getActiveSoulGauntletRun>> = null;
+  if (isGauntletCombat) {
+    if (!gauntletRunId || gauntletFloor <= 0) {
+      redirect(SOUL_GAUNTLET_LOBBY_PATH);
+    }
+    activeGauntletRun = await getActiveSoulGauntletRun(supabase, user.id);
+    if (
+      !activeGauntletRun ||
+      activeGauntletRun.id !== gauntletRunId ||
+      activeGauntletRun.current_floor !== gauntletFloor
+    ) {
+      redirect(SOUL_GAUNTLET_LOBBY_PATH);
+    }
+    const expectedFloor = getGauntletFloorConfig(gauntletFloor);
+    if (expectedFloor.encounterCode !== code) {
+      notFound();
+    }
   }
 
   const encounterRecommendedLevel = Math.max(
@@ -1128,6 +1185,11 @@ export default async function CombatEncounterPage({
   const enemies: CombatEncounterEnemyView[] = enemyRows
     .map((row, i) => mapRowToEnemyView(String(encounter.id), row, i, playerLevel))
     .filter((e): e is CombatEncounterEnemyView => e !== null);
+
+  const combatEnemies =
+    isGauntletCombat && gauntletFloor > 0
+      ? applyGauntletScalingToEnemies(enemies, gauntletFloor)
+      : enemies;
 
   if (combatDebugEnabled) {
     console.log("[combat-debug][server] encuentro cargado", {
@@ -2237,6 +2299,10 @@ export default async function CombatEncounterPage({
     if (!didWin) {
       const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
       await persistCharacterVitals();
+      if (isGauntletCombat && gauntletRunId) {
+        await endActiveSoulGauntletRun(supabaseAction, actionUser.id, "death");
+        return;
+      }
       if (defeatLostItems.length > 0) {
         for (const lost of defeatLostItems) {
           const { data: inventoryRow, error: inventoryReadError } = await supabaseAction
@@ -2289,6 +2355,24 @@ export default async function CombatEncounterPage({
       typeof characterSkillsProfileId === "string" && characterSkillsProfileId.trim().length > 0
         ? characterSkillsProfileId.trim()
         : actionUser.id;
+
+    if (isGauntletCombat && gauntletRunId) {
+      await persistCharacterVitals();
+      const safeFloorWon = Math.max(1, Math.trunc(gauntletFloor));
+      const run = await getActiveSoulGauntletRun(supabaseAction, actionUser.id);
+      if (run && run.id === gauntletRunId) {
+        await supabaseAction
+          .from("user_soul_gauntlet_runs")
+          .update({
+            max_floor_reached: Math.max(run.max_floor_reached, safeFloorWon),
+            current_floor: safeFloorWon + 1,
+          })
+          .eq("id", run.id)
+          .eq("user_id", actionUser.id)
+          .eq("is_active", true);
+      }
+      return;
+    }
 
     const safeVictoryXpGain = Math.max(0, Math.trunc(victoryXpGain));
     const didLevelUpOnVictory =
@@ -2500,7 +2584,7 @@ export default async function CombatEncounterPage({
     }
 
     const zoneProgressId = combatProgressZoneCode;
-    if (!zoneProgressId) return;
+    if (!zoneProgressId || isGauntletCombat) return;
     const nextCombatStep = encounterCombatStepForProgress + 1;
     if (process.env.NODE_ENV === "development") {
       console.log("[combat-progress] start", {
@@ -2706,6 +2790,11 @@ export default async function CombatEncounterPage({
     }
   }
 
+  const gauntletDefeatHref =
+    isGauntletCombat && activeGauntletRun
+      ? gauntletLobbyResultPath(activeGauntletRun.max_floor_reached)
+      : SOUL_GAUNTLET_LOBBY_PATH;
+
   return (
     <CombatEncounterShell
       encounterName={String(encounter.name ?? code)}
@@ -2716,15 +2805,19 @@ export default async function CombatEncounterPage({
         encounter.recommended_level != null ? num(encounter.recommended_level, 1) : null
       }
       backgroundSrc={backgroundSrc}
-      enemies={enemies}
+      enemies={combatEnemies}
       combatStartMessage={
         typeof encounter.combat_start_message === "string" &&
         encounter.combat_start_message.trim().length > 0
           ? encounter.combat_start_message.trim()
           : null
       }
-      escapeHref={escapeToMapHref}
-      escapeDisabled={escapeDisabled}
+      escapeHref={isGauntletCombat ? SOUL_GAUNTLET_RUN_PATH : escapeToMapHref}
+      escapeDisabled={escapeDisabled || isGauntletCombat}
+      disableEscapeByEnemyHp={isGauntletCombat}
+      isGauntletCombat={isGauntletCombat}
+      gauntletVictoryHref={SOUL_GAUNTLET_RUN_PATH}
+      gauntletDefeatHref={gauntletDefeatHref}
       playerDisplayName={playerDisplayName}
       playerPortraitSrc={playerPortraitSrc}
       playerSpriteSrc={playerSpriteSrc}
@@ -2748,12 +2841,14 @@ export default async function CombatEncounterPage({
       playerLevelAfterVictory={projectedLevelAfterVictory}
       playerSkills={playerSkills}
       playerConsumables={playerConsumables}
-      victoryLootItems={victoryLootItems}
-      defeatLostItems={defeatLostItems}
+      victoryLootItems={isGauntletCombat ? [] : victoryLootItems}
+      defeatLostItems={isGauntletCombat ? [] : defeatLostItems}
       victoryGoldFromLoot={victoryGoldFromLoot}
       onConsumeConsumable={consumeCombatConsumable}
       onEscapePersistState={persistEscapeCombatState}
-      onPlayerDefeatedGlobalLog={logPlayerDefeatedInGlobalLog}
+      onPlayerDefeatedGlobalLog={
+        isGauntletCombat ? undefined : logPlayerDefeatedInGlobalLog
+      }
       onPlayerLevelUpGlobalLog={logPlayerLevelUpInGlobalLog}
       onCombatFinishedStats={persistCombatStats}
       playerResistances={playerResistances}

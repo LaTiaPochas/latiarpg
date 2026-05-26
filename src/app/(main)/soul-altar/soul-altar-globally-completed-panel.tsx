@@ -3,6 +3,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
+import {
+  REBIRTH_SOUL_FRAGMENT_COST,
+  REBIRTH_SOUL_GOLD_COST,
+  RECONSTRUCT_SOUL_FRAGMENT_COST,
+} from "@/lib/soul-altar-costs";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -18,9 +23,6 @@ function isNextRedirectError(error: unknown): boolean {
 
 const GOLD_ICON_SRC = "/img/resources/items/resource_gold.png";
 const SOUL_FRAGMENT_ICON_SRC = "/img/resources/items/resource_soul_fragment.png";
-const RECONSTRUCT_GOLD_COST = 50;
-const RECONSTRUCT_SOUL_FRAGMENT_COST = 1;
-const REBIRTH_SOUL_FRAGMENT_COST = 10;
 
 const dialogueFont = Libre_Baskerville({
   subsets: ["latin"],
@@ -54,13 +56,16 @@ export function SoulAltarGloballyCompletedPanel({
   const [view, setView] = useState<CompletedView>("menu");
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const goldEnough = goldOwned >= RECONSTRUCT_GOLD_COST;
   const soulEnough = soulFragmentOwned >= RECONSTRUCT_SOUL_FRAGMENT_COST;
+  const goldEnoughForRebirth = goldOwned >= REBIRTH_SOUL_GOLD_COST;
   const soulEnoughForRebirth = soulFragmentOwned >= REBIRTH_SOUL_FRAGMENT_COST;
   const canReconstructSoul =
-    goldEnough && soulEnough && hasInventorySpaceForReconstruct && !isReconstructPending;
+    soulEnough && hasInventorySpaceForReconstruct && !isReconstructPending;
   const canRenacer =
-    soulEnoughForRebirth && hasInventorySpaceForReconstruct && !isRebirthPending;
+    goldEnoughForRebirth &&
+    soulEnoughForRebirth &&
+    hasInventorySpaceForReconstruct &&
+    !isRebirthPending;
 
   function handleReconstructSoul() {
     setActionError(null);
@@ -159,22 +164,6 @@ export function SoulAltarGloballyCompletedPanel({
               Coste para reconstruir una parte de tu alma:
             </p>
             <div className="mt-4 flex flex-wrap items-start justify-center gap-10 sm:gap-14">
-              <div className="flex flex-col items-center gap-2">
-                <Image
-                  src={GOLD_ICON_SRC}
-                  alt="Oro"
-                  width={40}
-                  height={40}
-                  className="h-10 w-10 object-contain drop-shadow-sm"
-                />
-                <span
-                  className={`${uiFont.className} text-sm font-bold tabular-nums sm:text-base ${
-                    goldEnough ? "text-emerald-700" : "text-red-600"
-                  }`}
-                >
-                  {goldOwned}/{RECONSTRUCT_GOLD_COST}
-                </span>
-              </div>
               <div className="flex flex-col items-center gap-2">
                 <Image
                   src={SOUL_FRAGMENT_ICON_SRC}
@@ -276,6 +265,22 @@ export function SoulAltarGloballyCompletedPanel({
                   }`}
                 >
                   {soulFragmentOwned}/{REBIRTH_SOUL_FRAGMENT_COST}
+                </span>
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <Image
+                  src={GOLD_ICON_SRC}
+                  alt="Oro"
+                  width={40}
+                  height={40}
+                  className="h-10 w-10 object-contain drop-shadow-sm"
+                />
+                <span
+                  className={`${uiFont.className} text-sm font-bold tabular-nums sm:text-base ${
+                    goldEnoughForRebirth ? "text-emerald-700" : "text-red-600"
+                  }`}
+                >
+                  {goldOwned}/{REBIRTH_SOUL_GOLD_COST}
                 </span>
               </div>
             </div>

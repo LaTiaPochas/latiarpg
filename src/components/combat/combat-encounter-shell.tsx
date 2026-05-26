@@ -1817,6 +1817,12 @@ export type CombatEncounterShellProps = {
   escapeHref?: string;
   /** Si true, "Escapar" queda deshabilitado todo el combate (encuentros por recolectar/minar). */
   escapeDisabled?: boolean;
+  /** Si true, no se deshabilita escapar cuando el enemigo tiene poca vida. */
+  disableEscapeByEnemyHp?: boolean;
+  /** Soul Pit Gauntlet: sin loot/XP de mapa; victoria/derrota usan hrefs dedicados. */
+  isGauntletCombat?: boolean;
+  gauntletVictoryHref?: string;
+  gauntletDefeatHref?: string;
   /** Activa logs `[enemy-dmg]` (también con `?debug=1` en la URL). */
   combatDebugEnabled?: boolean;
 };
@@ -2258,6 +2264,10 @@ export function CombatEncounterShell({
   onCombatFinishedStats,
   escapeHref = "/",
   escapeDisabled = false,
+  disableEscapeByEnemyHp = false,
+  isGauntletCombat = false,
+  gauntletVictoryHref,
+  gauntletDefeatHref,
   combatDebugEnabled: combatDebugEnabledProp = false,
 }: CombatEncounterShellProps) {
   const router = useRouter();
@@ -2824,8 +2834,14 @@ export function CombatEncounterShell({
     0,
   );
   const isEscapeDisabledByEnemyHp =
-    totalEnemyHpMax > 0 && totalEnemyHp / totalEnemyHpMax <= 0.6;
+    !disableEscapeByEnemyHp &&
+    totalEnemyHpMax > 0 &&
+    totalEnemyHp / totalEnemyHpMax <= 0.6;
   const isEscapeDisabled = escapeDisabled || isEscapeDisabledByEnemyHp;
+  const victoryFinishHref =
+    isGauntletCombat && gauntletVictoryHref ? gauntletVictoryHref : escapeHref;
+  const defeatFinishHref =
+    isGauntletCombat && gauntletDefeatHref ? gauntletDefeatHref : "/";
   const recordPlayerDamageDealt = (amount: number) => {
     const safe = Math.max(0, Math.trunc(amount));
     if (safe <= 0) return;
@@ -6547,7 +6563,13 @@ export function CombatEncounterShell({
               ) : null}
               <button
                 type="button"
-                onClick={() => setIsDefeatPenaltyOpen(true)}
+                onClick={() => {
+                  if (isGauntletCombat) {
+                    router.push(defeatFinishHref);
+                    return;
+                  }
+                  setIsDefeatPenaltyOpen(true);
+                }}
                 className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
               >
                 Continuar
@@ -6602,10 +6624,10 @@ export function CombatEncounterShell({
                 </div>
               </div>
               <Link
-                href="/"
+                href={defeatFinishHref}
                 className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
               >
-                Volver al Campamento
+                {isGauntletCombat ? "Volver al pozo" : "Volver al Campamento"}
               </Link>
             </div>
           )}
@@ -6645,7 +6667,13 @@ export function CombatEncounterShell({
               </div>
               <button
                 type="button"
-                onClick={() => setIsVictoryLootOpen(true)}
+                onClick={() => {
+                  if (isGauntletCombat) {
+                    router.push(victoryFinishHref);
+                    return;
+                  }
+                  setIsVictoryLootOpen(true);
+                }}
                 className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-emerald-600/90 bg-emerald-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-emerald-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-emerald-700/95 sm:mt-6`}
               >
                 Continuar
@@ -6940,10 +6968,10 @@ export function CombatEncounterShell({
                 ) : null}
               </div>
               <Link
-                href={escapeHref}
+                href={victoryFinishHref}
                 className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-amber-600/90 bg-amber-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-amber-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-amber-700/95 sm:mt-6`}
               >
-                Volver al mapa
+                {isGauntletCombat ? "Siguiente piso" : "Volver al mapa"}
               </Link>
             </div>
           )}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { redirect } from "next/navigation";
 
+import { reconcileDepthsBridgeProgress } from "@/app/(main)/cave-depths/actions";
 import { CaveDepthsMap } from "@/components/maps/cave-depths-map";
 import { WorldEventJournal } from "@/components/home/world-event-journal";
 import { CAVE_DEPTHS_ZONE_CODE } from "@/lib/game-zones";
@@ -44,12 +45,16 @@ export default async function CaveDepthsPage({ searchParams }: CaveDepthsPagePro
 
   const { data: milestones } = await supabase
     .from("user_milestones")
-    .select("cave_entrance_dialog")
+    .select("cave_entrance_dialog, depths_bridge_dialog")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (milestones?.cave_entrance_dialog !== true) {
     redirect("/bosque-inexplorado?hotspot=cave-entrance");
+  }
+
+  if (milestones?.depths_bridge_dialog === true) {
+    await reconcileDepthsBridgeProgress();
   }
 
   const currentCombatStep = await getUserCombatStepForZone(
@@ -94,6 +99,7 @@ export default async function CaveDepthsPage({ searchParams }: CaveDepthsPagePro
           currentCombatStep={currentCombatStep}
           zoneCode={CAVE_DEPTHS_ZONE_CODE}
           initialHotspotId={hotspotQuery}
+          depthsBridgeDialogCompleted={milestones?.depths_bridge_dialog === true}
         />
 
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">

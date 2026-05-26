@@ -2,6 +2,8 @@
 
 import { usePathname } from "next/navigation";
 
+import { GauntletRunGuard } from "@/components/soul-gauntlet/gauntlet-run-guard";
+
 function isCombatRoute(pathname: string | null): boolean {
   if (!pathname) return false;
   return pathname === "/combate" || pathname.startsWith("/combate/");
@@ -22,6 +24,7 @@ export function MainLayoutShell({ children, topNav }: MainLayoutShellProps) {
 
   return (
     <>
+      <GauntletRunGuard />
       {topNav}
       <main className="flex-1 pt-14">{children}</main>
     </>

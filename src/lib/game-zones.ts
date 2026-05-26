@@ -15,6 +15,8 @@ export const NEAR_WOODS_ZONE_CODE = "near_woods";
 export const MAGIC_FOREST_ZONE_CODE = "magic-forest";
 /** Minas abandonadas — `combat_encounters.zone_id` y `?zone=` al minar. */
 export const ABANDONED_COAL_MINE_ZONE_CODE = "abandoned-coal-mine";
+/** Soul Pit Gauntlet — pisos encadenados en `/soul-gauntlet-run`. */
+export const SOUL_GAUNTLET_ZONE_CODE = "soul-gauntlet";
 
 export function normalizeZoneCodeKey(raw: string | null | undefined): string {
   if (typeof raw !== "string") return "";
@@ -71,6 +73,11 @@ export function zoneLookupCodeCandidates(zoneQueryParam: string): string[] {
     add(out, "abandoned_coal_mine");
     return out;
   }
+  if (key === "soul_gauntlet") {
+    add(out, "soul-gauntlet");
+    add(out, "soul_gauntlet");
+    return out;
+  }
   return out;
 }
 
@@ -79,6 +86,7 @@ const COMBAT_ESCAPE_DISABLED_ZONE_KEYS = new Set([
   "magic_forest",
   "magicforest",
   "abandoned_coal_mine",
+  "soul_gauntlet",
 ]);
 
 /** `true` si el combate entró desde bosque mágico o minas abandonadas (`?zone=`). */
@@ -112,6 +120,9 @@ export function mapPathByZoneCode(zoneCode: string | null | undefined): string |
   }
   if (key === "abandoned_coal_mine") {
     return "/abandoned-coal-mine";
+  }
+  if (key === "soul_gauntlet") {
+    return "/gauntlet-pozo-de-las-almas";
   }
 
   return null;
