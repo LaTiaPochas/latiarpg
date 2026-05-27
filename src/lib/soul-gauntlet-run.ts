@@ -1,4 +1,4 @@
-import type { CombatEncounterEnemyView } from "@/components/combat/combat-encounter-shell";
+import type { CombatEncounterEnemyView } from "@/components/combat/types";
 import {
   SOUL_GAUNTLET_LOBBY_PATH,
   getGauntletFloorConfig,

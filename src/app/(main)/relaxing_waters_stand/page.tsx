@@ -490,7 +490,7 @@ export default async function RelaxingWatersStandPage() {
                   <button
                     type="submit"
                     disabled={isCharacterAlreadyFull || isNoBottleAvailable}
-                    className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
+                    className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-xs ${
                       isCharacterAlreadyFull || isNoBottleAvailable
                         ? "cursor-not-allowed border-cyan-700/40 bg-cyan-950/40 text-cyan-200/60"
                         : "cursor-pointer border-cyan-500/80 bg-cyan-700/85 text-cyan-50 hover:bg-cyan-600/90"
@@ -504,7 +504,7 @@ export default async function RelaxingWatersStandPage() {
                     Tu vida y tu mana están completos.
                   </span>
                 ) : isNoBottleAvailable ? (
-                  <span className="pointer-events-none absolute -top-10 left-1/2 z-20 w-max -translate-x-1/2 rounded-md border border-cyan-700/70 bg-[#0f1e2a]/95 px-2 py-1 text-[10px] text-cyan-100 opacity-0 shadow-[0_8px_18px_rgba(0,0,0,0.35)] transition-opacity duration-150 group-active:opacity-100 sm:hidden">
+                  <span className="pointer-events-none absolute -top-10 left-1/2 z-20 w-max -translate-x-1/2 rounded-md border border-cyan-700/70 bg-[#0f1e2a]/95 px-1 py-1 text-[10px] text-cyan-100 opacity-0 shadow-[0_8px_18px_rgba(0,0,0,0.35)] transition-opacity duration-150 group-active:opacity-100 sm:hidden">
                     No quedan Aguas Relajantes disponibles.
                   </span>
                 ) : null}
@@ -533,7 +533,7 @@ export default async function RelaxingWatersStandPage() {
               ) : null}
               <Link
                 href="/garrison"
-                className="rounded-md border border-amber-500/80 bg-amber-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-50 transition hover:bg-amber-700/90 sm:text-sm"
+                className="rounded-md border border-amber-500/80 bg-amber-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-50 transition hover:bg-amber-700/90 sm:text-xs"
               >
                 VOLVER AL CAMPAMENTO
               </Link>

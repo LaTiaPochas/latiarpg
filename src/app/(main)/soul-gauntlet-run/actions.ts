@@ -24,7 +24,16 @@ export async function abandonActiveSoulGauntletRun() {
   revalidatePath(SOUL_GAUNTLET_LOBBY_PATH);
 }
 
-export async function finalizeGauntletVictory(runId: string, floorWon: number) {
+function asNonNegativeInt(value: unknown): number {
+  return Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
+}
+
+export async function finalizeGauntletVictory(
+  runId: string,
+  floorWon: number,
+  finalHp: number,
+  finalMana: number,
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -42,6 +51,26 @@ export async function finalizeGauntletVictory(runId: string, floorWon: number) {
   const safeFloorWon = Math.max(1, Math.trunc(floorWon));
   const nextFloor = safeFloorWon + 1;
   const nextMax = Math.max(run.max_floor_reached, safeFloorWon);
+  const safeFinalHp = asNonNegativeInt(finalHp);
+  const safeFinalMana = asNonNegativeInt(finalMana);
+
+  const { data: characterRow } = await supabase
+    .from("user_character")
+    .select("hp_total, mana_total")
+    .eq("profile_id", user.id)
+    .maybeSingle();
+
+  if (characterRow) {
+    const hpTotal = Math.max(1, asNonNegativeInt(characterRow.hp_total));
+    const manaTotal = asNonNegativeInt(characterRow.mana_total);
+    await supabase
+      .from("user_character")
+      .update({
+        hp_actual: Math.min(hpTotal, safeFinalHp),
+        mana_actual: Math.min(manaTotal, safeFinalMana),
+      })
+      .eq("profile_id", user.id);
+  }
 
   await supabase
     .from("user_soul_gauntlet_runs")

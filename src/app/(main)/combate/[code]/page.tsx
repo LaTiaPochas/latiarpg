@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
-import {
-  CombatEncounterShell,
-  type CombatEncounterStatsPayload,
-  type CombatConsumeResult,
-  type CombatEncounterEnemyView,
-  type CombatEncounterEnemySkill,
-  type CombatVictoryLootItem,
-  type CombatPlayerConsumableView,
-  type CombatPlayerSkillView,
-  type CombatDefeatLostItem,
-} from "@/components/combat/combat-encounter-shell";
+import { CombatEncounterShell, GauntletCombatShell } from "@/components/combat";
+import type {
+  CombatConsumeResult,
+  CombatDefeatLostItem,
+  CombatEncounterEnemySkill,
+  CombatEncounterEnemyView,
+  CombatEncounterStatsPayload,
+  CombatPlayerConsumableView,
+  CombatPlayerSkillView,
+  CombatVictoryLootItem,
+} from "@/components/combat/types";
 import {
   isCombatEscapeDisabledZone,
   mapPathByZoneCode,
@@ -36,11 +36,14 @@ import {
   isDailyBossLimitedEncounterCode,
   recordUserDailyBossDefeat,
 } from "@/lib/daily-boss-combat";
+import { getUserCombatStepForZone } from "@/lib/user-combat-progress";
+import { isStoryBossReplayBlocked } from "@/lib/story-boss-combat";
 import {
   SOUL_GAUNTLET_COMBAT_MODE,
   SOUL_GAUNTLET_LOBBY_PATH,
   SOUL_GAUNTLET_RUN_PATH,
   SOUL_GAUNTLET_ZONE_CODE,
+  buildSoulGauntletCombatPath,
   getGauntletFloorConfig,
 } from "@/lib/soul-gauntlet";
 import {
@@ -118,6 +121,7 @@ type CombatConsumableInventoryRow = {
         name: string | null;
         description: string | null;
         item_type_id: string | null;
+        icon_path: string | null;
         json_consumable_effect: unknown;
       }
     | Array<{
@@ -125,6 +129,7 @@ type CombatConsumableInventoryRow = {
         name: string | null;
         description: string | null;
         item_type_id: string | null;
+        icon_path: string | null;
         json_consumable_effect: unknown;
       }>
     | null;
@@ -1013,12 +1018,15 @@ export default async function CombatEncounterPage({
       redirect(SOUL_GAUNTLET_LOBBY_PATH);
     }
     activeGauntletRun = await getActiveSoulGauntletRun(supabase, user.id);
-    if (
-      !activeGauntletRun ||
-      activeGauntletRun.id !== gauntletRunId ||
-      activeGauntletRun.current_floor !== gauntletFloor
-    ) {
+    if (!activeGauntletRun || activeGauntletRun.id !== gauntletRunId) {
       redirect(SOUL_GAUNTLET_LOBBY_PATH);
+    }
+    if (activeGauntletRun.current_floor !== gauntletFloor) {
+      const { href } = buildSoulGauntletCombatPath(
+        activeGauntletRun.current_floor,
+        activeGauntletRun.id,
+      );
+      redirect(href);
     }
     const expectedFloor = getGauntletFloorConfig(gauntletFloor);
     if (expectedFloor.encounterCode !== code) {
@@ -1073,6 +1081,26 @@ export default async function CombatEncounterPage({
     typeof encounter.combat_step === "number" && Number.isFinite(encounter.combat_step)
       ? Math.max(0, Math.trunc(encounter.combat_step))
       : 0;
+
+  if (
+    !isGauntletCombat &&
+    encounter.is_boss === true &&
+    !isDailyBossLimitedEncounterCode(code) &&
+    combatProgressZoneCode &&
+    isStoryBossReplayBlocked(
+      true,
+      encounterCombatStepForProgress,
+      await getUserCombatStepForZone(supabase, user.id, combatProgressZoneCode),
+    )
+  ) {
+    const returnHotspot = hotspotId || code;
+    const mapReturnPath =
+      mapPathByZoneCode(combatProgressZoneCode ?? zoneCode) ?? "/mystic-cave";
+    const separator = mapReturnPath.includes("?") ? "&" : "?";
+    redirect(
+      `${mapReturnPath}${separator}hotspot=${encodeURIComponent(returnHotspot)}&boss_story=blocked`,
+    );
+  }
 
   const baseEnemySelect = `
       spawn_index,
@@ -2070,7 +2098,7 @@ export default async function CombatEncounterPage({
   const { data: consumableRows } = await supabase
     .from("user_inventory")
     .select(
-      "id, quantity, item_id, items!inner(id, name, description, item_type_id, json_consumable_effect)",
+      "id, quantity, item_id, items!inner(id, name, description, item_type_id, icon_path, json_consumable_effect)",
     )
     .in("profile_id", consumableProfileIds)
     .gt("quantity", 0)
@@ -2095,6 +2123,9 @@ export default async function CombatEncounterPage({
           typeof itemJoin.description === "string" && itemJoin.description.trim().length > 0
             ? itemJoin.description.trim()
             : null,
+        iconPath: normalizePublicAssetUrl(
+          typeof itemJoin.icon_path === "string" ? itemJoin.icon_path : null,
+        ),
         effect:
           itemJoin.json_consumable_effect &&
           typeof itemJoin.json_consumable_effect === "object" &&
@@ -2357,20 +2388,6 @@ export default async function CombatEncounterPage({
         : actionUser.id;
 
     if (isGauntletCombat && gauntletRunId) {
-      await persistCharacterVitals();
-      const safeFloorWon = Math.max(1, Math.trunc(gauntletFloor));
-      const run = await getActiveSoulGauntletRun(supabaseAction, actionUser.id);
-      if (run && run.id === gauntletRunId) {
-        await supabaseAction
-          .from("user_soul_gauntlet_runs")
-          .update({
-            max_floor_reached: Math.max(run.max_floor_reached, safeFloorWon),
-            current_floor: safeFloorWon + 1,
-          })
-          .eq("id", run.id)
-          .eq("user_id", actionUser.id)
-          .eq("is_active", true);
-      }
       return;
     }
 
@@ -2795,67 +2812,76 @@ export default async function CombatEncounterPage({
       ? gauntletLobbyResultPath(activeGauntletRun.max_floor_reached)
       : SOUL_GAUNTLET_LOBBY_PATH;
 
-  return (
-    <CombatEncounterShell
-      encounterName={String(encounter.name ?? code)}
-      encounterCode={String(encounter.code ?? code)}
-      combatStep={encounter.combat_step != null ? String(encounter.combat_step) : null}
-      isBoss={Boolean(encounter.is_boss)}
-      recommendedLevel={
-        encounter.recommended_level != null ? num(encounter.recommended_level, 1) : null
-      }
-      backgroundSrc={backgroundSrc}
-      enemies={combatEnemies}
-      combatStartMessage={
+  const combatShellProps = {
+      encounterName: String(encounter.name ?? code),
+      encounterCode: String(encounter.code ?? code),
+      combatStep: encounter.combat_step != null ? String(encounter.combat_step) : null,
+      isBoss: Boolean(encounter.is_boss),
+      recommendedLevel:
+        encounter.recommended_level != null ? num(encounter.recommended_level, 1) : null,
+      backgroundSrc,
+      enemies: combatEnemies,
+      combatStartMessage:
         typeof encounter.combat_start_message === "string" &&
         encounter.combat_start_message.trim().length > 0
           ? encounter.combat_start_message.trim()
-          : null
-      }
-      escapeHref={isGauntletCombat ? SOUL_GAUNTLET_RUN_PATH : escapeToMapHref}
-      escapeDisabled={escapeDisabled || isGauntletCombat}
-      disableEscapeByEnemyHp={isGauntletCombat}
-      isGauntletCombat={isGauntletCombat}
-      gauntletVictoryHref={SOUL_GAUNTLET_RUN_PATH}
-      gauntletDefeatHref={gauntletDefeatHref}
-      playerDisplayName={playerDisplayName}
-      playerPortraitSrc={playerPortraitSrc}
-      playerSpriteSrc={playerSpriteSrc}
-      playerHp={playerHp}
-      playerHpMax={playerHpMax}
-      playerMana={playerMana}
-      playerManaMax={playerManaMax}
-      playerSpeed={playerSpeed}
-      playerWeaponDamageMin={playerWeaponDamageMin}
-      playerWeaponDamageMax={playerWeaponDamageMax}
-      playerMagicDamageMin={playerMagicDamageMin}
-      playerMagicDamageMax={playerMagicDamageMax}
-      playerStatStr={playerStatStr}
-      playerStatDex={playerStatDex}
-      playerStatInt={playerStatInt}
-      playerStatWis={playerStatWis}
-      playerArmor={playerArmor}
-      playerMr={playerMr}
-      playerExperienceToNext={playerExperienceToNext}
-      playerLevelCurrent={playerLevel}
-      playerLevelAfterVictory={projectedLevelAfterVictory}
-      playerSkills={playerSkills}
-      playerConsumables={playerConsumables}
-      victoryLootItems={isGauntletCombat ? [] : victoryLootItems}
-      defeatLostItems={isGauntletCombat ? [] : defeatLostItems}
-      victoryGoldFromLoot={victoryGoldFromLoot}
-      onConsumeConsumable={consumeCombatConsumable}
-      onEscapePersistState={persistEscapeCombatState}
-      onPlayerDefeatedGlobalLog={
-        isGauntletCombat ? undefined : logPlayerDefeatedInGlobalLog
-      }
-      onPlayerLevelUpGlobalLog={logPlayerLevelUpInGlobalLog}
-      onCombatFinishedStats={persistCombatStats}
-      playerResistances={playerResistances}
-      playerWeaknesses={playerWeaknesses}
-      playerWeaponAttackFamily={playerWeaponAttackFamily}
-      playerWeaponAmmoKind={playerWeaponAmmoKind}
-      combatDebugEnabled={combatDebugEnabled}
+          : null,
+      playerDisplayName,
+      playerPortraitSrc,
+      playerSpriteSrc,
+      playerHp,
+      playerHpMax,
+      playerMana,
+      playerManaMax,
+      playerSpeed,
+      playerWeaponDamageMin,
+      playerWeaponDamageMax,
+      playerMagicDamageMin,
+      playerMagicDamageMax,
+      playerStatStr,
+      playerStatDex,
+      playerStatInt,
+      playerStatWis,
+      playerArmor,
+      playerMr,
+      playerExperienceToNext,
+      playerLevelCurrent: playerLevel,
+      playerLevelAfterVictory: projectedLevelAfterVictory,
+      playerSkills,
+      playerConsumables,
+      victoryLootItems: isGauntletCombat ? [] : victoryLootItems,
+      defeatLostItems: isGauntletCombat ? [] : defeatLostItems,
+      victoryGoldFromLoot,
+      onConsumeConsumable: consumeCombatConsumable,
+      onEscapePersistState: persistEscapeCombatState,
+      onPlayerLevelUpGlobalLog: logPlayerLevelUpInGlobalLog,
+      onCombatFinishedStats: persistCombatStats,
+      playerResistances,
+      playerWeaknesses,
+      playerWeaponAttackFamily,
+      playerWeaponAmmoKind,
+      combatDebugEnabled,
+  };
+
+  if (isGauntletCombat && gauntletRunId) {
+    return (
+      <GauntletCombatShell
+        {...combatShellProps}
+        gauntletRunId={gauntletRunId}
+        gauntletFloor={gauntletFloor}
+        gauntletVictoryHref={SOUL_GAUNTLET_RUN_PATH}
+        gauntletDefeatHref={gauntletDefeatHref}
+        defaultNavigationHref={SOUL_GAUNTLET_RUN_PATH}
+      />
+    );
+  }
+
+  return (
+    <CombatEncounterShell
+      {...combatShellProps}
+      escapeHref={escapeToMapHref}
+      escapeDisabled={escapeDisabled}
+      onPlayerDefeatedGlobalLog={logPlayerDefeatedInGlobalLog}
     />
   );
 }

@@ -55,20 +55,54 @@ export function todayIsoDateLocal(): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Fecha YYYY-MM-DD en una zona IANA (p. ej. Supabase/UTC vs Argentina). */
-export function todayIsoDateInTimeZone(timeZone: string): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone });
+/** Fecha YYYY-MM-DD en una zona IANA (p. ej. Argentina para trueques diarios). */
+export function todayIsoDateInTimeZone(
+  timeZone: string,
+  date: Date = new Date(),
+): string {
+  return date.toLocaleDateString("en-CA", { timeZone });
 }
 
-/** Candidatos de “hoy” para evitar desfase UTC ↔ hora local al filtrar `date`. */
-export function getMeloniTradeDateCandidates(): string[] {
-  return [
-    ...new Set([
-      todayIsoDateInTimeZone(MELONI_TRADES_TIMEZONE),
-      todayIsoDateInTimeZone("UTC"),
-      todayIsoDateLocal(),
-    ]),
-  ];
+/** Fecha de “hoy” para trueques (solo zona AR; coincide con el contador a medianoche). */
+export function getMeloniTradeTodayDate(now: Date = new Date()): string {
+  return todayIsoDateInTimeZone(MELONI_TRADES_TIMEZONE, now);
+}
+
+/** @deprecated Usar `getMeloniTradeTodayDate()`. Mantenido por compatibilidad. */
+export function getMeloniTradeDateCandidates(now: Date = new Date()): string[] {
+  return [getMeloniTradeTodayDate(now)];
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Milisegundos hasta las 00:00 del día siguiente en la zona indicada. */
+export function getMsUntilMidnightInTimeZone(
+  timeZone: string,
+  now: Date = new Date(),
+): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  }).formatToParts(now);
+
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0) % 24;
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  const second = Number(parts.find((part) => part.type === "second")?.value ?? 0);
+  const elapsedMs = (hour * 3600 + minute * 60 + second) * 1000;
+
+  return MS_PER_DAY - elapsedMs;
+}
+
+/** Formato `HH:MM:SS` para tiempo restante hasta medianoche. */
+export function formatMeloniTradesResetCountdown(totalMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 /** Normaliza `date` de Postgres/PostgREST a YYYY-MM-DD. */
@@ -79,15 +113,15 @@ export function normalizeTradeDateOnly(value: unknown): string | null {
     return match ? match[1] : null;
   }
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    return todayIsoDateInTimeZone(MELONI_TRADES_TIMEZONE, value);
   }
   return null;
 }
 
-export function isMeloniTradeDateToday(value: unknown): boolean {
+export function isMeloniTradeDateToday(value: unknown, now: Date = new Date()): boolean {
   const normalized = normalizeTradeDateOnly(value);
   if (!normalized) return false;
-  return getMeloniTradeDateCandidates().includes(normalized);
+  return normalized === getMeloniTradeTodayDate(now);
 }
 
 export function resolveMeloniItemIconPath(iconPath: string | null | undefined): string {

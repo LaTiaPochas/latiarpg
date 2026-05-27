@@ -18,11 +18,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE = "cave-node-9";
 export const BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE = "forest-advance";
+export const CAVE_DEPTHS_DAILY_BOSS_ENCOUNTER_CODE = "cave-depth-3";
 
 export const DAILY_BOSS_ALREADY_DEFEATED_MESSAGE =
   "Ya derrotaste a este jefe hoy. Volvé mañana para intentarlo de nuevo.";
 
-const DAILY_BOSS_ENCOUNTER_CODES = new Set<string>([MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE, BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE]);
+const DAILY_BOSS_ENCOUNTER_CODES = new Set<string>([
+  MYSTIC_CAVE_DAILY_BOSS_ENCOUNTER_CODE,
+  BOSQUE_INEXPLORADO_DAILY_BOSS_ENCOUNTER_CODE,
+  CAVE_DEPTHS_DAILY_BOSS_ENCOUNTER_CODE,
+]);
 
 const DAILY_BOSS_DEFEATS_TABLE = "user_daily_boss_defeats";
 

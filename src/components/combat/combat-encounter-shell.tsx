@@ -1,10 +1,20 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+
+import { finalizeGauntletVictory } from "@/app/(main)/soul-gauntlet-run/actions";
 
 import {
   abilityTooltipStatGetterFromCombat,
@@ -1720,6 +1730,7 @@ export type CombatPlayerConsumableView = {
   itemId: string;
   name: string;
   description: string | null;
+  iconPath: string | null;
   effect: Record<string, unknown> | null;
   quantity: number;
 };
@@ -1821,6 +1832,8 @@ export type CombatEncounterShellProps = {
   disableEscapeByEnemyHp?: boolean;
   /** Soul Pit Gauntlet: sin loot/XP de mapa; victoria/derrota usan hrefs dedicados. */
   isGauntletCombat?: boolean;
+  gauntletRunId?: string;
+  gauntletFloor?: number;
   gauntletVictoryHref?: string;
   gauntletDefeatHref?: string;
   /** Activa logs `[enemy-dmg]` (también con `?debug=1` en la URL). */
@@ -2041,6 +2054,63 @@ function CombatHudStateIconStrip({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function isGauntletPrepPotionEffect(effect: Record<string, unknown> | null): boolean {
+  if (!effect || isAmmoConsumableEffect(effect) || isWeaponAttackFamilyConsumableEffect(effect)) {
+    return false;
+  }
+  const rawObjective =
+    typeof effect.objetive === "string"
+      ? effect.objetive.trim().toLowerCase()
+      : typeof effect.objective === "string"
+        ? effect.objective.trim().toLowerCase()
+        : "";
+  if (rawObjective === "enemy") return false;
+  const stat = typeof effect.stat === "string" ? effect.stat.trim().toLowerCase() : "";
+  return stat === "hp" || stat === "mana" || stat === "mp";
+}
+
+function GauntletVictoryVitalsPanel({
+  hp,
+  hpMax,
+  mana,
+  manaMax,
+  hpPercent,
+  manaPercent,
+}: {
+  hp: number;
+  hpMax: number;
+  mana: number;
+  manaMax: number;
+  hpPercent: number;
+  manaPercent: number;
+}) {
+  return (
+    <div
+      className={`${menuFont.className} rounded-lg border border-amber-700/55 bg-black/35 p-3`}
+      aria-label="Estado actual"
+    >
+      <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/50">
+        <div
+          className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-300"
+          style={{ width: `${hpPercent}%` }}
+        />
+      </div>
+      <p className="mt-1 text-[10px] tabular-nums text-emerald-100/95 sm:text-[11px]">
+        HP {hp} / {hpMax}
+      </p>
+      <div className="mt-2.5 h-2.5 w-full overflow-hidden rounded-full bg-black/50">
+        <div
+          className="h-full bg-gradient-to-r from-sky-600 to-cyan-400 transition-all duration-300"
+          style={{ width: `${manaPercent}%` }}
+        />
+      </div>
+      <p className="mt-1 text-[10px] tabular-nums text-sky-100/95 sm:text-[11px]">
+        Mana {mana} / {manaMax}
+      </p>
     </div>
   );
 }
@@ -2266,11 +2336,14 @@ export function CombatEncounterShell({
   escapeDisabled = false,
   disableEscapeByEnemyHp = false,
   isGauntletCombat = false,
+  gauntletRunId,
+  gauntletFloor = 0,
   gauntletVictoryHref,
   gauntletDefeatHref,
   combatDebugEnabled: combatDebugEnabledProp = false,
 }: CombatEncounterShellProps) {
   const router = useRouter();
+  const [isGauntletVictoryAdvancing, startGauntletVictoryAdvance] = useTransition();
   const combatDebugRef = useRef<CombatDebugLogger>(() => {});
   combatDebugRef.current = createCombatDebugLogger(
     isCombatDebugEnabled(combatDebugEnabledProp),
@@ -2357,6 +2430,11 @@ export function CombatEncounterShell({
   const combatPotionItems = useMemo(
     () => combatConsumables.filter((entry) => !isAmmoConsumableEffect(entry.effect)),
     [combatConsumables],
+  );
+
+  const gauntletPrepPotions = useMemo(
+    () => combatPotionItems.filter((entry) => isGauntletPrepPotionEffect(entry.effect)),
+    [combatPotionItems],
   );
 
   useEffect(() => {
@@ -2842,6 +2920,32 @@ export function CombatEncounterShell({
     isGauntletCombat && gauntletVictoryHref ? gauntletVictoryHref : escapeHref;
   const defeatFinishHref =
     isGauntletCombat && gauntletDefeatHref ? gauntletDefeatHref : "/";
+  const handleGauntletVictoryContinue = useCallback(() => {
+    const safeRunId =
+      typeof gauntletRunId === "string" && gauntletRunId.trim().length > 0
+        ? gauntletRunId.trim()
+        : null;
+    const safeFloor = Math.max(1, Math.trunc(gauntletFloor));
+    if (!safeRunId) {
+      router.push(victoryFinishHref);
+      return;
+    }
+    startGauntletVictoryAdvance(() => {
+      void finalizeGauntletVictory(
+        safeRunId,
+        safeFloor,
+        Math.max(0, Math.trunc(playerCurrentHp)),
+        Math.max(0, Math.trunc(displayPlayerMana)),
+      );
+    });
+  }, [
+    displayPlayerMana,
+    gauntletFloor,
+    gauntletRunId,
+    playerCurrentHp,
+    router,
+    victoryFinishHref,
+  ]);
   const recordPlayerDamageDealt = (amount: number) => {
     const safe = Math.max(0, Math.trunc(amount));
     if (safe <= 0) return;
@@ -3532,6 +3636,72 @@ export function CombatEncounterShell({
     if (stat === "mr") return { ...enemy, mr: Math.max(0, enemy.mr - amount) };
     if (stat === "speed") return { ...enemy, speed: Math.max(0, enemy.speed - amount) };
     return enemy;
+  }
+
+  function canUseGauntletPrepPotion(item: CombatPlayerConsumableView): boolean {
+    if (isGauntletVictoryAdvancing || item.quantity <= 0 || !item.effect) return false;
+    if (!isGauntletPrepPotionEffect(item.effect)) return false;
+    const stat = consumableStat(item.effect);
+    if (stat === "hp" && playerCurrentHp >= playerHpMax) return false;
+    if ((stat === "mana" || stat === "mp") && displayPlayerMana >= playerManaMax) return false;
+    return true;
+  }
+
+  async function handleGauntletPrepConsumableUse(item: CombatPlayerConsumableView) {
+    if (!canUseGauntletPrepPotion(item)) return;
+
+    setCombatConsumables((prev) =>
+      prev
+        .map((entry) =>
+          entry.inventoryId === item.inventoryId
+            ? { ...entry, quantity: Math.max(0, entry.quantity - 1) }
+            : entry,
+        )
+        .filter((entry) => entry.quantity > 0),
+    );
+
+    if (onConsumeConsumable) {
+      const result = await onConsumeConsumable(item.inventoryId);
+      if (!result.ok) {
+        setCombatConsumables((prev) => {
+          const existing = prev.find((entry) => entry.inventoryId === item.inventoryId);
+          if (existing) {
+            return prev.map((entry) =>
+              entry.inventoryId === item.inventoryId
+                ? { ...entry, quantity: existing.quantity + 1 }
+                : entry,
+            );
+          }
+          return [...prev, item];
+        });
+        return;
+      }
+      if (typeof result.remainingQuantity === "number") {
+        const qty = Math.max(0, Math.trunc(result.remainingQuantity));
+        setCombatConsumables((prev) => {
+          const exists = prev.some((entry) => entry.inventoryId === item.inventoryId);
+          if (qty <= 0) {
+            return prev.filter((entry) => entry.inventoryId !== item.inventoryId);
+          }
+          if (!exists) return [...prev, { ...item, quantity: qty }];
+          return prev.map((entry) =>
+            entry.inventoryId === item.inventoryId ? { ...entry, quantity: qty } : entry,
+          );
+        });
+      }
+    }
+
+    const stat = consumableStat(item.effect);
+    const amount = consumableAmount(item.effect);
+    if (stat === "hp") {
+      setPlayerCurrentHp((prev) => {
+        const next = Math.min(playerHpMax, Math.max(0, prev + amount));
+        recordPlayerHealing(next - prev);
+        return next;
+      });
+    } else if (stat === "mana" || stat === "mp") {
+      setDisplayPlayerMana((prev) => Math.min(playerManaMax, Math.max(0, prev + amount)));
+    }
   }
 
   async function handleConsumableUse(item: CombatPlayerConsumableView) {
@@ -6487,7 +6657,9 @@ export function CombatEncounterShell({
       ) : null}
       {consumableInfoTooltip.open && consumableTooltipEntry ? (
         <div
-          className={`${helpCardFont.className} fixed z-[62] max-w-sm rounded-lg border border-yellow-700/80 bg-[#1b1408]/96 px-3 py-2 pr-8 text-sm leading-relaxed text-yellow-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)]`}
+          className={`${helpCardFont.className} fixed max-w-sm rounded-lg border border-yellow-700/80 bg-[#1b1408]/96 px-3 py-2 pr-8 text-sm leading-relaxed text-yellow-100 shadow-[0_12px_30px_rgba(0,0,0,0.55)] ${
+            isVictoryOverlayVisible || isDefeatOverlayVisible ? "z-[210]" : "z-[62]"
+          }`}
           style={{ left: consumableInfoTooltip.x, top: consumableInfoTooltip.y }}
         >
           <button
@@ -6661,22 +6833,112 @@ export function CombatEncounterShell({
                   VICTORIA
                 </p>
                 <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/90">
-                  El enemigo ha sido derrotado
+                  {isGauntletCombat
+                    ? `Has superado el piso ${Math.max(1, Math.trunc(gauntletFloor))}`
+                    : "El enemigo ha sido derrotado"}
                 </p>
                 <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
               </div>
+              {isGauntletCombat ? (
+                <div
+                  className={`${menuFont.className} mt-4 rounded-xl border border-amber-700/60 bg-[#1a100c]/95 p-8 shadow-[0_10px_32px_rgba(0,0,0,0.45)] sm:p-5`}
+                >
+                  <GauntletVictoryVitalsPanel
+                    hp={playerCurrentHp}
+                    hpMax={playerHpMax}
+                    mana={displayPlayerMana}
+                    manaMax={playerManaMax}
+                    hpPercent={playerHpPercent}
+                    manaPercent={playerManaPercent}
+                  />
+                  <p className="mt-4 text-center text-xs font-semibold uppercase tracking-[0.14em] text-amber-200/90">
+                    Preparate para el siguiente combate:
+                  </p>
+                  {gauntletPrepPotions.length === 0 ? (
+                    <p className="mt-3 text-center text-[11px] text-amber-100/75">
+                      No tenés consumibles disponibles en el inventario.
+                    </p>
+                  ) : (
+                    <div className="mt-3 grid max-h-40 gap-1.5 overflow-y-auto pr-0.5">
+                      {gauntletPrepPotions.map((item) => {
+                        const usable = canUseGauntletPrepPotion(item);
+                        return (
+                          <div key={item.inventoryId} className="flex items-center gap-1.5">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-yellow-700/55 bg-black/40">
+                              {item.iconPath ? (
+                                <Image
+                                  src={item.iconPath}
+                                  alt=""
+                                  width={32}
+                                  height={32}
+                                  className="h-8 w-8 object-contain"
+                                />
+                              ) : (
+                                <span className="text-[10px] font-bold text-yellow-100/70">?</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!usable || isGauntletVictoryAdvancing}
+                              onClick={() => void handleGauntletPrepConsumableUse(item)}
+                              className={`min-w-0 flex-1 rounded-md border px-2 py-1.5 text-left text-[11px] font-semibold leading-snug transition ${
+                                !usable || isGauntletVictoryAdvancing
+                                  ? "cursor-not-allowed border-yellow-700/65 bg-yellow-950/35 text-yellow-100/90 opacity-70"
+                                  : "cursor-pointer border-yellow-600/70 bg-yellow-900/45 text-yellow-100 hover:bg-yellow-700/65"
+                              }`}
+                            >
+                              <span className="block truncate">{item.name}</span>
+                              <span className="text-[10px] font-normal text-yellow-100/80">
+                                x{item.quantity}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onMouseEnter={(e) =>
+                                openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                              }
+                              onMouseMove={(e) =>
+                                openConsumableInfoTooltip(item.inventoryId, e.clientX, e.clientY, false)
+                              }
+                              onMouseLeave={hideConsumableInfoTooltip}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleConsumableInfoTooltipPinned(
+                                  item.inventoryId,
+                                  e.clientX,
+                                  e.clientY,
+                                );
+                              }}
+                              className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-yellow-600/70 bg-yellow-950/50 text-[10px] font-black leading-none text-yellow-100 transition hover:bg-yellow-800/60"
+                              aria-label={`Información de ${item.name}`}
+                            >
+                              ?
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <button
                 type="button"
+                disabled={isGauntletCombat && isGauntletVictoryAdvancing}
                 onClick={() => {
                   if (isGauntletCombat) {
-                    router.push(victoryFinishHref);
+                    handleGauntletVictoryContinue();
                     return;
                   }
                   setIsVictoryLootOpen(true);
                 }}
-                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-emerald-600/90 bg-emerald-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-emerald-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-emerald-700/95 sm:mt-6`}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-emerald-600/90 bg-emerald-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-emerald-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-emerald-700/95 disabled:cursor-wait disabled:opacity-70 sm:mt-6`}
               >
-                Continuar
+                {isGauntletCombat && isGauntletVictoryAdvancing
+                  ? "Avanzando…"
+                  : isGauntletCombat
+                    ? "Siguiente piso"
+                    : "Continuar"}
               </button>
             </div>
           ) : (

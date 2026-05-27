@@ -4,7 +4,29 @@ import { revalidatePath } from "next/cache";
 
 import { CAVE_DEPTHS_ZONE_CODE, zoneLookupCodeCandidates } from "@/lib/game-zones";
 import { createClient } from "@/lib/supabase/server";
+import { insertWorldEventLog } from "@/lib/world-event-log";
 import { redirect } from "next/navigation";
+
+const PINDAL_FOUND_MILESTONE_TITLE = "pindal_found";
+
+function capitalizeFirst(value: string) {
+  if (!value) return value;
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function resolveMemberName(input: string | null | undefined, fallback: string) {
+  const value = input?.trim();
+  return value ? value : fallback;
+}
 
 export type CompleteCaveDepthsStoryResult = { ok: true } | { ok: false; error: string };
 
@@ -203,6 +225,56 @@ export async function completeCaveDepthsStory(): Promise<CompleteCaveDepthsStory
 
   revalidatePath("/cave-depths");
   revalidatePath("/cave-depths-story");
+
+  return { ok: true };
+}
+
+export async function completePindalFound(): Promise<{ ok: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: updatedRows, error: updateError } = await supabase
+    .from("global_milestones")
+    .update({
+      is_completed: true,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("title", PINDAL_FOUND_MILESTONE_TITLE)
+    .or("is_completed.is.false,is_completed.is.null")
+    .select("id");
+
+  if (updateError) {
+    return { ok: false };
+  }
+
+  const completedNow = (updatedRows?.length ?? 0) > 0;
+  if (completedNow) {
+    const { data: profile } = await supabase
+      .from("user_profiles")
+      .select("miembro, color")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const fallbackName = user.email?.split("@")[0] ?? "Aventurero";
+    const memberName = capitalizeFirst(resolveMemberName(profile?.miembro, fallbackName));
+    const memberColor = profile?.color?.trim() || "#f8fafc";
+    const safeMemberName = escapeHtml(memberName);
+    const safeMemberColor = escapeHtml(memberColor);
+    const eventHtml = `<span style="color:${safeMemberColor}">${safeMemberName}</span> rescató a un extraño personaje de Las Profundidades.`;
+
+    await insertWorldEventLog(supabase, user.id, {
+      member_name: memberName,
+      event_html: eventHtml,
+    });
+  }
+
+  revalidatePath("/cave-depths");
 
   return { ok: true };
 }

@@ -4,12 +4,13 @@ import { Libre_Baskerville, Montserrat } from "next/font/google";
 import { redirect } from "next/navigation";
 
 import { MeloniTradesList } from "@/components/meloni-stand/meloni-trades-list";
+import { MeloniTradesResetCountdown } from "@/components/meloni-stand/meloni-trades-reset-countdown";
 import type { InventoryRowForBag } from "@/lib/inventory-bag";
 import {
   buildMeloniTradesForDisplay,
   buildPlayerInventoryQuantities,
   canReceiveMeloniTradeRewards,
-  getMeloniTradeDateCandidates,
+  getMeloniTradeTodayDate,
   isMeloniTradeAffordable,
   isMeloniTradeDateToday,
 } from "@/lib/meloni-trades";
@@ -42,7 +43,7 @@ export default async function MeloniStandPage() {
   /** Tabla global: el dashboard usa service role; sin política RLS el cliente auth devuelve 0 filas. */
   const tradesSupabase = createServiceRoleClient() ?? supabase;
 
-  const todayCandidates = getMeloniTradeDateCandidates();
+  const todayDate = getMeloniTradeTodayDate();
 
   const tradeSelect =
     "id, item_id_1, item_id_2, quantity_1, quantity_2, exhange_quantity, exchange_item, exchange_item_2, exhange_quantity_2, date";
@@ -50,7 +51,7 @@ export default async function MeloniStandPage() {
   let { data: tradeRows, error: tradesError } = await tradesSupabase
     .from("global_melonis_trades")
     .select(tradeSelect)
-    .in("date", todayCandidates)
+    .eq("date", todayDate)
     .order("id", { ascending: true });
 
   // Respaldo: filas con `date` en otro formato o desfase; también detecta `date` NULL.
@@ -163,7 +164,7 @@ export default async function MeloniStandPage() {
             </p>
 
             <h2
-              className={`${uiFont.className} mt-8 text-sm font-bold uppercase tracking-wide text-slate-700 sm:text-sm`}
+              className={`${uiFont.className} mt-3 text-sm font-bold uppercase tracking-wide text-slate-700 sm:text-sm`}
             >
               Trueques del día
             </h2>
@@ -184,7 +185,9 @@ export default async function MeloniStandPage() {
                 uiClassName={uiFont.className}
               />
             )}
-
+              <MeloniTradesResetCountdown
+              className={`${uiFont.className} mt-5 text-[11px] font-semibold text-slate-700 sm:text-xs`}
+            />
             <div className="mt-4 flex justify-center">
               <Link
                 href="/garrison"

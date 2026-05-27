@@ -5,7 +5,17 @@ import { redirect } from "next/navigation";
 import { reconcileDepthsBridgeProgress } from "@/app/(main)/cave-depths/actions";
 import { CaveDepthsMap } from "@/components/maps/cave-depths-map";
 import { WorldEventJournal } from "@/components/home/world-event-journal";
-import { CAVE_DEPTHS_ZONE_CODE } from "@/lib/game-zones";
+import { CAVE_DEPTHS_ZONE_CODE, zoneLookupCodeCandidates } from "@/lib/game-zones";
+import {
+  CAVE_DEPTHS_DAILY_BOSS_ENCOUNTER_CODE,
+  DAILY_BOSS_ALREADY_DEFEATED_MESSAGE,
+  hasUserDefeatedDailyBossToday,
+  isDailyBossLimitedEncounterCode,
+} from "@/lib/daily-boss-combat";
+import {
+  STORY_BOSS_ALREADY_DEFEATED_MESSAGE,
+  isStoryBossReplayBlocked,
+} from "@/lib/story-boss-combat";
 import { getUserCombatStepForZone } from "@/lib/user-combat-progress";
 import { createClient } from "@/lib/supabase/server";
 
@@ -20,7 +30,7 @@ const pageFont = Montserrat({
 });
 
 type CaveDepthsPageProps = {
-  searchParams?: Promise<{ hotspot?: string }>;
+  searchParams?: Promise<{ hotspot?: string; boss_daily?: string; boss_story?: string }>;
 };
 
 export const metadata = {
@@ -49,6 +59,12 @@ export default async function CaveDepthsPage({ searchParams }: CaveDepthsPagePro
     .eq("user_id", user.id)
     .maybeSingle();
 
+  const { data: pindalFoundMilestone } = await supabase
+    .from("global_milestones")
+    .select("is_completed")
+    .eq("title", "pindal_found")
+    .maybeSingle();
+
   if (milestones?.cave_entrance_dialog !== true) {
     redirect("/bosque-inexplorado?hotspot=cave-entrance");
   }
@@ -62,6 +78,59 @@ export default async function CaveDepthsPage({ searchParams }: CaveDepthsPagePro
     user.id,
     CAVE_DEPTHS_ZONE_CODE,
   );
+
+  const zoneCandidates = zoneLookupCodeCandidates(CAVE_DEPTHS_ZONE_CODE);
+  const { data: storyBossRows } = await supabase
+    .from("combat_encounters")
+    .select("code")
+    .eq("is_boss", true)
+    .eq("is_active", true)
+    .in("zone_id", zoneCandidates.length > 0 ? zoneCandidates : [CAVE_DEPTHS_ZONE_CODE]);
+
+  const storyBossEncounterCodes = (storyBossRows ?? [])
+    .map((row) => (typeof row.code === "string" ? row.code.trim() : ""))
+    .filter((code) => code.length > 0);
+
+  const storyBossCodeSet = new Set(storyBossEncounterCodes.map((code) => code.toLowerCase()));
+
+  const dailyBossDefeatedToday = await hasUserDefeatedDailyBossToday(
+    supabase,
+    user.id,
+    CAVE_DEPTHS_DAILY_BOSS_ENCOUNTER_CODE,
+  );
+  const initialDailyBossBlockedMessage =
+    resolvedSearch?.boss_daily === "blocked" ||
+    (dailyBossDefeatedToday &&
+      hotspotQuery?.toLowerCase() === CAVE_DEPTHS_DAILY_BOSS_ENCOUNTER_CODE)
+      ? DAILY_BOSS_ALREADY_DEFEATED_MESSAGE
+      : null;
+
+  let initialStoryBossBlockedMessage: string | null = null;
+  if (resolvedSearch?.boss_story === "blocked") {
+    initialStoryBossBlockedMessage = STORY_BOSS_ALREADY_DEFEATED_MESSAGE;
+  } else if (
+    hotspotQuery &&
+    storyBossCodeSet.has(hotspotQuery.toLowerCase()) &&
+    !isDailyBossLimitedEncounterCode(hotspotQuery)
+  ) {
+    const { data: hotspotEncounter } = await supabase
+      .from("combat_encounters")
+      .select("combat_step")
+      .eq("code", hotspotQuery)
+      .eq("is_active", true)
+      .in("zone_id", zoneCandidates.length > 0 ? zoneCandidates : [CAVE_DEPTHS_ZONE_CODE])
+      .maybeSingle();
+
+    const hotspotCombatStep =
+      typeof hotspotEncounter?.combat_step === "number" &&
+      Number.isFinite(hotspotEncounter.combat_step)
+        ? Math.max(0, Math.trunc(hotspotEncounter.combat_step))
+        : 0;
+
+    if (isStoryBossReplayBlocked(true, hotspotCombatStep, currentCombatStep)) {
+      initialStoryBossBlockedMessage = STORY_BOSS_ALREADY_DEFEATED_MESSAGE;
+    }
+  }
 
   const { data: worldEvents } = await supabase
     .from("global_world_event_log")
@@ -100,6 +169,12 @@ export default async function CaveDepthsPage({ searchParams }: CaveDepthsPagePro
           zoneCode={CAVE_DEPTHS_ZONE_CODE}
           initialHotspotId={hotspotQuery}
           depthsBridgeDialogCompleted={milestones?.depths_bridge_dialog === true}
+          pindalFound={pindalFoundMilestone?.is_completed === true}
+          storyBossEncounterCodes={storyBossEncounterCodes}
+          dailyBossDefeatedToday={dailyBossDefeatedToday}
+          initialDailyBossBlockedMessage={
+            initialDailyBossBlockedMessage ?? initialStoryBossBlockedMessage
+          }
         />
 
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">
