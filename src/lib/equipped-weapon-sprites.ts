@@ -20,9 +20,26 @@ function weaponItemCodeForFilename(itemCode: string | null | undefined): string 
     .replace(/^_|_$/g, "");
 }
 
-function publicAbsolutePath(publicUrlPath: string): string {
-  const segments = publicUrlPath.replace(/^\//, "").split("/").filter(Boolean);
-  return path.join(process.cwd(), "public", ...segments);
+const CHARACTERS_PUBLIC_DIR = path.join(
+  process.cwd(),
+  "public",
+  "img",
+  "resources",
+  "characters",
+);
+
+let fightSpriteFilenames: Set<string> | null = null;
+
+function getFightSpriteFilenames(): Set<string> {
+  if (fightSpriteFilenames) return fightSpriteFilenames;
+  try {
+    fightSpriteFilenames = new Set(
+      fs.readdirSync(CHARACTERS_PUBLIC_DIR).filter((name) => name.includes("_rpg_fight_")),
+    );
+  } catch {
+    fightSpriteFilenames = new Set();
+  }
+  return fightSpriteFilenames;
 }
 
 const LOG_WEAPON_SPRITES =
@@ -64,8 +81,8 @@ export function resolveEquippedWeaponSprites(
   }
 
   const fightUrl = `/img/resources/characters/pj_${slug}_rpg_fight_${code}.png`;
-  const fightAbsolute = publicAbsolutePath(fightUrl);
-  const useFight = fs.existsSync(fightAbsolute);
+  const fightFilename = `pj_${slug}_rpg_fight_${code}.png`;
+  const useFight = getFightSpriteFilenames().has(fightFilename);
   const chosen = useFight ? fightUrl : standingUrl;
   logWeaponSprites({
     phase: "resolve",
@@ -75,7 +92,7 @@ export function resolveEquippedWeaponSprites(
     rawItemCode: itemCode ?? null,
     codeNormalized: code,
     fightUrl,
-    fightAbsolutePath: fightAbsolute,
+    fightFilename,
     fightFileExists: useFight,
     standingUrl,
     active_combat_sprite: chosen,

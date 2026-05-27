@@ -13,6 +13,11 @@ import {
 } from "react";
 
 import { DailyBossBlockedModal } from "@/components/maps/daily-boss-blocked-modal";
+import { isDailyBossLimitedEncounterCode } from "@/lib/daily-boss-combat";
+import {
+  STORY_BOSS_ALREADY_DEFEATED_MESSAGE,
+  isStoryBossHotspotDefeated,
+} from "@/lib/story-boss-combat";
 
 const mapFont = Montserrat({
   subsets: ["latin"],
@@ -29,10 +34,14 @@ export type ExplorationHotspot = {
   description: string;
   /** Sin marcador visible; solo área clickeable con cursor pointer. */
   hidden?: boolean;
+  /** Jefe de historia: no repetible tras superar este `step` en la zona. */
+  isBoss?: boolean;
   /** Bloqueado siempre (no depende de `currentCombatStep`). */
   alwaysLocked?: boolean;
   /** Tooltip al pasar el mouse si `alwaysLocked` (por defecto: «Aún no disponible»). */
   lockedMessage?: string;
+  /** Sin área clickeable (p. ej. hito global ya completado). */
+  nonClickable?: boolean;
 };
 
 type ExplorationZoneMapProps = {
@@ -52,6 +61,8 @@ type ExplorationZoneMapProps = {
   getIrAllaBlockedMessage?: (hotspot: ExplorationHotspot) => string | null;
   /** Abre el modal al cargar (p. ej. redirect desde `/combate` con `boss_daily=blocked`). */
   initialDailyBossBlockedMessage?: string | null;
+  /** `combat_encounters.code` con `is_boss` en BD (hotspot `id` = code). */
+  storyBossEncounterCodes?: readonly string[];
 };
 
 export function ExplorationZoneMap({
@@ -65,17 +76,42 @@ export function ExplorationZoneMap({
   onHotspotClick,
   getIrAllaBlockedMessage,
   initialDailyBossBlockedMessage = null,
+  storyBossEncounterCodes = [],
 }: ExplorationZoneMapProps) {
   const router = useRouter();
   const [dailyBossBlockedModalMessage, setDailyBossBlockedModalMessage] = useState<string | null>(
     null,
   );
+  const storyBossCodes = useMemo(() => {
+    const set = new Set<string>();
+    for (const raw of storyBossEncounterCodes) {
+      if (typeof raw !== "string") continue;
+      const code = raw.trim().toLowerCase();
+      if (code.length > 0) set.add(code);
+    }
+    for (const spot of hotspots) {
+      if (spot.isBoss === true) set.add(spot.id.trim().toLowerCase());
+    }
+    return set;
+  }, [hotspots, storyBossEncounterCodes]);
+
   const visibleHotspots = useMemo(
     () => hotspots.filter((spot) => !spot.hidden),
     [hotspots],
   );
+  const isStoryBossCleared = (spot: ExplorationHotspot) => {
+    if (isDailyBossLimitedEncounterCode(spot.id)) return false;
+    return isStoryBossHotspotDefeated(spot.id, spot.step, currentCombatStep, {
+      isBoss: spot.isBoss,
+      storyBossEncounterCodes: storyBossCodes,
+    });
+  };
   const isHotspotUnlocked = (spot: ExplorationHotspot) =>
     !spot.alwaysLocked && spot.step <= currentCombatStep;
+  const resolveIrAllaBlockedMessage = (spot: ExplorationHotspot): string | null => {
+    if (isStoryBossCleared(spot)) return STORY_BOSS_ALREADY_DEFEATED_MESSAGE;
+    return getIrAllaBlockedMessage?.(spot)?.trim() || null;
+  };
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [mapNaturalSize, setMapNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [mapFrame, setMapFrame] = useState<{ left: number; top: number; width: number; height: number } | null>(
@@ -159,7 +195,7 @@ export function ExplorationZoneMap({
 
   const handleIrAlla = () => {
     if (!selectedHotspot) return;
-    const blocked = getIrAllaBlockedMessage?.(selectedHotspot);
+    const blocked = resolveIrAllaBlockedMessage(selectedHotspot);
     if (blocked) {
       setDailyBossBlockedModalMessage(blocked);
       return;
@@ -222,6 +258,8 @@ export function ExplorationZoneMap({
             }}
           />
           {hotspots.map((hotspot) => {
+            if (hotspot.nonClickable) return null;
+
             const isHidden = Boolean(hotspot.hidden);
             const isSelected = !isHidden && hotspot.id === selectedHotspot?.id;
             const isLocked = hotspot.alwaysLocked === true || hotspot.step > currentCombatStep;

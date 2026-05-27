@@ -8,9 +8,20 @@ import {
   type HerreriaRecipeInventoryItem,
 } from "@/components/herreria/herreria-completed-modal";
 import { HerreriaConstructionDialogue } from "@/components/herreria/herreria-construction-dialogue";
+import {
+  type ComponentInventoryRow,
+  type HerreriaRecipeItemRow,
+  type RecipeComponentRow,
+  recipeComponentEntries,
+  resolveCraftedCatalogItemIdFromRecipeRow,
+  resolveCraftedItemId,
+  resolveItemTypeCode,
+  resolveRecipeComponentItemType,
+} from "@/lib/herreria-craft-recipe";
 import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 import Link from "next/link";
+import { craftRecipe } from "./actions";
 
 const WOOD_ITEM_ID = "ea5b9601-8a7d-4270-b5d9-cf292d49945e";
 /** Mismo ítem que en mina abandonada (`abandoned-coal-mine/actions.ts`). */
@@ -75,33 +86,6 @@ type GlobalHerreriaRecipeRow = {
   recipe_level: number | null;
   max_level: number | null;
 };
-type HerreriaItemTypeJoinRow = { code: string | null } | Array<{ code: string | null }>;
-type HerreriaRecipeItemRow = {
-  id: string;
-  name: string | null;
-  description?: string | null;
-  quote_text?: string | null;
-  icon_path: string | null;
-  rarity_color: string | null;
-  equip_slot?: string | null;
-  item_types?: HerreriaItemTypeJoinRow | null;
-};
-
-function resolveItemTypeCode(
-  itemTypes: HerreriaItemTypeJoinRow | null | undefined,
-): string | null {
-  const join = Array.isArray(itemTypes) ? (itemTypes[0] ?? null) : itemTypes;
-  const code = typeof join?.code === "string" ? join.code.trim().toLowerCase() : "";
-  return code.length > 0 ? code : null;
-}
-type RecipeComponentRow = {
-  recipe_id: string | null;
-  recipe_level: number | null;
-  crafted_item: unknown;
-  /** Cantidad del ítem fabricado (stackables). */
-  quantity?: number | null;
-  [key: string]: unknown;
-};
 type CraftedWeaponInstanceRow = {
   id: number;
   item_id: string;
@@ -148,12 +132,6 @@ type CraftedItemRequirementRow = {
     | Array<{ name: string | null }>
     | null;
 };
-type ComponentInventoryRow = {
-  id?: number | null;
-  item_id: string | null;
-  quantity: number | null;
-};
-
 const uiFont = Montserrat({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
@@ -196,162 +174,6 @@ function resolveItemIconPath(iconPath: string | null | undefined) {
     return trimmedPath;
   }
   return `/${trimmedPath}`;
-}
-
-function resolveCraftedItemId(input: unknown): string | null {
-  if (typeof input === "string" && input.trim().length > 0) {
-    return input.trim();
-  }
-  if (Array.isArray(input)) {
-    for (const entry of input) {
-      const resolved = resolveCraftedItemId(entry);
-      if (resolved) return resolved;
-    }
-    return null;
-  }
-  if (input && typeof input === "object") {
-    const record = input as Record<string, unknown>;
-    const candidates = [record.id, record.item_id, record.itemId, record.crafted_item_id];
-    for (const candidate of candidates) {
-      const resolved = resolveCraftedItemId(candidate);
-      if (resolved) return resolved;
-    }
-  }
-  return null;
-}
-
-function resolveRecipeComponentItemId(input: unknown): string | null {
-  if (typeof input === "string" && input.trim().length > 0) {
-    return input.trim();
-  }
-  if (input && typeof input === "object") {
-    const record = input as Record<string, unknown>;
-    const candidates = [
-      record.component_item,
-      record.component_item_id,
-      record.component_id,
-      record.item_id,
-      record.item,
-      record.material_item,
-      record.material_item_id,
-      record.required_item,
-      record.required_item_id,
-      record.id,
-    ];
-    for (const candidate of candidates) {
-      const resolved = resolveRecipeComponentItemId(candidate);
-      if (resolved) return resolved;
-    }
-  }
-  return null;
-}
-
-function resolveRecipeComponentQuantity(input: unknown): number {
-  if (typeof input === "number" && Number.isFinite(input)) {
-    return Math.max(1, Math.trunc(input));
-  }
-  if (typeof input === "string") {
-    const parsed = Number(input);
-    return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : 1;
-  }
-  if (input && typeof input === "object") {
-    const record = input as Record<string, unknown>;
-    const candidates = [
-      record.qty,
-      record.amount,
-      record.required_quantity,
-      record.component_quantity,
-      record.count,
-    ];
-    for (const candidate of candidates) {
-      const resolved = resolveRecipeComponentQuantity(candidate);
-      if (resolved > 1) return resolved;
-    }
-  }
-  return 1;
-}
-
-/** `recipe_components.quantity`: unidades del ítem fabricado que se agregan al inventario. */
-function resolveRecipeCraftOutputQuantity(row: RecipeComponentRow): number {
-  const raw = row.quantity;
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    return Math.max(1, Math.trunc(raw));
-  }
-  if (typeof raw === "string") {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) return Math.max(1, Math.trunc(parsed));
-  }
-  return 1;
-}
-
-function recipeComponentEntries(row: RecipeComponentRow) {
-  const record = row as Record<string, unknown>;
-  const nestedComponents = record.components ?? record.componentes ?? record.required_components;
-
-  if (Array.isArray(nestedComponents)) {
-    return nestedComponents.flatMap((entry) => {
-      const itemId = resolveRecipeComponentItemId(entry);
-      if (!itemId) return [];
-      return [{ itemId, quantity: resolveRecipeComponentQuantity(entry) }];
-    });
-  }
-
-  const numberedComponents = Object.keys(record).flatMap((key) => {
-    const match = /^component_(\d+)$/.exec(key);
-    if (!match) return [];
-    const itemId = resolveRecipeComponentItemId(record[key]);
-    if (!itemId) return [];
-    return [
-      {
-        itemId,
-        quantity: resolveRecipeComponentQuantity(record[`quantity_${match[1]}`]),
-      },
-    ];
-  });
-  if (numberedComponents.length > 0) {
-    return numberedComponents;
-  }
-
-  const itemId = resolveRecipeComponentItemId(record);
-  if (!itemId) return [];
-  return [{ itemId, quantity: resolveRecipeComponentQuantity(record) }];
-}
-
-function recipeComponentItemType(row: RecipeComponentRow): "weapon" | "equipment" | null {
-  const record = row as Record<string, unknown>;
-  const rawCandidates: unknown[] = [
-    record.item_type,
-    record.crafted_item_type,
-    record.result_item_type,
-    record.output_item_type,
-  ];
-  const crafted = record.crafted_item;
-  if (crafted && typeof crafted === "object" && !Array.isArray(crafted)) {
-    const cr = crafted as Record<string, unknown>;
-    rawCandidates.push(cr.item_type, cr.itemType, cr.type);
-  }
-  for (const raw of rawCandidates) {
-    if (typeof raw !== "string") continue;
-    const normalized = raw.trim().toLowerCase();
-    if (normalized === "weapon" || normalized === "weapons") return "weapon";
-    if (
-      normalized === "equipment" ||
-      normalized === "armor" ||
-      normalized === "armour" ||
-      normalized === "gear"
-    ) {
-      return "equipment";
-    }
-  }
-  return null;
-}
-
-function randomIdFromRows(rows: Array<{ id: number | null }>) {
-  const ids = rows
-    .map((row) => row.id)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (ids.length === 0) return null;
-  return ids[Math.floor(Math.random() * ids.length)] ?? null;
 }
 
 function craftedDamageRange(min: number | null | undefined, max: number | null | undefined) {
@@ -599,7 +421,7 @@ export default async function HerreriaPage() {
   const craftedItemIds = Array.from(
     new Set(
       ((availableRecipeComponents ?? []) as RecipeComponentRow[])
-        .map((row) => resolveCraftedItemId(row.crafted_item))
+        .map((row) => resolveCraftedCatalogItemIdFromRecipeRow(row))
         .filter((value): value is string => Boolean(value)),
     ),
   );
@@ -753,7 +575,7 @@ export default async function HerreriaPage() {
           typeof item.rarity_color === "string" && item.rarity_color.trim().length > 0
             ? item.rarity_color.trim()
             : null,
-        isMaxLevel: maxLevel > 0 && recipeLevel >= maxLevel,
+        isMaxLevel: maxLevel > 0 && recipeLevel === maxLevel,
       },
     ];
   });
@@ -819,9 +641,13 @@ export default async function HerreriaPage() {
       typeof row.recipe_level === "number" && Number.isFinite(row.recipe_level)
         ? Math.max(0, Math.trunc(row.recipe_level))
         : 0;
+    const maxLevel =
+      typeof row.max_level === "number" && Number.isFinite(row.max_level)
+        ? Math.max(0, Math.trunc(row.max_level))
+        : 0;
     const matchingComponents =
       recipeComponentsByRecipeAndLevel.get(`${row.recipe_id}:${recipeLevel}`) ?? [];
-    const craftedItemId = resolveCraftedItemId(matchingComponents[0]?.crafted_item);
+    const craftedItemId = resolveCraftedCatalogItemIdFromRecipeRow(matchingComponents[0] ?? null);
     const craftedItem = craftedItemId ? craftedItemById.get(craftedItemId) : null;
     const displayItem = craftedItem ?? recipeItem;
     const weaponInstance = craftedItemId ? craftedWeaponByItemId.get(craftedItemId) : null;
@@ -853,12 +679,8 @@ export default async function HerreriaPage() {
     );
 
     const craftedItemTypeCode =
-      resolveItemTypeCode(craftedItem?.item_types) ??
-      (recipeComponentItemType(matchingComponents[0] ?? ({} as RecipeComponentRow)) === "weapon"
-        ? "weapon"
-        : recipeComponentItemType(matchingComponents[0] ?? ({} as RecipeComponentRow)) === "equipment"
-          ? "equipment"
-          : null);
+      resolveRecipeComponentItemType(matchingComponents[0] ?? null) ??
+      resolveItemTypeCode(craftedItem?.item_types);
 
     return [
       {
@@ -867,6 +689,7 @@ export default async function HerreriaPage() {
         craftedItemName: craftedItem?.name ?? recipeItem.name,
         craftedItemTypeCode,
         recipeLevel,
+        isMaxLevel: maxLevel > 0 && recipeLevel === maxLevel,
         iconPath: resolveItemIconPath(displayItem.icon_path),
         rarityColor:
           typeof displayItem.rarity_color === "string" && displayItem.rarity_color.trim().length > 0
@@ -996,271 +819,6 @@ export default async function HerreriaPage() {
       .delete()
       .eq("id", parsedInventoryId)
       .eq("profile_id", currentUser.id);
-  }
-
-  async function craftRecipe(recipeId: string, recipeLevel: number) {
-    "use server";
-
-    const safeRecipeId = typeof recipeId === "string" ? recipeId.trim() : "";
-    const parsedRecipeLevel = Math.max(0, Math.trunc(Number(recipeLevel) || 0));
-    if (!safeRecipeId || parsedRecipeLevel <= 0) {
-      return { ok: false };
-    }
-
-    const supabaseAction = await createClient();
-    const {
-      data: { user: currentUser },
-    } = await supabaseAction.auth.getUser();
-
-    if (!currentUser) {
-      redirect("/login");
-    }
-
-    const { data: globalRecipeRow } = await supabaseAction
-      .from("global_herreria")
-      .select("recipe_id, recipe_level")
-      .eq("recipe_id", safeRecipeId)
-      .maybeSingle();
-    const currentGlobalLevel =
-      typeof globalRecipeRow?.recipe_level === "number" && Number.isFinite(globalRecipeRow.recipe_level)
-        ? Math.max(0, Math.trunc(globalRecipeRow.recipe_level))
-        : 0;
-    if (currentGlobalLevel !== parsedRecipeLevel) {
-      return { ok: false };
-    }
-
-    const { data: recipeComponentData } = await supabaseAction
-      .from("recipe_components")
-      .select("*")
-      .eq("recipe_id", safeRecipeId)
-      .eq("recipe_level", parsedRecipeLevel)
-      .maybeSingle();
-    const recipeComponent = recipeComponentData as RecipeComponentRow | null;
-    const craftedItemId = recipeComponent ? resolveCraftedItemId(recipeComponent.crafted_item) : null;
-    const componentEntries = recipeComponent ? recipeComponentEntries(recipeComponent) : [];
-
-    if (!recipeComponent || !craftedItemId || componentEntries.length === 0) {
-      return { ok: false };
-    }
-
-    const requiredByItemId = new Map<string, number>();
-    for (const entry of componentEntries) {
-      requiredByItemId.set(entry.itemId, (requiredByItemId.get(entry.itemId) ?? 0) + entry.quantity);
-    }
-    const requiredItemIds = Array.from(requiredByItemId.keys());
-
-    const { data: inventoryRows } = await supabaseAction
-      .from("user_inventory")
-      .select("id, item_id, quantity")
-      .eq("profile_id", currentUser.id)
-      .in("item_id", requiredItemIds)
-      .order("id", { ascending: true });
-
-    const ownedByItemId = new Map<string, number>();
-    for (const row of (inventoryRows ?? []) as ComponentInventoryRow[]) {
-      if (typeof row.item_id !== "string" || row.item_id.trim().length === 0) continue;
-      const quantity =
-        typeof row.quantity === "number" && Number.isFinite(row.quantity)
-          ? Math.max(0, Math.trunc(row.quantity))
-          : 0;
-      ownedByItemId.set(row.item_id, (ownedByItemId.get(row.item_id) ?? 0) + quantity);
-    }
-
-    for (const [itemId, requiredQuantity] of requiredByItemId) {
-      if ((ownedByItemId.get(itemId) ?? 0) < requiredQuantity) {
-        return { ok: false };
-      }
-    }
-
-    for (const [itemId, requiredQuantity] of requiredByItemId) {
-      let pendingDiscount = requiredQuantity;
-      for (const row of (inventoryRows ?? []) as ComponentInventoryRow[]) {
-        if (pendingDiscount <= 0) break;
-        if (row.item_id !== itemId || typeof row.id !== "number") continue;
-        const rowQty =
-          typeof row.quantity === "number" && Number.isFinite(row.quantity)
-            ? Math.max(0, Math.trunc(row.quantity))
-            : 0;
-        if (rowQty <= 0) continue;
-        const deduct = Math.min(rowQty, pendingDiscount);
-        const nextQty = rowQty - deduct;
-        if (nextQty <= 0) {
-          await supabaseAction.from("user_inventory").delete().eq("id", row.id);
-        } else {
-          await supabaseAction
-            .from("user_inventory")
-            .update({ quantity: nextQty })
-            .eq("id", row.id);
-        }
-        pendingDiscount -= deduct;
-      }
-    }
-
-    let craftItemKind = recipeComponentItemType(recipeComponent);
-    if (craftItemKind == null) {
-      const { data: weaponProbe } = await supabaseAction
-        .from("weapon_instance")
-        .select("id")
-        .eq("item_id", craftedItemId)
-        .limit(1);
-      if ((weaponProbe ?? []).length > 0) {
-        craftItemKind = "weapon";
-      } else {
-        const { data: equipmentProbe } = await supabaseAction
-          .from("equipment_instances")
-          .select("id")
-          .eq("item_id", craftedItemId)
-          .limit(1);
-        if ((equipmentProbe ?? []).length > 0) {
-          craftItemKind = "equipment";
-        }
-      }
-    }
-
-    let weaponInstanceId: number | null = null;
-    let equipmentInstanceId: number | null = null;
-
-    if (craftItemKind === "weapon") {
-      const { data: weaponRows } = await supabaseAction
-        .from("weapon_instance")
-        .select("id")
-        .eq("item_id", craftedItemId);
-      weaponInstanceId = randomIdFromRows((weaponRows ?? []) as Array<{ id: number | null }>);
-    }
-
-    if (craftItemKind === "equipment") {
-      const { data: equipmentRows } = await supabaseAction
-        .from("equipment_instances")
-        .select("id")
-        .eq("item_id", craftedItemId);
-      equipmentInstanceId = randomIdFromRows((equipmentRows ?? []) as Array<{ id: number | null }>);
-    }
-
-    if (craftItemKind === "weapon" && weaponInstanceId == null) {
-      return { ok: false };
-    }
-
-    if (craftItemKind === "equipment" && equipmentInstanceId == null) {
-      return { ok: false };
-    }
-
-    const craftOutputQuantity = resolveRecipeCraftOutputQuantity(recipeComponent);
-
-    const { data: inventoryRowsForCraftCapacity } = await supabaseAction
-      .from("user_inventory")
-      .select("id")
-      .eq("profile_id", currentUser.id)
-      .gt("quantity", 0);
-    const { data: equippedRowsForCraftCapacity } = await supabaseAction
-      .from("user_equipment")
-      .select("inventory_id")
-      .eq("profile_id", currentUser.id);
-    const equippedCraftInventoryIds = new Set(
-      (equippedRowsForCraftCapacity ?? [])
-        .map((row) => row.inventory_id)
-        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
-    );
-    const unequippedCraftInventoryCount = (inventoryRowsForCraftCapacity ?? []).reduce(
-      (total, row) => {
-        const id = typeof row.id === "number" && Number.isFinite(row.id) ? Math.trunc(row.id) : null;
-        if (id == null || equippedCraftInventoryIds.has(id)) return total;
-        return total + 1;
-      },
-      0,
-    );
-
-    const needsNewInventorySlot = async (): Promise<boolean> => {
-      const { data: existingStackRows } = await supabaseAction
-        .from("user_inventory")
-        .select("id")
-        .eq("profile_id", currentUser.id)
-        .eq("item_id", craftedItemId)
-        .is("weapon_instance_id", null)
-        .is("equipment_instance_id", null)
-        .gt("quantity", 0)
-        .limit(1);
-      return (existingStackRows ?? []).length === 0;
-    };
-
-    if (weaponInstanceId != null || equipmentInstanceId != null) {
-      if (unequippedCraftInventoryCount >= 24) {
-        return { ok: false };
-      }
-
-      const insertPayload: {
-        profile_id: string;
-        quantity: number;
-        weapon_instance_id?: number;
-        equipment_instance_id?: number;
-      } = {
-        profile_id: currentUser.id,
-        quantity: 1,
-      };
-
-      if (weaponInstanceId != null) {
-        insertPayload.weapon_instance_id = weaponInstanceId;
-      } else if (equipmentInstanceId != null) {
-        insertPayload.equipment_instance_id = equipmentInstanceId;
-      }
-
-      const { error: insertInventoryError } = await supabaseAction
-        .from("user_inventory")
-        .insert(insertPayload);
-
-      if (insertInventoryError) {
-        return { ok: false };
-      }
-
-      return { ok: true };
-    }
-
-    const requiresNewSlot = await needsNewInventorySlot();
-    if (requiresNewSlot && unequippedCraftInventoryCount >= 24) {
-      return { ok: false };
-    }
-
-    const { data: existingStackRows, error: existingStackError } = await supabaseAction
-      .from("user_inventory")
-      .select("id, quantity")
-      .eq("profile_id", currentUser.id)
-      .eq("item_id", craftedItemId)
-      .is("weapon_instance_id", null)
-      .is("equipment_instance_id", null)
-      .order("id", { ascending: true })
-      .limit(1);
-
-    if (existingStackError) {
-      return { ok: false };
-    }
-
-    const existingStack = (existingStackRows ?? [])[0] as ComponentInventoryRow | undefined;
-    if (existingStack && typeof existingStack.id === "number") {
-      const currentQty =
-        typeof existingStack.quantity === "number" && Number.isFinite(existingStack.quantity)
-          ? Math.max(0, Math.trunc(existingStack.quantity))
-          : 0;
-      const { error: updateInventoryError } = await supabaseAction
-        .from("user_inventory")
-        .update({ quantity: currentQty + craftOutputQuantity })
-        .eq("id", existingStack.id)
-        .eq("profile_id", currentUser.id);
-
-      if (updateInventoryError) {
-        return { ok: false };
-      }
-    } else {
-      const { error: insertInventoryError } = await supabaseAction.from("user_inventory").insert({
-        profile_id: currentUser.id,
-        item_id: craftedItemId,
-        quantity: craftOutputQuantity,
-      });
-
-      if (insertInventoryError) {
-        return { ok: false };
-      }
-    }
-
-    return { ok: true };
   }
 
   async function contributeWood(amount: number) {

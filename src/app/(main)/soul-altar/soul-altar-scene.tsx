@@ -25,7 +25,7 @@ export function SoulAltarScene({ playerName, onComplete }: SoulAltarSceneProps) 
         width={820}
         height={820}
         priority
-        className="pointer-events-none absolute bottom-[18%] left-1/2 z-30 h-auto w-[170px]  -translate-x-1/2 translate-y-28 object-contain drop-shadow-[0_18px_32px_rgba(0,0,0,0.65)] sm:w-[240px] lg:w-[620px]"
+        className="pointer-events-none absolute bottom-[18%] left-1/2 z-30 h-auto w-[170px] -translate-x-1/2 translate-y-28 object-contain drop-shadow-[0_18px_32px_rgba(0,0,0,0.65)] sm:w-[240px] lg:w-[760px]"
       />
       <Image
         src="/img/resources/characters/pj_leo_rpg_standing.png"

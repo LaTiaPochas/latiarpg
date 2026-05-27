@@ -7,6 +7,11 @@ import { revalidatePath } from "next/cache";
 
 import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
 import { resolveEquippedWeaponSprites } from "@/lib/equipped-weapon-sprites";
+import {
+  REBIRTH_SOUL_FRAGMENT_COST,
+  REBIRTH_SOUL_GOLD_COST,
+  RECONSTRUCT_SOUL_FRAGMENT_COST,
+} from "@/lib/soul-altar-costs";
 import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 import { SoulAltarGloballyCompletedPanel } from "./soul-altar-globally-completed-panel";
@@ -27,9 +32,6 @@ const SOUL_ALTAR_MATERIAL_TITLES = {
 } as const;
 const SOUL_ALTAR_COMPLETED_TITLE = "soul_altar_completed";
 const INVENTORY_BAG_SLOT_LIMIT = 24;
-const RECONSTRUCT_SOUL_GOLD_COST = 50;
-const RECONSTRUCT_SOUL_FRAGMENT_COST = 1;
-const REBIRTH_SOUL_FRAGMENT_COST = 10;
 
 type SoulAltarMaterialKind = keyof typeof SOUL_ALTAR_MATERIAL_TITLES;
 
@@ -492,18 +494,11 @@ export default async function SoulAltarPage() {
       );
     }
 
-    const goldItemIdResolved = await resolveSoulAltarMaterialItemId("gold");
     const soulItemIdResolved = await resolveSoulAltarMaterialItemId("souls");
-    if (!goldItemIdResolved || !soulItemIdResolved) {
+    if (!soulItemIdResolved) {
       throw new Error("No se pudieron resolver los ítems de costo.");
     }
 
-    const { data: goldInvRows } = await supabaseAction
-      .from("user_inventory")
-      .select("id, quantity")
-      .eq("profile_id", currentUser.id)
-      .eq("item_id", goldItemIdResolved)
-      .order("id", { ascending: true });
     const { data: soulInvRows } = await supabaseAction
       .from("user_inventory")
       .select("id, quantity")
@@ -511,31 +506,12 @@ export default async function SoulAltarPage() {
       .eq("item_id", soulItemIdResolved)
       .order("id", { ascending: true });
 
-    const goldAvailable = (goldInvRows ?? []).reduce(
-      (total, row) => total + Math.max(0, Math.trunc(num(row.quantity, 0))),
-      0,
-    );
     const soulAvailable = (soulInvRows ?? []).reduce(
       (total, row) => total + Math.max(0, Math.trunc(num(row.quantity, 0))),
       0,
     );
-    if (goldAvailable < RECONSTRUCT_SOUL_GOLD_COST || soulAvailable < RECONSTRUCT_SOUL_FRAGMENT_COST) {
-      throw new Error("No tenés suficientes materiales para pagar el coste.");
-    }
-
-    let pendingGold = RECONSTRUCT_SOUL_GOLD_COST;
-    for (const row of goldInvRows ?? []) {
-      if (pendingGold <= 0) break;
-      const rowQty = Math.max(0, Math.trunc(num(row.quantity, 0)));
-      if (rowQty <= 0) continue;
-      const deduct = Math.min(rowQty, pendingGold);
-      const nextQty = rowQty - deduct;
-      if (nextQty <= 0) {
-        await supabaseAction.from("user_inventory").delete().eq("id", row.id);
-      } else {
-        await supabaseAction.from("user_inventory").update({ quantity: nextQty }).eq("id", row.id);
-      }
-      pendingGold -= deduct;
+    if (soulAvailable < RECONSTRUCT_SOUL_FRAGMENT_COST) {
+      throw new Error("No tenés suficientes Fragmentos de Alma para la reconstrucción.");
     }
 
     let pendingSoul = RECONSTRUCT_SOUL_FRAGMENT_COST;
@@ -694,11 +670,18 @@ export default async function SoulAltarPage() {
       );
     }
 
+    const goldItemIdResolved = await resolveSoulAltarMaterialItemId("gold");
     const soulItemIdResolved = await resolveSoulAltarMaterialItemId("souls");
-    if (!soulItemIdResolved) {
+    if (!goldItemIdResolved || !soulItemIdResolved) {
       throw new Error("No se pudieron resolver los ítems de costo.");
     }
 
+    const { data: goldInvRows } = await supabaseAction
+      .from("user_inventory")
+      .select("id, quantity")
+      .eq("profile_id", currentUser.id)
+      .eq("item_id", goldItemIdResolved)
+      .order("id", { ascending: true });
     const { data: soulInvRows } = await supabaseAction
       .from("user_inventory")
       .select("id, quantity")
@@ -706,12 +689,34 @@ export default async function SoulAltarPage() {
       .eq("item_id", soulItemIdResolved)
       .order("id", { ascending: true });
 
+    const goldAvailable = (goldInvRows ?? []).reduce(
+      (total, row) => total + Math.max(0, Math.trunc(num(row.quantity, 0))),
+      0,
+    );
     const soulAvailable = (soulInvRows ?? []).reduce(
       (total, row) => total + Math.max(0, Math.trunc(num(row.quantity, 0))),
       0,
     );
-    if (soulAvailable < REBIRTH_SOUL_FRAGMENT_COST) {
-      throw new Error("No tenés suficientes Fragmentos de Alma para el Renacimiento.");
+    if (
+      goldAvailable < REBIRTH_SOUL_GOLD_COST ||
+      soulAvailable < REBIRTH_SOUL_FRAGMENT_COST
+    ) {
+      throw new Error("No tenés suficientes materiales para pagar el coste del Renacimiento.");
+    }
+
+    let pendingGold = REBIRTH_SOUL_GOLD_COST;
+    for (const row of goldInvRows ?? []) {
+      if (pendingGold <= 0) break;
+      const rowQty = Math.max(0, Math.trunc(num(row.quantity, 0)));
+      if (rowQty <= 0) continue;
+      const deduct = Math.min(rowQty, pendingGold);
+      const nextQty = rowQty - deduct;
+      if (nextQty <= 0) {
+        await supabaseAction.from("user_inventory").delete().eq("id", row.id);
+      } else {
+        await supabaseAction.from("user_inventory").update({ quantity: nextQty }).eq("id", row.id);
+      }
+      pendingGold -= deduct;
     }
 
     let pendingSoul = REBIRTH_SOUL_FRAGMENT_COST;

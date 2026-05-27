@@ -24,6 +24,7 @@ export type HerreriaAvailableRecipeItem = {
   /** `items.item_types.code` del ítem fabricado (p. ej. `consumable`, `equipment`, `weapon`). */
   craftedItemTypeCode: string | null;
   recipeLevel: number;
+  isMaxLevel: boolean;
   iconPath: string;
   rarityColor: string | null;
   craftedTooltip: {
@@ -54,7 +55,11 @@ type HerreriaCompletedModalProps = {
   availableRecipes: HerreriaAvailableRecipeItem[];
   hasInventorySpace: boolean;
   onGiveRecipe: (inventoryId: number) => Promise<void>;
-  onCraftRecipe: (recipeId: string, recipeLevel: number) => Promise<{ ok: boolean }>;
+  onCraftRecipe: (
+    recipeId: string,
+    recipeLevel: number,
+    craftCount?: number,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   className?: string;
   actionButtonClassName?: string;
   tooltipClassName?: string;
@@ -70,14 +75,26 @@ const CRAFT_CATEGORY_LABELS: Record<HerreriaCraftCategory, string> = {
   other: "Otros",
 };
 
+/** Máximo de crafts según el material más limitante (p. ej. 4 madera / 1 por craft → 4). */
+function maxCraftableUnits(components: HerreriaAvailableRecipeItem["components"]): number {
+  if (components.length === 0) return 0;
+  let max = Number.POSITIVE_INFINITY;
+  for (const component of components) {
+    const perCraft = Math.max(1, Math.trunc(component.quantity));
+    const batches = Math.floor(Math.max(0, Math.trunc(component.ownedQuantity)) / perCraft);
+    max = Math.min(max, batches);
+  }
+  return Number.isFinite(max) && max > 0 ? max : 0;
+}
+
 function recipeMatchesCraftCategory(
   recipe: HerreriaAvailableRecipeItem,
   category: HerreriaCraftCategory,
 ): boolean {
   const code = (recipe.craftedItemTypeCode ?? "").trim().toLowerCase();
   if (category === "consumable") return code === "consumable";
-  if (category === "equipment") return code === "equipment";
-  return code !== "consumable" && code !== "equipment";
+  if (category === "equipment") return code === "equipment" || code === "weapon";
+  return code !== "consumable" && code !== "equipment" && code !== "weapon";
 }
 
 type RecipeTooltipState = {
@@ -242,6 +259,10 @@ export function HerreriaCompletedModal({
   const [usesHoverTooltips, setUsesHoverTooltips] = useState(false);
   const [craftProgressVisible, setCraftProgressVisible] = useState(false);
   const [craftProgress, setCraftProgress] = useState(0);
+  const [craftQuantityPickerVisible, setCraftQuantityPickerVisible] = useState(false);
+  const [craftQuantity, setCraftQuantity] = useState(1);
+  const [craftQuantityInput, setCraftQuantityInput] = useState("1");
+  const [craftErrorMessage, setCraftErrorMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isCraftPending, startCraftTransition] = useTransition();
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -265,6 +286,65 @@ export function HerreriaCompletedModal({
   const craftDisabledTooltip = !hasInventorySpace
     ? "Liberá espacio en el inventario para poder craftear"
     : null;
+  const isConsumableCraft =
+    (selectedAvailableRecipe?.craftedItemTypeCode ?? "").trim().toLowerCase() === "consumable";
+  const maxCraftQuantity = selectedAvailableRecipe
+    ? maxCraftableUnits(selectedAvailableRecipe.components)
+    : 0;
+
+  const clampCraftQuantity = (value: number) =>
+    Math.max(1, Math.min(maxCraftQuantity || 1, Math.trunc(value)));
+
+  const commitCraftQuantityInput = (raw?: string): number => {
+    const parsed = Math.trunc(Number((raw ?? craftQuantityInput).replace(/\D/g, "")));
+    const clamped =
+      Number.isFinite(parsed) && parsed >= 1 ? clampCraftQuantity(parsed) : 1;
+    setCraftQuantity(clamped);
+    setCraftQuantityInput(String(clamped));
+    return clamped;
+  };
+
+  const setCraftQuantityBoth = (value: number) => {
+    const clamped = clampCraftQuantity(value);
+    setCraftQuantity(clamped);
+    setCraftQuantityInput(String(clamped));
+    return clamped;
+  };
+
+  const runCraft = (count: number) => {
+    if (!selectedAvailableRecipe || !canCraftSelectedRecipe) return;
+    const safeCount = Math.max(1, Math.min(Math.trunc(count), maxCraftQuantity || 1));
+    setCraftQuantityPickerVisible(false);
+    setCraftErrorMessage(null);
+    setCraftProgressVisible(true);
+    setCraftProgress(0);
+    startCraftTransition(async () => {
+      const result = await onCraftRecipe(
+        selectedAvailableRecipe.recipeId,
+        selectedAvailableRecipe.recipeLevel,
+        safeCount,
+      );
+      if (!result.ok) {
+        setCraftProgressVisible(false);
+        setCraftProgress(0);
+        setCraftErrorMessage(result.error);
+        return;
+      }
+      setActiveTooltip(null);
+      setCraftProgress(100);
+      window.setTimeout(() => {
+        setCraftProgressVisible(false);
+        setCraftProgress(0);
+        setCraftQuantity(1);
+        setCraftQuantityInput("1");
+        setSelectedAvailableRecipeId(null);
+        setSelectedRecipeId(null);
+        setCraftCategory(null);
+        setMode("options");
+        router.refresh();
+      }, 260);
+    });
+  };
 
   useEffect(() => {
     const hoverQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
@@ -287,6 +367,13 @@ export function HerreriaCompletedModal({
     document.addEventListener("pointerdown", closeMobileTooltip);
     return () => document.removeEventListener("pointerdown", closeMobileTooltip);
   }, [activeTooltip, mode, usesHoverTooltips]);
+
+  useEffect(() => {
+    if (!craftQuantityPickerVisible || maxCraftQuantity < 1) return;
+    setCraftQuantityBoth(
+      Math.min(Math.max(1, craftQuantity), maxCraftQuantity),
+    );
+  }, [craftQuantityPickerVisible, maxCraftQuantity]);
 
   useEffect(() => {
     if (!craftProgressVisible || craftProgress >= 90) return;
@@ -514,8 +601,14 @@ export function HerreriaCompletedModal({
                         quality={75}
                         className="h-auto w-auto max-h-full max-w-full object-contain p-1.5"
                       />
-                      <span className="absolute bottom-1 right-1 rounded-full border border-amber-300/70 bg-gradient-to-b from-amber-600 to-amber-900 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-50 shadow-[0_0_8px_rgba(251,191,36,0.45)]">
-                        Lv. {recipe.recipeLevel}
+                      <span
+                        className={
+                          recipe.isMaxLevel
+                            ? "absolute bottom-1 right-1 rounded-full border border-amber-300/70 bg-gradient-to-b from-amber-600 to-amber-900 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-amber-50 shadow-[0_0_2px_rgba(251,191,36,0.75)]"
+                            : "absolute bottom-1 right-1 rounded-full border border-sky-300/70 bg-gradient-to-b from-slate-500 via-sky-700 to-slate-900 px-1.5 py-0.5 text-[8px] font-black tracking-wide text-slate-100 shadow-[0_0_8px_rgba(56,189,248,0.35)]"
+                        }
+                      >
+                        {recipe.isMaxLevel ? "MAX" : `Lv. ${recipe.recipeLevel}`}
                       </span>
                     </button>
                   </div>
@@ -622,6 +715,9 @@ export function HerreriaCompletedModal({
                 Esta receta no tiene componentes cargados.
               </p>
             )}
+            {craftErrorMessage ? (
+              <p className="mt-4 text-sm font-semibold text-red-800">{craftErrorMessage}</p>
+            ) : null}
             <span
               className="inline-block"
               onMouseEnter={(event) => {
@@ -661,30 +757,12 @@ export function HerreriaCompletedModal({
                 disabled={!canCraftSelectedRecipe || isCraftPending}
                 onClick={() => {
                   if (!selectedAvailableRecipe || !canCraftSelectedRecipe) return;
-                  setCraftProgressVisible(true);
-                  setCraftProgress(0);
-                  startCraftTransition(async () => {
-                    const result = await onCraftRecipe(
-                      selectedAvailableRecipe.recipeId,
-                      selectedAvailableRecipe.recipeLevel,
-                    );
-                    if (!result.ok) {
-                      setCraftProgressVisible(false);
-                      setCraftProgress(0);
-                      return;
-                    }
-                    setActiveTooltip(null);
-                    setCraftProgress(100);
-                    window.setTimeout(() => {
-                      setCraftProgressVisible(false);
-                      setCraftProgress(0);
-                      setSelectedAvailableRecipeId(null);
-                      setSelectedRecipeId(null);
-                      setCraftCategory(null);
-                      setMode("options");
-                      router.refresh();
-                    }, 260);
-                  });
+                  if (isConsumableCraft && maxCraftQuantity > 0) {
+                    setCraftQuantityBoth(1);
+                    setCraftQuantityPickerVisible(true);
+                    return;
+                  }
+                  runCraft(1);
                 }}
                 className={`mt-6 cursor-pointer rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-6 py-2.5 text-xs font-bold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] disabled:cursor-not-allowed disabled:border-slate-500/70 disabled:bg-slate-500/60 disabled:text-slate-200/80 ${actionButtonClassName}`}
               >
@@ -696,6 +774,7 @@ export function HerreriaCompletedModal({
                 type="button"
                 onClick={() => {
                   setActiveTooltip(null);
+                  setCraftErrorMessage(null);
                   setMode("available-recipes");
                 }}
                 className={`inline-flex cursor-pointer items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-900 transition hover:text-amber-800 ${uiClassName}`}
@@ -840,6 +919,104 @@ export function HerreriaCompletedModal({
               ) : (
                 activeTooltip.name
               )}
+            </div>,
+            document.body,
+          )
+        : null}
+      {craftQuantityPickerVisible && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 px-4">
+              <div
+                className={`w-full max-w-sm rounded-xl border border-[#9f8352]/80 bg-[#ddccaa] p-5 text-center shadow-[0_12px_40px_rgba(0,0,0,0.45)] ${uiClassName}`}
+                role="dialog"
+                aria-labelledby="herreria-craft-quantity-title"
+                aria-modal="true"
+              >
+                <p
+                  id="herreria-craft-quantity-title"
+                  className="text-sm font-bold leading-relaxed text-slate-900"
+                >
+                  ¿Cuántas unidades querés craftear?
+                </p>
+                <p className="mt-1 text-xs font-semibold text-slate-700">
+                  Máximo {maxCraftQuantity} según tus materiales
+                </p>
+                <div className="mx-auto mt-5 flex max-w-[12rem] items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    disabled={craftQuantity <= 1 || isCraftPending}
+                    onClick={() => setCraftQuantityBoth(craftQuantity - 1)}
+                    className={`flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] text-lg font-bold text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] disabled:cursor-not-allowed disabled:border-slate-500/70 disabled:bg-slate-500/60 disabled:text-slate-200/80 ${actionButtonClassName}`}
+                    aria-label="Menos unidades"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={isCraftPending}
+                    value={craftQuantityInput}
+                    onChange={(event) => {
+                      const digitsOnly = event.target.value.replace(/\D/g, "");
+                      if (!digitsOnly) {
+                        setCraftQuantityInput("");
+                        return;
+                      }
+                      const parsed = Math.trunc(Number(digitsOnly));
+                      if (!Number.isFinite(parsed) || parsed < 1) return;
+                      const clamped = clampCraftQuantity(parsed);
+                      setCraftQuantity(clamped);
+                      setCraftQuantityInput(String(clamped));
+                    }}
+                    onBlur={() => {
+                      commitCraftQuantityInput();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      const count = commitCraftQuantityInput();
+                      runCraft(count);
+                    }}
+                    className={`h-10 w-20 rounded-lg border-2 border-amber-900/60 bg-[#fdfbf7]/95 text-center text-2xl font-black tabular-nums text-amber-950 shadow-inner outline-none focus:border-amber-700 focus:ring-2 focus:ring-amber-600/40 disabled:cursor-not-allowed disabled:opacity-60 ${uiClassName}`}
+                    aria-label="Cantidad a craftear"
+                    aria-valuemin={1}
+                    aria-valuemax={maxCraftQuantity}
+                    aria-valuenow={craftQuantity}
+                  />
+                  <button
+                    type="button"
+                    disabled={craftQuantity >= maxCraftQuantity || isCraftPending}
+                    onClick={() => setCraftQuantityBoth(craftQuantity + 1)}
+                    className={`flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] text-lg font-bold text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] disabled:cursor-not-allowed disabled:border-slate-500/70 disabled:bg-slate-500/60 disabled:text-slate-200/80 ${actionButtonClassName}`}
+                    aria-label="Más unidades"
+                  >
+                    +
+                  </button>
+                </div>
+                <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                  <button
+                    type="button"
+                    disabled={isCraftPending || maxCraftQuantity < 1}
+                    onClick={() => runCraft(commitCraftQuantityInput())}
+                    className={`cursor-pointer rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] disabled:cursor-not-allowed disabled:border-slate-500/70 disabled:bg-slate-500/60 disabled:text-slate-200/80 ${actionButtonClassName}`}
+                  >
+                    Craftear ×{craftQuantity}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isCraftPending}
+                    onClick={() => {
+                      setCraftQuantityPickerVisible(false);
+                      setCraftQuantityBoth(1);
+                    }}
+                    className={`cursor-pointer rounded-lg border border-slate-500/80 bg-slate-600 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-100 shadow-sm transition-colors hover:bg-slate-500 active:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 ${actionButtonClassName}`}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
             </div>,
             document.body,
           )

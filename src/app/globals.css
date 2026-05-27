@@ -142,3 +142,22 @@ body {
     scrollbar-color: #c89a4a transparent;
   }
 }
+
+/* Meloni stand: selección de fila (evita clases condicionales que Tailwind v4 no siempre genera). */
+.meloni-trade-row {
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgb(159 131 82 / 0.55);
+  background-color: rgb(216 199 162 / 0.8);
+}
+
+.meloni-trade-row:hover {
+  border-color: rgb(138 112 72 / 0.8);
+  background-color: rgb(224 208 176 / 0.9);
+}
+
+.meloni-trade-row[data-selected="true"] {
+  border-color: rgb(138, 80, 50);
+  border-width: 3px;
+  background-color: rgb(196 180 142);
+}
