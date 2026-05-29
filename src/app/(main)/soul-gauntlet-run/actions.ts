@@ -15,7 +15,6 @@ import {
   serializeGrantedRewardsSnapshot,
   type SoulGauntletRewardTier,
 } from "@/lib/soul-gauntlet-rewards";
-import type { createClient } from "@/lib/supabase/server";
 import {
   endActiveSoulGauntletRun,
   gauntletLobbyResultPath,
