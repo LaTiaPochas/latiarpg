@@ -14,7 +14,8 @@ import {
   useTransition,
 } from "react";
 
-import { finalizeGauntletVictory } from "@/app/(main)/soul-gauntlet-run/actions";
+import { finalizeGauntletDeath, finalizeGauntletVictory } from "@/app/(main)/soul-gauntlet-run/actions";
+import { SOUL_GAUNTLET_MAX_FLOOR } from "@/lib/soul-gauntlet";
 
 import {
   abilityTooltipStatGetterFromCombat,
@@ -2344,6 +2345,7 @@ export function CombatEncounterShell({
 }: CombatEncounterShellProps) {
   const router = useRouter();
   const [isGauntletVictoryAdvancing, startGauntletVictoryAdvance] = useTransition();
+  const [isGauntletDefeatAdvancing, startGauntletDefeatAdvance] = useTransition();
   const combatDebugRef = useRef<CombatDebugLogger>(() => {});
   combatDebugRef.current = createCombatDebugLogger(
     isCombatDebugEnabled(combatDebugEnabledProp),
@@ -2920,6 +2922,8 @@ export function CombatEncounterShell({
     isGauntletCombat && gauntletVictoryHref ? gauntletVictoryHref : escapeHref;
   const defeatFinishHref =
     isGauntletCombat && gauntletDefeatHref ? gauntletDefeatHref : "/";
+  const isGauntletFinalFloor =
+    isGauntletCombat && Math.max(1, Math.trunc(gauntletFloor)) >= SOUL_GAUNTLET_MAX_FLOOR;
   const handleGauntletVictoryContinue = useCallback(() => {
     const safeRunId =
       typeof gauntletRunId === "string" && gauntletRunId.trim().length > 0
@@ -2946,6 +2950,21 @@ export function CombatEncounterShell({
     router,
     victoryFinishHref,
   ]);
+
+  const handleGauntletDefeatContinue = useCallback(() => {
+    const safeRunId =
+      typeof gauntletRunId === "string" && gauntletRunId.trim().length > 0
+        ? gauntletRunId.trim()
+        : null;
+    const safeFloor = Math.max(1, Math.trunc(gauntletFloor));
+    if (!safeRunId) {
+      router.push(defeatFinishHref);
+      return;
+    }
+    startGauntletDefeatAdvance(() => {
+      void finalizeGauntletDeath(safeRunId, safeFloor);
+    });
+  }, [defeatFinishHref, gauntletFloor, gauntletRunId, router]);
   const recordPlayerDamageDealt = (amount: number) => {
     const safe = Math.max(0, Math.trunc(amount));
     if (safe <= 0) return;
@@ -6735,16 +6754,17 @@ export function CombatEncounterShell({
               ) : null}
               <button
                 type="button"
+                disabled={isGauntletCombat && isGauntletDefeatAdvancing}
                 onClick={() => {
                   if (isGauntletCombat) {
-                    router.push(defeatFinishHref);
+                    handleGauntletDefeatContinue();
                     return;
                   }
                   setIsDefeatPenaltyOpen(true);
                 }}
-                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 sm:mt-6`}
+                className={`${menuFont.className} mx-auto mt-5 block w-full max-w-sm cursor-pointer rounded-md border border-red-600/90 bg-red-800/90 px-5 py-2.5 text-center text-sm font-semibold uppercase tracking-[0.12em] text-red-50 shadow-[0_6px_20px_rgba(0,0,0,0.4)] transition hover:bg-red-700/95 disabled:cursor-not-allowed disabled:opacity-60 sm:mt-6`}
               >
-                Continuar
+                {isGauntletCombat && isGauntletDefeatAdvancing ? "Guardando..." : "Continuar"}
               </button>
             </div>
           ) : (
@@ -6834,12 +6854,14 @@ export function CombatEncounterShell({
                 </p>
                 <p className="relative mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-100/90">
                   {isGauntletCombat
-                    ? `Has superado el piso ${Math.max(1, Math.trunc(gauntletFloor))}`
+                    ? isGauntletFinalFloor
+                      ? "¡Completaste el Soul Pit Gauntlet!"
+                      : `Has superado el piso ${Math.max(1, Math.trunc(gauntletFloor))}`
                     : "El enemigo ha sido derrotado"}
                 </p>
                 <div className="relative mx-auto mt-3 h-px w-2/3 bg-gradient-to-r from-transparent via-emerald-200/70 to-transparent" />
               </div>
-              {isGauntletCombat ? (
+              {isGauntletCombat && !isGauntletFinalFloor ? (
                 <div
                   className={`${menuFont.className} mt-4 rounded-xl border border-amber-700/60 bg-[#1a100c]/95 p-8 shadow-[0_10px_32px_rgba(0,0,0,0.45)] sm:p-5`}
                 >
@@ -6922,6 +6944,13 @@ export function CombatEncounterShell({
                   )}
                 </div>
               ) : null}
+              {isGauntletCombat && isGauntletFinalFloor ? (
+                <p
+                  className={`${menuFont.className} mx-auto mt-5 max-w-sm text-center text-xs font-semibold uppercase tracking-[0.12em] text-amber-200/90`}
+                >
+                  Al continuar recibirás la recompensa del piso {SOUL_GAUNTLET_MAX_FLOOR}.
+                </p>
+              ) : null}
               <button
                 type="button"
                 disabled={isGauntletCombat && isGauntletVictoryAdvancing}
@@ -6937,7 +6966,9 @@ export function CombatEncounterShell({
                 {isGauntletCombat && isGauntletVictoryAdvancing
                   ? "Avanzando…"
                   : isGauntletCombat
-                    ? "Siguiente piso"
+                    ? isGauntletFinalFloor
+                      ? "Reclamar recompensa"
+                      : "Siguiente piso"
                     : "Continuar"}
               </button>
             </div>

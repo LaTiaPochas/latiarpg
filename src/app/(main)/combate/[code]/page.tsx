@@ -41,6 +41,7 @@ import { isStoryBossReplayBlocked } from "@/lib/story-boss-combat";
 import {
   SOUL_GAUNTLET_COMBAT_MODE,
   SOUL_GAUNTLET_LOBBY_PATH,
+  SOUL_GAUNTLET_MAX_FLOOR,
   SOUL_GAUNTLET_RUN_PATH,
   SOUL_GAUNTLET_ZONE_CODE,
   buildSoulGauntletCombatPath,
@@ -48,8 +49,6 @@ import {
 } from "@/lib/soul-gauntlet";
 import {
   applyGauntletScalingToEnemies,
-  endActiveSoulGauntletRun,
-  gauntletLobbyResultPath,
   getActiveSoulGauntletRun,
 } from "@/lib/soul-gauntlet-run";
 
@@ -1014,7 +1013,7 @@ export default async function CombatEncounterPage({
 
   let activeGauntletRun: Awaited<ReturnType<typeof getActiveSoulGauntletRun>> = null;
   if (isGauntletCombat) {
-    if (!gauntletRunId || gauntletFloor <= 0) {
+    if (!gauntletRunId || gauntletFloor <= 0 || gauntletFloor > SOUL_GAUNTLET_MAX_FLOOR) {
       redirect(SOUL_GAUNTLET_LOBBY_PATH);
     }
     activeGauntletRun = await getActiveSoulGauntletRun(supabase, user.id);
@@ -2330,8 +2329,9 @@ export default async function CombatEncounterPage({
     if (!didWin) {
       const RELAXING_WATER_ITEM_ID = "ecd74ed8-b2de-4bb9-b109-3fd4f27e8955";
       await persistCharacterVitals();
+      // Gauntlet: la run se cierra y las recompensas se otorgan en `finalizeGauntletDeath`
+      // al pulsar Continuar (no aquí), para poder validar piso/tier y mostrar el modal.
       if (isGauntletCombat && gauntletRunId) {
-        await endActiveSoulGauntletRun(supabaseAction, actionUser.id, "death");
         return;
       }
       if (defeatLostItems.length > 0) {
@@ -2807,10 +2807,7 @@ export default async function CombatEncounterPage({
     }
   }
 
-  const gauntletDefeatHref =
-    isGauntletCombat && activeGauntletRun
-      ? gauntletLobbyResultPath(activeGauntletRun.max_floor_reached)
-      : SOUL_GAUNTLET_LOBBY_PATH;
+  const gauntletDefeatHref = SOUL_GAUNTLET_LOBBY_PATH;
 
   const combatShellProps = {
       encounterName: String(encounter.name ?? code),

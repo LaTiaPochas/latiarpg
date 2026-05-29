@@ -179,7 +179,7 @@ const STORY_SCENES: StoryScene[] = [
   },
   {
     speaker: "player",
-    text: "Ya veo. Y esta persona que los atacó, ¿Es de Verloria?",
+    text: "Ya veo. Y esta persona que los atacó, ¿Es de Veloria?",
     enemySprite: "hazramitor",
   },
   {

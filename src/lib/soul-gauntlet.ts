@@ -13,12 +13,25 @@ export const SOUL_GAUNTLET_ZONE_CODE = "soul-gauntlet";
 
 export const SOUL_GAUNTLET_FIXED_FLOOR_COUNT = 10;
 
-/** +12% HP y daño por cada piso después del 10. */
-export const SOUL_GAUNTLET_SCALE_PER_FLOOR_AFTER_10 = 0.12;
+/** Último piso jugable; al ganarlo se otorgan recompensas y termina la run. */
+export const SOUL_GAUNTLET_MAX_FLOOR = 15;
+
+/** Pisos 11+ reutilizan encuentros 6–10 con buff progresivo. */
+export const SOUL_GAUNTLET_EXTENDED_CYCLE_START_FLOOR = 11;
+export const SOUL_GAUNTLET_EXTENDED_TEMPLATE_START = 6;
+export const SOUL_GAUNTLET_EXTENDED_TEMPLATE_COUNT = 5;
+/** Piso 11 = +20%; cada piso extra suma +5% (12 → 25%, …, 15 → 40%). */
+export const SOUL_GAUNTLET_EXTENDED_BASE_BUFF = 0.2;
+export const SOUL_GAUNTLET_EXTENDED_BUFF_STEP = 0.05;
+
+/** Bonus fijo sobre stats de enemigos cargados desde BD en combates del gauntlet. */
+export const SOUL_GAUNTLET_BASE_ENEMY_STAT_BONUS = 0.1;
+
+export const SOUL_GAUNTLET_BASE_ENEMY_STAT_MULTIPLIER = 1 + SOUL_GAUNTLET_BASE_ENEMY_STAT_BONUS;
 
 export const SOUL_GAUNTLET_COMBAT_MODE = "gauntlet";
 
-export type SoulGauntletRunEndReason = "death" | "abandoned";
+export type SoulGauntletRunEndReason = "death" | "abandoned" | "completed";
 
 export type GauntletFloorConfig = {
   floor: number;
@@ -30,9 +43,23 @@ export type GauntletFloorConfig = {
 
 export function getGauntletFloorConfig(floor: number): GauntletFloorConfig {
   const safeFloor = Math.max(1, Math.trunc(floor));
-  const templateFloor = ((safeFloor - 1) % SOUL_GAUNTLET_FIXED_FLOOR_COUNT) + 1;
-  const extraFloors = Math.max(0, safeFloor - SOUL_GAUNTLET_FIXED_FLOOR_COUNT);
-  const mult = 1 + extraFloors * SOUL_GAUNTLET_SCALE_PER_FLOOR_AFTER_10;
+
+  if (safeFloor <= SOUL_GAUNTLET_FIXED_FLOOR_COUNT) {
+    return {
+      floor: safeFloor,
+      templateFloor: safeFloor,
+      encounterCode: `soul-gauntlet-floor-${safeFloor}`,
+      hpMultiplier: 1,
+      damageMultiplier: 1,
+    };
+  }
+
+  const offset = safeFloor - SOUL_GAUNTLET_EXTENDED_CYCLE_START_FLOOR;
+  const templateFloor =
+    SOUL_GAUNTLET_EXTENDED_TEMPLATE_START + (offset % SOUL_GAUNTLET_EXTENDED_TEMPLATE_COUNT);
+  const buff =
+    SOUL_GAUNTLET_EXTENDED_BASE_BUFF + offset * SOUL_GAUNTLET_EXTENDED_BUFF_STEP;
+  const mult = 1 + buff;
 
   return {
     floor: safeFloor,
