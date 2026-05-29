@@ -11,6 +11,10 @@ import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 
 import { SOUL_FRAGMENT_ITEM_ID } from "@/lib/soul-gauntlet";
+import {
+  loadSoulGauntletRunRewardGrantViews,
+  soulGauntletRewardTierLabel,
+} from "@/lib/soul-gauntlet-rewards";
 
 import { completeSoulGauntletIntro } from "./actions";
 
@@ -151,7 +155,19 @@ async function completeSoulGauntletIfMaterialsReady(
   return completedNow;
 }
 
-export default async function GauntletPozoDeLasAlmasPage() {
+type GauntletPozoDeLasAlmasPageProps = {
+  searchParams?: Promise<{
+    gauntlet_result?: string;
+    run?: string;
+    floor?: string;
+    gauntlet_completed?: string;
+  }>;
+};
+
+export default async function GauntletPozoDeLasAlmasPage({
+  searchParams,
+}: GauntletPozoDeLasAlmasPageProps) {
+  const resolvedSearch = searchParams ? await searchParams : {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -189,10 +205,46 @@ export default async function GauntletPozoDeLasAlmasPage() {
       "/img/resources/items/resource_soul_fragment.png",
     );
 
+    let runResult = null;
+    const showRunResult = resolvedSearch?.gauntlet_result === "1";
+    const resultRunId =
+      typeof resolvedSearch?.run === "string" && resolvedSearch.run.trim().length > 0
+        ? resolvedSearch.run.trim()
+        : null;
+
+    if (showRunResult && resultRunId) {
+      const floorFromQuery =
+        typeof resolvedSearch?.floor === "string" && resolvedSearch.floor.trim() !== ""
+          ? Math.max(1, Math.trunc(Number(resolvedSearch.floor) || 1))
+          : null;
+      const completedFromQuery = resolvedSearch?.gauntlet_completed === "1";
+
+      const loaded = await loadSoulGauntletRunRewardGrantViews(supabase, resultRunId, user.id);
+      if (loaded) {
+        runResult = {
+          floor: loaded.floor,
+          rewardTierLabel: soulGauntletRewardTierLabel(loaded.rewardTier),
+          granted: loaded.granted,
+          inventoryError: loaded.inventoryError,
+          completed: loaded.completed || completedFromQuery,
+        };
+      } else {
+        runResult = {
+          floor: floorFromQuery ?? 1,
+          rewardTierLabel: "Partida del gauntlet",
+          granted: [],
+          inventoryError:
+            "No se pudieron cargar las recompensas de esta partida. Si acabas de morir, pulsa Continuar otra vez en el combate.",
+          completed: completedFromQuery,
+        };
+      }
+    }
+
     return (
       <SoulGauntletCompletedScene
         soulFragmentOwned={soulFragmentOwned}
         soulFragmentIconSrc={soulFragmentIconSrc}
+        runResult={runResult}
       />
     );
   }

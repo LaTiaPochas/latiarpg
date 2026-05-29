@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { getGameDayIsoDate } from "@/lib/game-day";
 import {
   SOUL_FRAGMENT_ITEM_ID,
   SOUL_GAUNTLET_ENTRY_FRAGMENT_COST,
   SOUL_GAUNTLET_LOBBY_PATH,
   SOUL_GAUNTLET_RUN_PATH,
 } from "@/lib/soul-gauntlet";
+import { resolveSoulGauntletRewardTierForNewRun } from "@/lib/soul-gauntlet-rewards";
 import { endActiveSoulGauntletRun, healCharacterForGauntletStart } from "@/lib/soul-gauntlet-run";
 import { createClient } from "@/lib/supabase/server";
 
@@ -112,11 +114,16 @@ export async function startSoulGauntletRun() {
       : user.id;
   await healCharacterForGauntletStart(supabase, healProfileId);
 
+  const gameDay = getGameDayIsoDate();
+  const rewardTier = await resolveSoulGauntletRewardTierForNewRun(supabase, user.id, gameDay);
+
   const { error: insertRunError } = await supabase.from("user_soul_gauntlet_runs").insert({
     user_id: user.id,
     is_active: true,
     current_floor: 1,
     max_floor_reached: 0,
+    game_day: gameDay,
+    reward_tier: rewardTier,
   });
 
   if (insertRunError) {
