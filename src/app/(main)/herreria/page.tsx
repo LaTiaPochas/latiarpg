@@ -20,7 +20,7 @@ import {
 } from "@/lib/herreria-craft-recipe";
 import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
-import Link from "next/link";
+import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
 import { craftRecipe } from "./actions";
 
 const WOOD_ITEM_ID = "ea5b9601-8a7d-4270-b5d9-cf292d49945e";
@@ -1195,16 +1195,8 @@ export default async function HerreriaPage() {
 
               </div>
               <div className="mt-6 flex justify-center">
-                    <Link
-                      href="/garrison"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-3 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] lg:text-xs"
-                    >
-                      <span className="text-base leading-none" aria-hidden>
-                        ←
-                      </span>
-                      volver al campamento
-                    </Link>
-                  </div>
+                <GarrisonBackLink className={uiFont.className} />
+              </div>
             </div>
           </div>
         </section>
