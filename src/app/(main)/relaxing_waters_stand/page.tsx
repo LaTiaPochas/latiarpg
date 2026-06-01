@@ -1,3 +1,4 @@
+import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
 import { RelaxingWatersStandStory } from "@/components/relaxing-waters-stand/relaxing-waters-stand-story";
 import { RelaxingWatersHelpButton } from "@/components/relaxing-waters-stand/relaxing-waters-help-button";
 import { WoodAmountSelector } from "@/components/campsite/wood-amount-selector";
@@ -5,7 +6,6 @@ import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
 import Image from "next/image";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 const dialogueFont = Libre_Baskerville({
@@ -16,6 +16,9 @@ const uiFont = Montserrat({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
 });
+
+const relaxingStandActionButtonClass =
+  "inline-flex min-h-[34px] min-w-[13.5rem] items-center justify-center rounded-md border px-3 py-2 text-center text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-xs";
 
 function resolvePlayerName(input: string | null | undefined, fallback: string) {
   const value = input?.trim();
@@ -183,6 +186,13 @@ export default async function RelaxingWatersStandPage() {
   );
   const canPayGoldToHeal = playerGoldAmount >= HEAL_COST_GOLD;
   const showPayGoldHealButton = isNoBottleAvailable && !isCharacterAlreadyFull;
+  const standStatusMessage = isCharacterAlreadyFull
+    ? "Tu vida y tu mana están completos."
+    : isNoBottleAvailable
+      ? canPayGoldToHeal
+        ? "No quedan botellas. Podés curarte pagando 1 de oro."
+        : "No quedan botellas y no tenés oro suficiente para curarte."
+      : "Podés tomar una botella para recuperar vida y mana.";
   const relaxingWaterIconSrc = resolveItemIconPath(relaxingWaterItem?.icon_path);
   const userWoodQuantity = (woodInventoryRows ?? []).reduce(
     (total, row) => total + (typeof row.quantity === "number" ? row.quantity : 0),
@@ -474,23 +484,32 @@ export default async function RelaxingWatersStandPage() {
             <p className="text-center text-xs leading-relaxed text-cyan-50 sm:text-sm">
               Nacho se está encargando de embotellar y traer agua del río para que puedan recuperar fuerzas.
             </p>
-            <div className="mt-3 flex items-center justify-center gap-1 text-[11px] font-semibold text-cyan-100 sm:text-sm">
-              <span>Aguas Relajantes disponibles: <span className="text-amber-200 text-[13px] font-bold">{relaxingWatersAvailable}</span></span>
-              <Image
-                src={relaxingWaterIconSrc}
-                alt="Aguas relajantes"
-                width={18}
-                height={18}
-                className="h-[30px] w-[30px] object-contain -translate-y-1"
-              />
+            <div className="mt-3 flex flex-col items-center gap-0.5">
+              <div className="flex items-center justify-center gap-1 text-[11px] font-semibold text-cyan-100 sm:text-sm">
+                <span>
+                  Aguas Relajantes disponibles:{" "}
+                  <span className="text-[13px] font-bold text-amber-200">{relaxingWatersAvailable}</span>
+                </span>
+                <Image
+                  src={relaxingWaterIconSrc}
+                  alt="Aguas relajantes"
+                  width={18}
+                  height={18}
+                  className="-translate-y-1 h-[30px] w-[30px] object-contain"
+                />
+              </div>
+              <p className="text-center text-[9px] leading-snug text-cyan-100/85 sm:text-[10px]">
+                {standStatusMessage}
+              </p>
             </div>
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-6 flex flex-col items-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-3">
               <div className="group relative">
                 <form action={takeOneBottle}>
                   <button
                     type="submit"
                     disabled={isCharacterAlreadyFull || isNoBottleAvailable}
-                    className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-xs ${
+                    className={`${relaxingStandActionButtonClass} ${
                       isCharacterAlreadyFull || isNoBottleAvailable
                         ? "cursor-not-allowed border-cyan-700/40 bg-cyan-950/40 text-cyan-200/60"
                         : "cursor-pointer border-cyan-500/80 bg-cyan-700/85 text-cyan-50 hover:bg-cyan-600/90"
@@ -499,15 +518,6 @@ export default async function RelaxingWatersStandPage() {
                     TOMAR 1 BOTELLA
                   </button>
                 </form>
-                {isCharacterAlreadyFull ? (
-                  <span className="pointer-events-none absolute -top-10 left-1/2 z-20 w-max -translate-x-1/2 rounded-md border border-cyan-700/70 bg-[#0f1e2a]/95 px-2 py-1 text-[10px] text-cyan-100 opacity-0 shadow-[0_8px_18px_rgba(0,0,0,0.35)] transition-opacity duration-150 group-active:opacity-100 sm:hidden">
-                    Tu vida y tu mana están completos.
-                  </span>
-                ) : isNoBottleAvailable ? (
-                  <span className="pointer-events-none absolute -top-10 left-1/2 z-20 w-max -translate-x-1/2 rounded-md border border-cyan-700/70 bg-[#0f1e2a]/95 px-1 py-1 text-[10px] text-cyan-100 opacity-0 shadow-[0_8px_18px_rgba(0,0,0,0.35)] transition-opacity duration-150 group-active:opacity-100 sm:hidden">
-                    No quedan Aguas Relajantes disponibles.
-                  </span>
-                ) : null}
               </div>
               {showPayGoldHealButton ? (
                 <div className="group relative">
@@ -515,7 +525,7 @@ export default async function RelaxingWatersStandPage() {
                     <button
                       type="submit"
                       disabled={!canPayGoldToHeal}
-                      className={`rounded-md border px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] transition sm:text-sm ${
+                      className={`${relaxingStandActionButtonClass} ${
                         canPayGoldToHeal
                           ? "cursor-pointer border-amber-500/80 bg-amber-700/90 text-amber-50 hover:bg-amber-600/90"
                           : "cursor-not-allowed border-cyan-700/40 bg-cyan-950/40 text-cyan-200/60"
@@ -531,25 +541,8 @@ export default async function RelaxingWatersStandPage() {
                   ) : null}
                 </div>
               ) : null}
-              <Link
-                href="/garrison"
-                className="rounded-md border border-amber-500/80 bg-amber-800/80 px-3 py-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-50 transition hover:bg-amber-700/90 sm:text-xs"
-              >
-                VOLVER AL CAMPAMENTO
-              </Link>
-            </div>
-            <div className="mt-3 hidden justify-center sm:flex">
-              <div className="inline-flex items-center gap-2 rounded-md border border-cyan-800/70 bg-black/20 px-2.5 py-1.5">
-                <span className="text-[10px] text-cyan-100/90 sm:text-sm">
-                  {isCharacterAlreadyFull
-                    ? "Tu vida y tu mana están completos."
-                    : isNoBottleAvailable
-                      ? canPayGoldToHeal
-                        ? "No quedan botellas. Podés curarte pagando 1 de oro."
-                        : "No quedan botellas y no tenés oro suficiente para curarte."
-                      : "Podés tomar una botella para recuperar vida y mana."}
-                </span>
               </div>
+              <GarrisonBackLink className={uiFont.className} />
             </div>
           </div>
         </div>
@@ -605,15 +598,7 @@ export default async function RelaxingWatersStandPage() {
               </div>
               <WoodAmountSelector maxAmount={userWoodQuantity} onContribute={contributeWood} />
               <div className="mt-8 flex justify-center">
-                <Link
-                  href="/garrison"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-3 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] lg:text-xs"
-                >
-                  <span className="text-base leading-none" aria-hidden>
-                    ←
-                  </span>
-                  volver al campamento
-                </Link>
+                <GarrisonBackLink className={uiFont.className} />
               </div>
             </div>
           </section>

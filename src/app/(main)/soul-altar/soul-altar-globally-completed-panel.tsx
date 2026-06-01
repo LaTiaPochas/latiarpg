@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
+import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
 import {
   REBIRTH_SOUL_FRAGMENT_COST,
   REBIRTH_SOUL_GOLD_COST,
@@ -133,15 +133,7 @@ export function SoulAltarGloballyCompletedPanel({
               </button>
             </div>
             <div className="mt-6 flex justify-center">
-              <Link
-                href="/garrison"
-                className={`${uiFont.className} inline-flex items-center gap-1.5 rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b]`}
-              >
-                <span className="text-base leading-none" aria-hidden>
-                  ←
-                </span>
-                Volver al Campamento
-              </Link>
+              <GarrisonBackLink className={uiFont.className} />
             </div>
           </>
         ) : view === "reconstruction" ? (

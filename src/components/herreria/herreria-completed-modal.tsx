@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
 import { HerreriaHelpButton } from "@/components/herreria/herreria-help-button";
 import { WeaponPhysicalDamageTooltipLine } from "@/components/character-profile/weapon-physical-damage-tooltip-line";
 
@@ -794,26 +795,29 @@ export function HerreriaCompletedModal({
             <p className="text-xs leading-relaxed text-slate-700 sm:text-sm">
               Dale tus recetas a Chane para que pueda descifrarlas y fabricar los objetos que se encuentran en ellas.
             </p>
-            <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => setMode("give-recipe")}
-                className={`w-full cursor-pointer rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] sm:w-auto ${uiClassName}`}
-              >
-                Aprender
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTooltip(null);
-                  setCraftCategory(null);
-                  setSelectedAvailableRecipeId(null);
-                  setMode("craft-category");
-                }}
-                className={`w-full cursor-pointer rounded-lg border border-slate-500/80 bg-slate-700 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-100 shadow-sm transition-colors hover:bg-slate-600 active:bg-[#b9a47b] sm:w-auto ${uiClassName}`}
-              >
-                CRAFTEAR
-              </button>
+            <div className="mt-6 flex flex-col items-center gap-3">
+              <div className="flex w-full flex-col items-center justify-center gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => setMode("give-recipe")}
+                  className={`w-full cursor-pointer rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] sm:w-auto ${uiClassName}`}
+                >
+                  Aprender
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTooltip(null);
+                    setCraftCategory(null);
+                    setSelectedAvailableRecipeId(null);
+                    setMode("craft-category");
+                  }}
+                  className={`w-full cursor-pointer rounded-lg border border-slate-500/80 bg-slate-700 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-100 shadow-sm transition-colors hover:bg-slate-600 active:bg-[#b9a47b] sm:w-auto ${uiClassName}`}
+                >
+                  CRAFTEAR
+                </button>
+              </div>
+              <GarrisonBackLink className={uiClassName} />
             </div>
           </>
         )}

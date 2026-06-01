@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useState } from "react";
+import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
 import {
   GlobalWarehouseInventoryModal,
   type GlobalWarehouseInventorySlotPayload,
@@ -58,7 +58,7 @@ export function WarehouseCompletedView({
               Acá vamos a poder dejar objetos, para que no se pierdan si tenés el inventario lleno. Este warehouse es
               compartido entre todos, así que ojo con lo que dejás.
             </p>
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-4 flex flex-col items-center gap-3">
               {!warehouseModalOpen ? (
                 <button
                   type="button"
@@ -68,15 +68,7 @@ export function WarehouseCompletedView({
                   Ver almacén global
                 </button>
               ) : null}
-              <Link
-                href="/garrison"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] sm:text-xs"
-              >
-                <span className="text-base leading-none" aria-hidden>
-                  ←
-                </span>
-                volver al campamento
-              </Link>
+              <GarrisonBackLink className={uiFontClassName} />
             </div>
           </div>
         </div>

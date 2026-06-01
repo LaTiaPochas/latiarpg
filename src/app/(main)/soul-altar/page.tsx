@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
 import { Libre_Baskerville, Montserrat } from "next/font/google";
+import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -906,15 +906,7 @@ export default async function SoulAltarPage() {
                   })}
                 </div>
                 <div className="mt-6 flex justify-center">
-                  <Link
-                    href="/garrison"
-                    className={`${uiFont.className} inline-flex items-center gap-1.5 rounded-lg border border-[#7a5c31]/80 bg-[#7d6138] px-3 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#fdfbf7] shadow-sm transition-colors hover:bg-[#6e5532] active:bg-[#5f482b] lg:text-xs`}
-                  >
-                    <span className="text-base leading-none" aria-hidden>
-                      ←
-                    </span>
-                    volver al campamento
-                  </Link>
+                  <GarrisonBackLink className={uiFont.className} />
                 </div>
               </div>
             </section>
