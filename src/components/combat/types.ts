@@ -34,6 +34,8 @@ export type CombatPlayerSkillView = {
 export type CombatEncounterEnemyView = {
   id: string;
   templateId: string | null;
+  /** `enemy_templates.creature_type` (stats de bajas en biblioteca). */
+  creatureType: string | null;
   spawnIndex: number;
   name: string;
   enemyLevel: number | null;
