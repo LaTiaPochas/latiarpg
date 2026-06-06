@@ -143,6 +143,119 @@ body {
   }
 }
 
+/* Biblioteca: scrollbar ámbar oscuro / marrón. */
+.biblioteca-parchment-scrollbar::-webkit-scrollbar {
+  width: 10px !important;
+  height: 10px !important;
+}
+
+.biblioteca-parchment-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.biblioteca-parchment-scrollbar::-webkit-scrollbar-track {
+  background: #3d2914 !important;
+  border-radius: 9999px;
+  margin: 4px 2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(120, 53, 15, 0.45),
+    inset 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.biblioteca-parchment-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #b45309 0%, #92400e 45%, #78350f 100%) !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(69, 26, 3, 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(251, 191, 36, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 1px 3px rgba(0, 0, 0, 0.28);
+}
+
+.biblioteca-parchment-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #d97706 0%, #b45309 45%, #92400e 100%) !important;
+}
+
+.biblioteca-parchment-scrollbar::-webkit-scrollbar-corner {
+  background: #f5edd8 !important;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .biblioteca-parchment-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #92400e #3d2914;
+  }
+}
+
+/* Biblioteca: máximo por columna en tabla de materiales. */
+.biblioteca-stat-column-max {
+  font-weight: 700 !important;
+  color: #15803d !important;
+}
+
+/* Biblioteca: carta de estadística de combate (volteo). */
+.biblioteca-flip-card {
+  display: block;
+  width: 100%;
+  min-height: 7.5rem;
+  perspective: 1000px;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  background: transparent;
+  text-align: inherit;
+}
+
+.biblioteca-flip-card-inner {
+  position: relative;
+  width: 100%;
+  min-height: 7.5rem;
+  transition: transform 0.55s ease;
+  transform-style: preserve-3d;
+}
+
+.biblioteca-flip-card-inner.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.biblioteca-flip-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(159, 131, 82, 0.7);
+  background: rgba(245, 237, 216, 0.92);
+  padding: 0.5rem 0.375rem;
+  backface-visibility: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.biblioteca-flip-face.biblioteca-flip-back {
+  transform: rotateY(180deg);
+  justify-content: flex-start;
+  gap: 0.25rem;
+  padding: 0.375rem 0.25rem 0.375rem 0.375rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.biblioteca-flip-face.biblioteca-flip-back.biblioteca-parchment-scrollbar::-webkit-scrollbar {
+  width: 6px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .biblioteca-flip-card-inner {
+    transition: none;
+  }
+}
+
 /* Meloni stand: selección de fila (evita clases condicionales que Tailwind v4 no siempre genera). */
 .meloni-trade-row {
   border-width: 1px;

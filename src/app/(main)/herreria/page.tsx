@@ -18,6 +18,7 @@ import {
   resolveItemTypeCode,
   resolveRecipeComponentItemType,
 } from "@/lib/herreria-craft-recipe";
+import { parseCraftPreviewStatsLines } from "@/lib/herreria-craft-preview-stats";
 import { createClient } from "@/lib/supabase/server";
 import { insertWorldEventLog } from "@/lib/world-event-log";
 import { GarrisonBackLink } from "@/components/camp/garrison-back-link";
@@ -430,7 +431,7 @@ export default async function HerreriaPage() {
       ? await supabase
           .from("items")
           .select(
-            "id, name, description, quote_text, icon_path, rarity_color, equip_slot, item_types(code)",
+            "id, name, description, quote_text, icon_path, rarity_color, equip_slot, craft_preview_stats, item_types(code)",
           )
           .in("id", craftedItemIds)
       : { data: [] };
@@ -681,6 +682,11 @@ export default async function HerreriaPage() {
     const craftedItemTypeCode =
       resolveRecipeComponentItemType(matchingComponents[0] ?? null) ??
       resolveItemTypeCode(craftedItem?.item_types);
+    const recipeComponentItemType = resolveRecipeComponentItemType(matchingComponents[0] ?? null);
+    const craftPreviewStats =
+      recipeComponentItemType === "equipment"
+        ? parseCraftPreviewStatsLines(craftedItem?.craft_preview_stats)
+        : [];
 
     return [
       {
@@ -721,6 +727,7 @@ export default async function HerreriaPage() {
           magicDamageLine: weaponInstance
             ? `${craftedDamageRange(weaponInstance.magic_damage_min, weaponInstance.magic_damage_max)} Daño Mágico`
             : null,
+          craftPreviewStats,
           requirements,
         },
         components,

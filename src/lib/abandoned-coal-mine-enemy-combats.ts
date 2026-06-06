@@ -10,8 +10,8 @@ export const ABANDONED_COAL_MINE_ENEMY_COMBAT_WEIGHTS: AbandonedCoalMineEnemyCom
   { combatCode: "abandoned-coal-mine-1", chance: 0.35 },
   { combatCode: "abandoned-coal-mine-2", chance: 0.25 },
   { combatCode: "abandoned-coal-mine-3", chance: 0.2 },
-  { combatCode: "abandoned-coal-mine-4", chance: 0.12 },
-  { combatCode: "abandoned-coal-mine-5", chance: 0.08 },
+  { combatCode: "abandoned-coal-mine-4", chance: 0.13 },
+  { combatCode: "abandoned-coal-mine-5", chance: 0.07 },
 ];
 
 export function rollAbandonedCoalMineEnemyCombatCode(): string {

@@ -164,6 +164,24 @@ export default async function GarrisonPage() {
     });
   const isSoulAltarCompleted = isSoulAltarCompletedByGlobalRow || areSoulAltarMaterialsCompleted;
   const showAdvancedHotspots = showWarehouseSprite && showRelaxingWatersSprite;
+  const { data: garrisonLevel2CompletedMilestone } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed")
+    .eq("title", "garrison_level2_completed")
+    .maybeSingle();
+  const isGarrisonLevel2Completed =
+    typeof garrisonLevel2CompletedMilestone?.title === "string" &&
+    garrisonLevel2CompletedMilestone.title.trim().toLowerCase() === "garrison_level2_completed" &&
+    garrisonLevel2CompletedMilestone.is_completed === true;
+  const { data: loremasterCompletedMilestone } = await supabase
+    .from("global_milestones")
+    .select("title, is_completed")
+    .eq("title", "loremaster_completed")
+    .maybeSingle();
+  const isBibliotecaCompleted =
+    typeof loremasterCompletedMilestone?.title === "string" &&
+    loremasterCompletedMilestone.title.trim().toLowerCase() === "loremaster_completed" &&
+    loremasterCompletedMilestone.is_completed === true;
   const { data: userMilestones } = await supabase
     .from("user_milestones")
     .select("meloni_found_cave")
@@ -249,6 +267,8 @@ export default async function GarrisonPage() {
             showMeloniSprite={meloniGalletaGiven}
             isCraftingBenchCompleted={isCraftingBenchCompleted}
             isSoulAltarCompleted={isSoulAltarCompleted}
+            isGarrisonLevel2Completed={isGarrisonLevel2Completed}
+            isBibliotecaCompleted={isBibliotecaCompleted}
           />
         </section>
         <section className="mt-3 rounded-lg border border-amber-900/70 bg-[#1a100c]/85 p-3 shadow-[0_0_20px_rgba(0,0,0,0.3)] lg:p-4">

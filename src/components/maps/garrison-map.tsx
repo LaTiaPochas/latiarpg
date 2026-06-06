@@ -12,6 +12,13 @@ type Hotspot = {
   description: string;
 };
 
+type MapSpriteResponsiveSize = {
+  /** Ancho en mobile (por defecto hasta lg / 1023px). Ej: "w-[48px]" */
+  mobile: string;
+  /** Ancho en desktop (lg+). Ej: "lg:w-[130px]" */
+  desktop: string;
+};
+
 type MapSprite = {
   id: string;
   hotspotId: string;
@@ -21,13 +28,40 @@ type MapSprite = {
   height: number;
   xPercent: number;
   yPercent: number;
+  /** Nivel 1: clases Tailwind con breakpoints sm/lg */
   className?: string;
   completedSrc?: string;
   completedAlt?: string;
   completedClassName?: string;
+  /** Nivel 2: tamaños mobile y desktop por separado */
+  size?: MapSpriteResponsiveSize;
+  completedSize?: MapSpriteResponsiveSize;
 };
 
-const HOTSPOTS: Hotspot[] = [
+const DEFAULT_SPRITE_WIDTH_CLASS = "w-[70px] sm:w-[110px] lg:w-[130px]";
+
+function resolveSpriteWidthClass(sprite: MapSprite, isCompleted: boolean, useLevel2Sizes: boolean) {
+  if (useLevel2Sizes && sprite.size) {
+    const size = isCompleted && sprite.completedSize ? sprite.completedSize : sprite.size;
+    return `${size.mobile} ${size.desktop}`;
+  }
+  if (isCompleted) {
+    return sprite.completedClassName ?? sprite.className ?? DEFAULT_SPRITE_WIDTH_CLASS;
+  }
+  return sprite.className ?? DEFAULT_SPRITE_WIDTH_CLASS;
+}
+
+const GARRISON_LEVEL_1_MAP = {
+  src: "/img/resources/maps/map_initialzone_empty.png",
+  alt: "Mapa de la guarnicion",
+} as const;
+
+const GARRISON_LEVEL_2_MAP = {
+  src: "/img/resources/maps/map_garrisonlvl2.png",
+  alt: "Campamento expandido",
+} as const;
+
+const HOTSPOTS_LEVEL_1: Hotspot[] = [
   {
     id: "warehouse-spot",
     label: "Warehouse",
@@ -64,17 +98,72 @@ const HOTSPOTS: Hotspot[] = [
     description:
       "Meloni se instaló en la base. Parece que tiene un propósito muy particular. Chane le enseño bien.",
   },
-  /*
   {
-    id: "tasty-meals",
-    label: "Delicias de La Tia",
-    xPercent: 44,
-    yPercent: 73,
-    description: "Por suerte en La Tia tenemos muy buenos cocineros, aprovechemoslos.",
-  },*/
+    id: "garrison-level-2",
+    label: "Garrison",
+    xPercent: 50,
+    yPercent: 65,
+    description: "La Tía piensa que ya es hora de comenzar la expansión del campamento y construir algo un poco más grande. Los materiales ya están y ya conocemos un poco más sobre el mundo.",
+  },
 ];
 
-const MAP_SPRITES: MapSprite[] = [
+/** Hotspots del mapa nivel 2 — ajustá xPercent / yPercent según map_garrisonlvl2.png */
+const HOTSPOTS_LEVEL_2: Hotspot[] = [
+  {
+    id: "warehouse-spot",
+    label: "Warehouse",
+    xPercent: 20,
+    yPercent: 20,
+    description: "Acá vas a poder liberar toda esa carga que tenés encima en el inventario.",
+  },
+  {
+    id: "relaxing-waters-tent",
+    label: "Aguas Relajantes",
+    xPercent: 80,
+    yPercent: 20,
+    description: "Spot ideal para relajarse y tomar un descanso.",
+  },
+  {
+    id: "crafting-table",
+    label: "Mesa de Trabajo",
+    xPercent: 16,
+    yPercent: 60,
+    description: "¿Tomar materiales y crear nuevos objetos? ¿Dónde me anoto?",
+  },
+  {
+    id: "soul-altar",
+    label: "Roca Extraña",
+    xPercent: 89,
+    yPercent: 45,
+    description: "Una piedra misteriosa, con gran energía mágica.",
+  },
+  {
+    id: "meloni",
+    label: "Meloni's",
+    xPercent: 76,
+    yPercent: 47,
+    description:
+      "Meloni se instaló en la base. Parece que tiene un propósito muy particular. Chane le enseño bien.",
+  },
+  {
+    id: "tuneles-delu",
+    label: "Túneles",
+    xPercent: 90,
+    yPercent: 68,
+    description:
+      "Delu está tramando algo con sus túneles.",
+  },
+  {
+    id: "bibliotca-silva",
+    label: "Loremaster",
+    xPercent: 40,
+    yPercent: 45,
+    description:
+      "Silva está juntando lore sobre este mundo, ayudá al master a completar su Lore.",
+  },
+];
+
+const MAP_SPRITES_LEVEL_1: MapSprite[] = [
   {
     id: "warehouse-spot-sprite",
     hotspotId: "warehouse-spot",
@@ -134,6 +223,100 @@ const MAP_SPRITES: MapSprite[] = [
   },
 ];
 
+/**
+ * Sprites del mapa nivel 2 — ajustá xPercent / yPercent y `size` / `completedSize`.
+ * `size.mobile` → ancho hasta lg (1023px). `size.desktop` → lg+ (ej. "lg:w-[130px]").
+ */
+const MAP_SPRITES_LEVEL_2: MapSprite[] = [
+  {
+    id: "warehouse-spot-sprite",
+    hotspotId: "warehouse-spot",
+    src: "/img/resources/maps/garrison_warehouse.png",
+    alt: "Warehouse",
+    width: 170,
+    height: 170,
+    xPercent: 17,
+    yPercent: 14,
+    size: { mobile: "w-[54px]", desktop: "lg:w-[110px]" },
+  },
+  {
+    id: "relaxing-waters-tent-sprite",
+    hotspotId: "relaxing-waters-tent",
+    src: "/img/resources/maps/garrison_relaxing_waters.png",
+    alt: "Tienda de aguas relajantes",
+    width: 170,
+    height: 170,
+    xPercent: 81,
+    yPercent: 16,
+    size: { mobile: "w-[54px]", desktop: "lg:w-[100px]" },
+  },
+  {
+    id: "crafting-table-sprite",
+    hotspotId: "crafting-table",
+    src: "/img/resources/characters/pj_chane_rpg_standing_stick.png",
+    alt: "Chane en la mesa de trabajo",
+    width: 170,
+    height: 170,
+    xPercent: 14,
+    yPercent: 55,
+    size: { mobile: "w-[65px]", desktop: "lg:w-[110px]" },
+    completedSize: { mobile: "w-[54px]", desktop: "lg:w-[110px]" },
+  },
+  {
+    id: "soul-altar-sprite",
+    hotspotId: "soul-altar",
+    src: "/img/resources/maps/garrison_altar_construction.png",
+    alt: "Leo escondido",
+    width: 170,
+    height: 170,
+    xPercent: 89,
+    yPercent: 38,
+    size: { mobile: "w-[72px]", desktop: "lg:w-[125px]" },
+    completedSrc: "/img/resources/maps/garrison_altar_completed.png",
+    completedAlt: "Altar de almas",
+    completedSize: { mobile: "w-[48px]", desktop: "lg:w-[110px]" },
+  },
+  {
+    id: "meloni-sprite",
+    hotspotId: "meloni",
+    src: "/img/resources/characters/pj_meloni.png",
+    alt: "Meloni",
+    width: 170,
+    height: 170,
+    xPercent: 76,
+    yPercent: 43,
+    size: { mobile: "w-[26px]", desktop: "lg:w-[50px]" },
+  },
+  {
+    id: "tuneles-sprite",
+    hotspotId: "tuneles-delu",
+    src: "/img/resources/maps/garrison_tunel_construction.png",
+    alt: "Túneles de Delu",
+    width: 170,
+    height: 170,
+    xPercent: 90,
+    yPercent: 65,
+    size: { mobile: "w-[40px]", desktop: "lg:w-[75px]" },
+    completedSrc: "/img/resources/maps/garrison_tunel_completed.png",
+    completedAlt: "Altar de almas",
+    completedSize: { mobile: "w-[48px]", desktop: "lg:w-[110px]" }
+  },
+  {
+    id: "biblioteca-sprite",
+    hotspotId: "bibliotca-silva",
+    src: "/img/resources/maps/garrison_library_construction.png",
+    alt: "Loremaster",
+    width: 170,
+    height: 170,
+    xPercent: 40,
+    yPercent: 40,
+    size: { mobile: "w-[45px]", desktop: "lg:w-[110px]" },
+    completedSrc: "/img/resources/maps/garrison_library_completed.png",
+    completedAlt: "Biblioteca del Loremater",
+    completedSize: { mobile: "w-[56px]", desktop: "lg:w-[130px]" }
+  },
+];
+
 type GarrisonMapProps = {
   showWarehouseSprite?: boolean;
   showRelaxingWatersSprite?: boolean;
@@ -141,6 +324,8 @@ type GarrisonMapProps = {
   showMeloniSprite?: boolean;
   isCraftingBenchCompleted?: boolean;
   isSoulAltarCompleted?: boolean;
+  isGarrisonLevel2Completed?: boolean;
+  isBibliotecaCompleted?: boolean;
 };
 
 export function GarrisonMap({
@@ -150,23 +335,47 @@ export function GarrisonMap({
   showMeloniSprite = false,
   isCraftingBenchCompleted = false,
   isSoulAltarCompleted = false,
+  isGarrisonLevel2Completed = false,
+  isBibliotecaCompleted = false,
 }: GarrisonMapProps) {
   const router = useRouter();
-  const [selectedHotspotId, setSelectedHotspotId] = useState(HOTSPOTS[0].id);
+  const mapImage = isGarrisonLevel2Completed ? GARRISON_LEVEL_2_MAP : GARRISON_LEVEL_1_MAP;
+  const hotspotsSource = isGarrisonLevel2Completed ? HOTSPOTS_LEVEL_2 : HOTSPOTS_LEVEL_1;
+  const spritesSource = isGarrisonLevel2Completed ? MAP_SPRITES_LEVEL_2 : MAP_SPRITES_LEVEL_1;
+
+  const [selectedHotspotId, setSelectedHotspotId] = useState(hotspotsSource[0]?.id ?? "");
   const availableHotspots = useMemo(
     () =>
-      HOTSPOTS.map((spot) =>
-        spot.id === "soul-altar" && isSoulAltarCompleted
-          ? { ...spot, label: "Altar de Almas" }
-          : spot,
-      ).filter((spot) => {
-        if (spot.id === "meloni") return showMeloniSprite;
-        return (
-          showAdvancedHotspots ||
-          (spot.id !== "crafting-table" && spot.id !== "lesser-shop")
-        );
-      }),
-    [isSoulAltarCompleted, showAdvancedHotspots, showMeloniSprite],
+      hotspotsSource
+        .map((spot) =>
+          spot.id === "soul-altar" && isSoulAltarCompleted
+            ? { ...spot, label: "Altar de Almas" }
+            : spot,
+        )
+        .filter((spot) => {
+          if (isGarrisonLevel2Completed) {
+            if (spot.id === "garrison-level-2") return false;
+            if (spot.id === "meloni") return showMeloniSprite;
+            if (spot.id === "warehouse-spot") return showWarehouseSprite;
+            if (spot.id === "relaxing-waters-tent") return showRelaxingWatersSprite;
+            return true;
+          }
+          if (spot.id === "meloni") return showMeloniSprite;
+          if (spot.id === "garrison-level-2") return showAdvancedHotspots;
+          return (
+            showAdvancedHotspots ||
+            (spot.id !== "crafting-table" && spot.id !== "lesser-shop")
+          );
+        }),
+    [
+      hotspotsSource,
+      isGarrisonLevel2Completed,
+      isSoulAltarCompleted,
+      showAdvancedHotspots,
+      showMeloniSprite,
+      showRelaxingWatersSprite,
+      showWarehouseSprite,
+    ],
   );
   const selectedHotspot = useMemo(
     () =>
@@ -180,14 +389,28 @@ export function GarrisonMap({
   }, [availableHotspots, selectedHotspotId]);
   const visibleSprites = useMemo(
     () =>
-      MAP_SPRITES.filter(
-        (sprite) =>
+      spritesSource.filter((sprite) => {
+        if (isGarrisonLevel2Completed) {
+          if (sprite.id === "meloni-sprite") return showMeloniSprite;
+          if (sprite.id === "warehouse-spot-sprite") return showWarehouseSprite;
+          if (sprite.id === "relaxing-waters-tent-sprite") return showRelaxingWatersSprite;
+          return true;
+        }
+        return (
           (sprite.id !== "warehouse-spot-sprite" || showWarehouseSprite) &&
           (sprite.id !== "relaxing-waters-tent-sprite" || showRelaxingWatersSprite) &&
           (sprite.id !== "crafting-table-sprite" || showAdvancedHotspots) &&
-          (sprite.id !== "meloni-sprite" || showMeloniSprite),
-      ),
-    [showAdvancedHotspots, showMeloniSprite, showRelaxingWatersSprite, showWarehouseSprite],
+          (sprite.id !== "meloni-sprite" || showMeloniSprite)
+        );
+      }),
+    [
+      isGarrisonLevel2Completed,
+      showAdvancedHotspots,
+      showMeloniSprite,
+      showRelaxingWatersSprite,
+      showWarehouseSprite,
+      spritesSource,
+    ],
   );
 
   return (
@@ -214,8 +437,8 @@ export function GarrisonMap({
 
       <div className="relative mt-2 w-full overflow-hidden rounded-md border border-amber-900/70 bg-black/40 lg:h-[647px]">
         <Image
-          src="/img/resources/maps/map_initialzone_empty.png"
-          alt="Mapa de la guarnicion"
+          src={mapImage.src}
+          alt={mapImage.alt}
           width={1024}
           height={647}
           priority
@@ -226,23 +449,29 @@ export function GarrisonMap({
             sprite.id === "crafting-table-sprite" && isCraftingBenchCompleted;
           const isSoulAltarSpriteCompleted =
             sprite.id === "soul-altar-sprite" && isSoulAltarCompleted;
-          const imageSrc =
-            isCraftingCompleted
-              ? "/img/resources/maps/garrison_anvil_completed.png"
+          const isBibliotecaSpriteCompleted =
+            sprite.id === "biblioteca-sprite" && isBibliotecaCompleted;
+          const imageSrc = isCraftingCompleted
+            ? "/img/resources/maps/garrison_anvil_completed.png"
+            : isBibliotecaSpriteCompleted && sprite.completedSrc
+              ? sprite.completedSrc
               : isSoulAltarSpriteCompleted && sprite.completedSrc
                 ? sprite.completedSrc
                 : sprite.src;
-          const imageAlt =
-            isCraftingCompleted
-              ? "Yunque de herrería completado"
+          const imageAlt = isCraftingCompleted
+            ? "Yunque de herrería completado"
+            : isBibliotecaSpriteCompleted && sprite.completedAlt
+              ? sprite.completedAlt
               : isSoulAltarSpriteCompleted && sprite.completedAlt
                 ? sprite.completedAlt
                 : sprite.alt;
-          const defaultSpriteWidthClass = "w-[70px] sm:w-[110px] lg:w-[130px]";
-          const isSpriteCompleted = isCraftingCompleted || isSoulAltarSpriteCompleted;
-          const spriteWidthClass = isSpriteCompleted
-            ? (sprite.completedClassName ?? sprite.className ?? defaultSpriteWidthClass)
-            : (sprite.className ?? defaultSpriteWidthClass);
+          const isSpriteCompleted =
+            isCraftingCompleted || isSoulAltarSpriteCompleted || isBibliotecaSpriteCompleted;
+          const spriteWidthClass = resolveSpriteWidthClass(
+            sprite,
+            isSpriteCompleted,
+            isGarrisonLevel2Completed,
+          );
           return (
           <div
             key={sprite.id}
@@ -326,6 +555,14 @@ export function GarrisonMap({
               }
               if (selectedHotspot.id === "meloni") {
                 router.push("/meloni-stand");
+                return;
+              }
+              if (selectedHotspot.id === "garrison-level-2") {
+                router.push("/expansion-garrison");
+                return;
+              }
+              if (selectedHotspot.id === "bibliotca-silva") {
+                router.push("/biblioteca");
                 return;
               }
               router.push(`/?destino=${encodeURIComponent(selectedHotspot.id)}`);

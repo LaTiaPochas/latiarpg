@@ -39,6 +39,7 @@ export type HerreriaAvailableRecipeItem = {
     physicalDamageRangeText: string | null;
     physicalDamageAttackFamily: string | null;
     magicDamageLine: string | null;
+    craftPreviewStats: Array<{ text: string; isNegative: boolean }>;
     requirements: Array<{ label: string; value: string }>;
   } | null;
   components: Array<{
@@ -900,6 +901,20 @@ export function HerreriaCompletedModal({
                       {activeTooltip.craftedTooltip.magicDamageLine ? (
                         <p>{activeTooltip.craftedTooltip.magicDamageLine}</p>
                       ) : null}
+                    </div>
+                  ) : null}
+                  {activeTooltip.craftedTooltip.craftPreviewStats.length > 0 ? (
+                    <div className="mt-2 space-y-1 text-xs leading-tight text-amber-100">
+                      {activeTooltip.craftedTooltip.craftPreviewStats.map((statLine, index) => (
+                        <p
+                          key={`${statLine.text}-${index}`}
+                          className={
+                            statLine.isNegative ? "font-medium text-red-400" : "text-amber-100"
+                          }
+                        >
+                          {statLine.text}
+                        </p>
+                      ))}
                     </div>
                   ) : null}
                   {activeTooltip.craftedTooltip.requirements.length > 0 ? (

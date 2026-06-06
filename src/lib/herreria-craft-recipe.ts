@@ -8,6 +8,7 @@ export type HerreriaRecipeItemRow = {
   icon_path: string | null;
   rarity_color: string | null;
   equip_slot?: string | null;
+  craft_preview_stats?: unknown;
   item_types?: HerreriaItemTypeJoinRow | null;
 };
 

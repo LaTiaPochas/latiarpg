@@ -31,6 +31,8 @@ import {
   weaponAttackFamilyConsumableAllowsInventoryUse,
 } from "@/lib/combat-weapon-attack-family-consumable";
 import { persistCombatAmmoSpent, type CombatAmmoSpentEntry } from "@/lib/combat-persist-ammo";
+import { recordEnemyCreatureKills } from "@/lib/enemies-stats-killed";
+import { recordUserBestiaryDiscoveries } from "@/lib/user-bestiary-discoveries";
 import {
   hasUserDefeatedDailyBossToday,
   isDailyBossLimitedEncounterCode,
@@ -361,6 +363,10 @@ function firstNonEmptyString(...vals: unknown[]): string | null {
 
 function templateName(t: EnemyTemplateRow): string | null {
   return firstNonEmptyString(t.name);
+}
+
+function templateCreatureType(t: EnemyTemplateRow): string | null {
+  return firstNonEmptyString(t.creature_type);
 }
 
 function templateSpriteRaw(t: EnemyTemplateRow): string | null {
@@ -767,6 +773,7 @@ function mapRowToEnemyView(
       t.id != null && (typeof t.id === "string" || typeof t.id === "number")
         ? String(t.id)
         : null,
+    creatureType: templateCreatureType(t),
     spawnIndex: spawn,
     name,
     enemyLevel,
@@ -2241,6 +2248,12 @@ export default async function CombatEncounterPage({
     } = await supabaseAction.auth.getUser();
     if (!actionUser) return;
 
+    await recordUserBestiaryDiscoveries(
+      supabaseAction,
+      actionUser.id,
+      combatEnemies.map((enemy) => enemy.templateId),
+    );
+
     const asNonNegativeInt = (value: unknown): number =>
       Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
     const didWin = payload.didWin === true;
@@ -2382,6 +2395,10 @@ export default async function CombatEncounterPage({
       }
       return;
     }
+
+    const defeatedCreatureTypes = combatEnemies.map((enemy) => enemy.creatureType);
+    await recordEnemyCreatureKills(supabaseAction, defeatedCreatureTypes);
+
     const profileIdForInventory =
       typeof characterSkillsProfileId === "string" && characterSkillsProfileId.trim().length > 0
         ? characterSkillsProfileId.trim()
@@ -2770,6 +2787,12 @@ export default async function CombatEncounterPage({
       data: { user: actionUser },
     } = await supabaseAction.auth.getUser();
     if (!actionUser) return;
+
+    await recordUserBestiaryDiscoveries(
+      supabaseAction,
+      actionUser.id,
+      combatEnemies.map((enemy) => enemy.templateId),
+    );
 
     const asNonNegativeInt = (value: unknown): number =>
       Math.max(0, Math.trunc(Number.isFinite(Number(value)) ? Number(value) : 0));
